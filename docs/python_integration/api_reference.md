@@ -2,259 +2,734 @@
 
 ## Overview
 
-This document provides a complete reference for the Python API available in the Ladybird browser. The API closely mirrors JavaScript DOM APIs but with Python-idiomatic syntax and conventions.
+This document provides a comprehensive reference for the Python APIs available in the Ladybird browser, allowing Python developers to create web applications with familiar syntax and patterns.
 
-## Global Objects
+## Core Concepts
 
-### `document`
-The Document object represents the HTML document being viewed.
+### Script Execution Context
 
-```python
-# Access the current document
-doc = document
-```
+Python scripts in Ladybird execute in a sandboxed environment with access to web APIs but restricted system access. Scripts can be either:
 
-#### Properties
-- `url` - Document URL
-- `title` - Document title
-- `body` - Document body element
-- `head` - Document head element
+1. **Inline scripts** - Embedded directly in HTML
+2. **External scripts** - Loaded from separate files
 
-#### Methods
-- `select(selector)` - Query multiple elements using CSS selector
-- `find(selector)` - Query single element using CSS selector
-- `get_element_by_id(id)` - Get element by ID
-- `get_elements_by_class_name(class_name)` - Get elements by class name
-- `get_elements_by_tag_name(tag_name)` - Get elements by tag name
-- `create_element(tag_name)` - Create new DOM element
-- `create_text_node(text)` - Create new text node
+### Global Objects
 
-### `window`
-The Window object represents the browser window.
+Python scripts have access to several global objects that mirror JavaScript globals:
 
-```python
-# Access the current window
-win = window
-```
+- `window` - The browser window object
+- `document` - The current document
+- `console` - Console logging interface
+- `location` - Current URL information
+- `navigator` - Browser capability information
+
+## Document API
+
+### `document` Object
+
+The global `document` object provides access to the DOM tree.
 
 #### Properties
-- `document` - Current document
-- `location` - Current location
-- `navigator` - Browser navigator
-- `inner_width` - Window inner width
-- `inner_height` - Window inner height
+
+| Property | Description | Type |
+|----------|-------------|------|
+| `url` | Current document URL | `str` |
+| `title` | Document title | `str` |
+| `body` | Document body element | `Element` |
+| `head` | Document head element | `Element` |
 
 #### Methods
-- `alert(message)` - Display alert dialog
-- `confirm(message)` - Display confirmation dialog
-- `prompt(message, default=None)` - Display prompt dialog
-- `set_timeout(callback, delay)` - Schedule one-time callback
-- `set_interval(callback, delay)` - Schedule repeating callback
-- `clear_timeout(timer_id)` - Cancel timeout
-- `clear_interval(interval_id)` - Cancel interval
-- `fetch(url, options=None)` - Perform HTTP fetch request
 
-### `console`
-The Console object provides access to browser console functionality.
+##### `select(selector)`
+Query multiple elements using CSS selector syntax.
+
+```python
+# Select all div elements with class "content"
+elements = document.select("div.content")
+
+# Select all paragraph elements
+paragraphs = document.select("p")
+
+# Select elements by attribute
+inputs = document.select("input[type='text']")
+```
+
+##### `find(selector)`
+Query single element using CSS selector syntax. Returns first matching element or `None`.
+
+```python
+# Find element by ID
+element = document.find("#my-id")
+
+# Find first element with specific class
+first_button = document.find(".button")
+
+# Find element by tag name
+first_header = document.find("h1")
+```
+
+##### `get_element_by_id(id)`
+Get element by its ID attribute.
+
+```python
+# Get element with ID "content"
+content = document.get_element_by_id("content")
+```
+
+##### `get_elements_by_class_name(class_name)`
+Get elements by their class name.
+
+```python
+# Get all elements with class "highlight"
+highlighted = document.get_elements_by_class_name("highlight")
+```
+
+##### `get_elements_by_tag_name(tag_name)`
+Get elements by their tag name.
+
+```python
+# Get all div elements
+divs = document.get_elements_by_tag_name("div")
+```
+
+##### `create_element(tag_name)`
+Create a new DOM element.
+
+```python
+# Create new div element
+new_div = document.create_element("div")
+
+# Create new paragraph element
+new_p = document.create_element("p")
+```
+
+##### `create_text_node(text)`
+Create a new text node.
+
+```python
+# Create text node
+text_node = document.create_text_node("Hello, world!")
+```
+
+## Element API
+
+### `Element` Object
+
+Represents DOM elements with Python-idiomatic methods.
+
+#### Properties
+
+| Property | Description | Type | Access |
+|----------|-------------|------|--------|
+| `tag_name` | Element tag name | `str` | Read-only |
+| `text` | Text content | `str` | Read/Write |
+| `html` | HTML content | `str` | Read/Write |
+| `parent_element` | Parent element | `Element` | Read-only |
+| `children` | Child elements | `list` | Read-only |
+| `first_element_child` | First child element | `Element` | Read-only |
+| `last_element_child` | Last child element | `Element` | Read-only |
+| `next_element_sibling` | Next sibling element | `Element` | Read-only |
+| `previous_element_sibling` | Previous sibling element | `Element` | Read-only |
+| `class_name` | Class attribute | `str` | Read/Write |
+| `id` | ID attribute | `str` | Read/Write |
+
+#### Methods
+
+##### `get_attribute(name)`
+Get element attribute value.
+
+```python
+# Get class attribute
+class_value = element.get_attribute("class")
+
+# Get href attribute
+href = link.get_attribute("href")
+```
+
+##### `set_attribute(name, value)`
+Set element attribute value.
+
+```python
+# Set class attribute
+element.set_attribute("class", "new-class")
+
+# Set data attribute
+element.set_attribute("data-value", "123")
+```
+
+##### `remove_attribute(name)`
+Remove element attribute.
+
+```python
+# Remove class attribute
+element.remove_attribute("class")
+```
+
+##### `has_attribute(name)`
+Check if element has attribute.
+
+```python
+# Check if element has class attribute
+if element.has_attribute("class"):
+    print("Element has class attribute")
+```
+
+##### `append_child(child)`
+Append child element.
+
+```python
+# Create and append new element
+new_div = document.create_element("div")
+element.append_child(new_div)
+```
+
+##### `remove_child(child)`
+Remove child element.
+
+```python
+# Remove child element
+element.remove_child(child_element)
+```
+
+##### `replace_child(new_child, old_child)`
+Replace child element.
+
+```python
+# Replace existing child with new element
+new_element = document.create_element("span")
+element.replace_child(new_element, old_element)
+```
+
+##### `insert_before(new_node, reference_node)`
+Insert node before reference node.
+
+```python
+# Insert new element before existing element
+new_element = document.create_element("div")
+element.insert_before(new_element, reference_element)
+```
+
+##### `query_selector(selector)`
+Find first child element matching CSS selector.
+
+```python
+# Find first button inside element
+button = element.query_selector("button")
+```
+
+##### `query_selector_all(selector)`
+Find all child elements matching CSS selector.
+
+```python
+# Find all links inside element
+links = element.query_selector_all("a")
+```
+
+##### `add_event_listener(event_type, callback)`
+Add event listener to element.
+
+```python
+# Add click event listener
+def click_handler(event):
+    print("Element clicked!")
+
+element.add_event_listener("click", click_handler)
+```
+
+##### `remove_event_listener(event_type, callback)`
+Remove event listener from element.
+
+```python
+# Remove click event listener
+element.remove_event_listener("click", click_handler)
+```
+
+## Window API
+
+### `window` Object
+
+Provides access to browser functionality and global operations.
+
+#### Properties
+
+| Property | Description | Type |
+|----------|-------------|------|
+| `document` | Current document | `Document` |
+| `location` | Current location | `Location` |
+| `navigator` | Browser navigator | `Navigator` |
+| `inner_width` | Window inner width | `int` |
+| `inner_height` | Window inner height | `int` |
+| `outer_width` | Window outer width | `int` |
+| `outer_height` | Window outer height | `int` |
+
+#### Methods
+
+##### `alert(message)`
+Display alert dialog.
+
+```python
+# Show alert message
+window.alert("Hello from Python!")
+```
+
+##### `confirm(message)`
+Display confirmation dialog.
+
+```python
+# Show confirmation dialog
+result = window.confirm("Are you sure?")
+if result:
+    print("User confirmed")
+else:
+    print("User cancelled")
+```
+
+##### `prompt(message, default=None)`
+Display prompt dialog.
+
+```python
+# Show prompt dialog
+user_input = window.prompt("Enter your name:", "Anonymous")
+print(f"User entered: {user_input}")
+```
+
+##### `set_timeout(callback, delay)`
+Schedule one-time callback execution.
+
+```python
+# Schedule function to run after 1 second
+def delayed_function():
+    print("This runs after 1 second")
+
+timer_id = window.set_timeout(delayed_function, 1000)
+```
+
+##### `set_interval(callback, delay)`
+Schedule repeating callback execution.
+
+```python
+# Schedule function to run every 500ms
+def repeating_function():
+    print("This runs every 500ms")
+
+interval_id = window.set_interval(repeating_function, 500)
+```
+
+##### `clear_timeout(timer_id)`
+Cancel scheduled timeout.
+
+```python
+# Cancel timeout
+window.clear_timeout(timer_id)
+```
+
+##### `clear_interval(interval_id)`
+Cancel scheduled interval.
+
+```python
+# Cancel interval
+window.clear_interval(interval_id)
+```
+
+##### `fetch(url, options=None)`
+Perform HTTP fetch request.
+
+```python
+# Simple GET request
+response = window.fetch("https://api.example.com/data")
+data = response.json()
+
+# POST request with options
+options = {
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "body": '{"key": "value"}'
+}
+response = window.fetch("https://api.example.com/data", options)
+```
+
+##### `console.log(message)`
+Log message to browser console.
 
 ```python
 # Log to console
-console.log("Debug message")
-console.error("Error message")
-console.warn("Warning message")
+window.console.log("Debug message")
 ```
 
-#### Methods
-- `log(*messages)` - Log messages to console
-- `error(*messages)` - Log error messages to console
-- `warn(*messages)` - Log warning messages to console
-- `info(*messages)` - Log info messages to console
-- `debug(*messages)` - Log debug messages to console
-- `clear()` - Clear console
-
-## DOM Objects
-
-### `Element`
-Represents a DOM element.
+##### `console.error(message)`
+Log error to browser console.
 
 ```python
-# Get an element
-element = document.find("#my-element")
+# Log error to console
+window.console.error("Error message")
 ```
 
-#### Properties
-- `tag_name` - Element tag name
-- `text` - Text content
-- `html` - HTML content
-- `parent_element` - Parent element
-- `children` - Child elements
-- `first_element_child` - First child element
-- `last_element_child` - Last child element
-- `next_element_sibling` - Next sibling element
-- `previous_element_sibling` - Previous sibling element
-- `class_name` - Class attribute
-- `id` - ID attribute
-
-#### Methods
-- `get_attribute(name)` - Get attribute value
-- `set_attribute(name, value)` - Set attribute value
-- `remove_attribute(name)` - Remove attribute
-- `has_attribute(name)` - Check if element has attribute
-- `append_child(child)` - Append child element
-- `remove_child(child)` - Remove child element
-- `replace_child(new_child, old_child)` - Replace child element
-- `insert_before(new_node, reference_node)` - Insert node before reference
-- `query_selector(selector)` - Find first child matching selector
-- `query_selector_all(selector)` - Find all children matching selector
-- `add_event_listener(event_type, callback)` - Add event listener
-- `remove_event_listener(event_type, callback)` - Remove event listener
-
-### `Document`
-Represents the HTML document.
-
-Inherits from Element.
-
-#### Properties
-All Element properties plus:
-- `forms` - All form elements
-- `images` - All image elements
-- `links` - All link elements
-- `scripts` - All script elements
-
-#### Methods
-All Element methods plus:
-- `create_attribute(name)` - Create attribute
-- `create_comment(data)` - Create comment
-- `create_document_fragment()` - Create document fragment
-- `get_elements_by_name(name)` - Get elements by name
-- `import_node(node, deep=False)` - Import node from another document
-- `adopt_node(node)` - Adopt node from another document
-
-### `Event`
-Represents a DOM event.
+##### `console.warn(message)`
+Log warning to browser console.
 
 ```python
-# Event handler
-def click_handler(event):
-    print("Element clicked!")
+# Log warning to console
+window.console.warn("Warning message")
+```
+
+## Event API
+
+### `Event` Object
+
+Represents DOM events with familiar properties and methods.
+
+#### Properties
+
+| Property | Description | Type |
+|----------|-------------|------|
+| `type` | Event type | `str` |
+| `target` | Event target | `Element` |
+| `current_target` | Current target | `Element` |
+| `bubbles` | Whether event bubbles | `bool` |
+| `cancelable` | Whether event is cancelable | `bool` |
+| `default_prevented` | Whether default is prevented | `bool` |
+| `time_stamp` | Event timestamp | `float` |
+
+#### Methods
+
+##### `prevent_default()`
+Prevent default event behavior.
+
+```python
+# Prevent default form submission
+def submit_handler(event):
     event.prevent_default()
+    print("Form submission prevented")
 ```
 
-#### Properties
-- `type` - Event type
-- `target` - Event target
-- `current_target` - Current target
-- `bubbles` - Whether event bubbles
-- `cancelable` - Whether event is cancelable
-- `default_prevented` - Whether default is prevented
-- `time_stamp` - Event timestamp
+##### `stop_propagation()`
+Stop event propagation.
+
+```python
+# Stop event from bubbling up
+def click_handler(event):
+    event.stop_propagation()
+    print("Event propagation stopped")
+```
+
+##### `stop_immediate_propagation()`
+Stop immediate event propagation.
+
+```python
+# Stop all other listeners on this element
+def click_handler(event):
+    event.stop_immediate_propagation()
+    print("Immediate propagation stopped")
+```
+
+## Console API
+
+### `console` Object
+
+Provides access to browser console functionality.
 
 #### Methods
-- `prevent_default()` - Prevent default event behavior
-- `stop_propagation()` - Stop event propagation
-- `stop_immediate_propagation()` - Stop immediate event propagation
 
-## JavaScript Interoperability
+##### `log(*messages)`
+Log messages to console.
 
-### Accessing JavaScript Objects
 ```python
-# Access JavaScript global object
-js_window = window
+# Log multiple values
+console.log("Value:", 42, "String:", "hello")
+```
 
-# Access JavaScript properties
-js_title = window.document.title
+##### `error(*messages)`
+Log error messages to console.
 
-# Call JavaScript functions
+```python
+# Log error
+console.error("An error occurred:", exception)
+```
+
+##### `warn(*messages)`
+Log warning messages to console.
+
+```python
+# Log warning
+console.warn("This is a warning:", warning_info)
+```
+
+##### `info(*messages)`
+Log info messages to console.
+
+```python
+# Log info
+console.info("Information:", info_data)
+```
+
+##### `debug(*messages)`
+Log debug messages to console.
+
+```python
+# Log debug info
+console.debug("Debug:", debug_data)
+```
+
+##### `clear()`
+Clear console.
+
+```python
+# Clear console
+console.clear()
+```
+
+## XMLHttpRequest API
+
+### `XMLHttpRequest` Object
+
+Enables HTTP requests from Python with familiar API.
+
+#### Properties
+
+| Property | Description | Type |
+|----------|-------------|------|
+| `ready_state` | Request state | `int` |
+| `response` | Response data | `str` |
+| `response_text` | Response text | `str` |
+| `response_url` | Response URL | `str` |
+| `status` | HTTP status code | `int` |
+| `status_text` | HTTP status text | `str` |
+
+#### Methods
+
+##### `open(method, url, async=True)`
+Initialize request.
+
+```python
+# Create XMLHttpRequest
+xhr = XMLHttpRequest()
+xhr.open("GET", "https://api.example.com/data")
+```
+
+##### `set_request_header(name, value)`
+Set request header.
+
+```python
+# Set content type
+xhr.set_request_header("Content-Type", "application/json")
+```
+
+##### `send(data=None)`
+Send request.
+
+```python
+# Send GET request
+xhr.send()
+
+# Send POST request with data
+xhr.send('{"key": "value"}')
+```
+
+##### `abort()`
+Abort request.
+
+```python
+# Abort ongoing request
+xhr.abort()
+```
+
+#### Events
+
+##### `onload`
+Called when request completes successfully.
+
+```python
+def onload_handler():
+    print("Request completed:", xhr.response_text)
+
+xhr.onload = onload_handler
+```
+
+##### `onerror`
+Called when request fails.
+
+```python
+def onerror_handler():
+    print("Request failed")
+
+xhr.onerror = onerror_handler
+```
+
+##### `onprogress`
+Called during request progress.
+
+```python
+def onprogress_handler(event):
+    print(f"Progress: {event.loaded}/{event.total}")
+
+xhr.onprogress = onprogress_handler
+```
+
+## Storage API
+
+Access to localStorage and sessionStorage.
+
+#### Properties
+
+None
+
+#### Methods
+
+##### `get_item(key)`
+Get stored item.
+
+```python
+# Get stored value
+value = window.localStorage.get_item("my-key")
+```
+
+##### `set_item(key, value)`
+Set stored item.
+
+```python
+# Store value
+window.localStorage.set_item("my-key", "my-value")
+```
+
+##### `remove_item(key)`
+Remove stored item.
+
+```python
+# Remove item
+window.localStorage.remove_item("my-key")
+```
+
+##### `clear()`
+Clear all stored items.
+
+```python
+# Clear storage
+window.localStorage.clear()
+```
+
+##### `key(index)`
+Get key at index.
+
+```python
+# Get first key
+first_key = window.localStorage.key(0)
+```
+
+##### `length`
+Get number of stored items.
+
+```python
+# Get storage length
+count = window.localStorage.length
+```
+
+## JSON Module
+
+Python's built-in JSON module is available for data serialization.
+
+```python
+import json
+
+# Parse JSON
+data = json.loads('{"key": "value"}')
+
+# Serialize to JSON
+json_string = json.dumps({"key": "value"})
+```
+
+## Math Module
+
+Python's built-in math module is available for mathematical operations.
+
+```python
+import math
+
+# Mathematical functions
+result = math.sqrt(16)
+angle = math.sin(math.pi / 2)
+```
+
+## Datetime Module
+
+Python's datetime module is available for date/time operations.
+
+```python
+import datetime
+
+# Current time
+now = datetime.datetime.now()
+
+# Date formatting
+formatted = now.strftime("%Y-%m-%d %H:%M:%S")
+```
+
+## Error Handling
+
+Python exceptions are converted to JavaScript errors and vice versa.
+
+```python
+try:
+    # DOM operation that might fail
+    element = document.find("#nonexistent")
+    element.text = "New text"
+except AttributeError as e:
+    print(f"DOM error: {e}")
+except Exception as e:
+    print(f"General error: {e}")
+```
+
+## Cross-Language Examples
+
+### Calling JavaScript from Python
+
+```python
+# Call JavaScript function
 result = window.some_js_function("argument")
 
-# Set JavaScript values
-window.pyProperty = "Python value"
+# Access JavaScript object
+js_value = window.js_object.property
+
+# Set JavaScript value
+window.js_object.new_property = "Python value"
 ```
 
-### Calling JavaScript Functions from Python
-```python
-# Simple function call
-result = window.alert("Hello from Python")
+### Calling Python from JavaScript
 
-# Function with arguments
-calc_result = window.calculate_sum(10, 20)
-
-# Accessing JavaScript objects
-js_obj = window.jsObject
-js_value = js_obj.property
-```
-
-### Accessing Python Objects from JavaScript
 ```javascript
-// Access Python global object
-var py_window = window;
-
-// Access Python properties
-var py_title = window.document.title;
-
-// Call Python functions
+// Call Python function
 var result = window.python_function("argument");
 
-// Set Python values
-window.jsProperty = "JavaScript value";
+// Access Python object
+var pyValue = window.python_object.property;
+
+// Set Python value
+window.python_object.newProperty = "JavaScript value";
 ```
 
 ## Security Restrictions
 
-### Forbidden Operations
-The following operations are blocked for security:
+Certain operations are restricted for security:
 
-1. **Dangerous Module Imports**
-   ```python
-   # These will raise ImportError
-   import os          # Blocked
-   import sys         # Blocked
-   import subprocess  # Blocked
-   import socket      # Blocked
-   ```
+### Forbidden Modules
+```python
+# These imports will fail
+import os          # Security violation
+import sys         # Security violation
+import subprocess  # Security violation
+```
 
-2. **Filesystem Access**
-   ```python
-   # These will raise exceptions
-   f = open("/etc/passwd", "r")  # Blocked
-   import os
-   os.listdir("/")               # Blocked
-   ```
+### Restricted File Operations
+```python
+# These operations will fail
+f = open("/etc/passwd", "r")  # Security violation
+```
 
-3. **Network Restrictions**
-   ```python
-   # Cross-origin requests may be blocked
-   import urllib.request
-   response = urllib.request.urlopen("http://different-domain.com")  # May be blocked
-   ```
-
-### Allowed Operations
-The following operations are permitted:
-
-1. **Safe Module Imports**
-   ```python
-   # These are allowed
-   import json        # Allowed
-   import datetime    # Allowed
-   import math        # Allowed
-   import random      # Allowed
-   import re          # Allowed
-   ```
-
-2. **DOM Manipulation**
-   ```python
-   # These are allowed
-   element = document.find("#my-element")
-   element.text = "New text"
-   element.set_attribute("class", "new-class")
-   ```
-
-3. **Console Output**
-   ```python
-   # These are allowed
-   print("Debug message")
-   console.log("Console message")
-   ```
+### Network Restrictions
+```python
+# Cross-origin requests may be blocked
+import urllib.request
+response = urllib.request.urlopen("http://different-domain.com")  # May be blocked
+```
 
 ## Best Practices
 
@@ -299,182 +774,6 @@ except Exception as e:
 ```python
 # Good: Clean up references when done
 large_data = None  # Explicitly clear large objects
-```
-
-## Python Language Features
-
-### Supported Python Features
-The following Python features are supported:
-- Basic data types (int, float, str, bool, list, dict, tuple)
-- Control flow (if, for, while, try/except)
-- Functions and classes
-- List/dict comprehensions
-- String formatting
-- Standard library modules (json, datetime, math, random, re, collections, itertools)
-
-### Unsupported Python Features
-The following Python features are not supported for security:
-- File I/O operations
-- System calls
-- Network operations outside SOP
-- Dangerous modules (os, sys, subprocess, etc.)
-- Import of external packages
-- Reflection/metaprogramming features
-
-## Cross-Language Examples
-
-### Python Calling JavaScript
-```python
-# Call JavaScript function
-result = window.js_function("Hello from Python")
-
-# Access JavaScript object
-js_value = window.js_object.property
-
-# Set JavaScript value
-window.pyProperty = "Python value"
-
-# Work with JavaScript arrays
-js_array = window.js_array
-for item in js_array:
-    print(item)
-```
-
-### JavaScript Calling Python
-```javascript
-// Call Python function
-var result = window.python_function("Hello from JavaScript");
-
-// Access Python object
-var pyValue = window.python_object.property;
-
-// Set Python value
-window.jsProperty = "JavaScript value";
-
-// Work with Python lists
-var pyList = window.python_list;
-for (var i = 0; i < pyList.length; i++) {
-    console.log(pyList[i]);
-}
-```
-
-## Performance Tips
-
-### 1. Minimize Cross-Language Calls
-```python
-# Bad: Many cross-language calls
-for i in range(1000):
-    window.js_function(i)
-
-# Good: Batch operations
-numbers = list(range(1000))
-window.js_function_batch(numbers)
-```
-
-### 2. Use DOM APIs Efficiently
-```python
-# Bad: Modifying DOM in a loop
-for i in range(1000):
-    div = document.create_element("div")
-    div.text = f"Item {i}"
-    document.body.append_child(div)
-
-# Good: Batch DOM modifications
-fragment = document.create_document_fragment()
-for i in range(1000):
-    div = document.create_element("div")
-    div.text = f"Item {i}"
-    fragment.append_child(div)
-document.body.append_child(fragment)
-```
-
-### 3. Cache Expensive Operations
-```python
-# Bad: Repeated expensive operations
-def process_elements():
-    elements = document.select(".expensive-selector")
-    # Process elements
-    return elements
-
-# Good: Cache results
-_element_cache = {}
-
-def process_elements():
-    selector = ".expensive-selector"
-    if selector not in _element_cache:
-        _element_cache[selector] = document.select(selector)
-    elements = _element_cache[selector]
-    # Process elements
-    return elements
-```
-
-## Error Handling
-
-### Python Exceptions
-Python exceptions are converted to JavaScript errors:
-
-```python
-# Python code that raises exception
-def faulty_function():
-    raise ValueError("Something went wrong")
-
-try:
-    faulty_function()
-except ValueError as e:
-    print(f"Caught Python exception: {e}")
-```
-
-### JavaScript Errors in Python
-JavaScript errors are converted to Python exceptions:
-
-```python
-# Python code that catches JavaScript error
-try:
-    window.faulty_js_function()
-except Exception as e:
-    print(f"Caught JavaScript error: {e}")
-```
-
-## Testing
-
-### Unit Testing
-```python
-# Simple unit test
-def test_document_find():
-    # Create test element
-    div = document.create_element("div")
-    div.set_attribute("id", "test-id")
-    document.body.append_child(div)
-    
-    # Test find method
-    element = document.find("#test-id")
-    assert element is not None
-    assert element.tag_name == "DIV"
-    assert element.get_attribute("id") == "test-id"
-
-# Run test
-test_document_find()
-print("All tests passed!")
-```
-
-### Integration Testing
-```python
-# Integration test for cross-language communication
-def test_cross_language_communication():
-    # Define Python function accessible from JavaScript
-    def python_function(arg):
-        return f"Python received: {arg}"
-    
-    # Make it available globally
-    window.python_function = python_function
-    
-    # JavaScript would call this as:
-    # var result = window.python_function("test");
-    # assert(result === "Python received: test");
-    
-    print("Cross-language communication test passed!")
-
-test_cross_language_communication()
 ```
 
 This API reference provides a comprehensive guide to using Python for web development in Ladybird browser, with familiar patterns that Python developers will find intuitive while maintaining the power and flexibility of web APIs.
