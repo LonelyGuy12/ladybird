@@ -84,7 +84,7 @@ add_custom_target(lint-shell-scripts
     USES_TERMINAL
 )
 
-find_package(Python3 COMPONENTS Interpreter)
+find_package(Python3 COMPONENTS Interpreter Development)
 if (Python3_FOUND)
     add_custom_target(check-style
         COMMAND ${Python3_EXECUTABLE} "${ladybird_SOURCE_DIR}/Meta/check-style.py"

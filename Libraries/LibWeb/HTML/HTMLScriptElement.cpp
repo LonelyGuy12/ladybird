@@ -20,6 +20,7 @@
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ImportMapParseResult.h>
+#include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Infra/Strings.h>
@@ -157,6 +158,27 @@ void HTMLScriptElement::execute_script()
         // 1. Register an import map given el's relevant global object and el's result.
         m_result.get<GC::Ref<ImportMapParseResult>>()->register_import_map(as<Window>(relevant_global_object(*this)));
     }
+    // -> "python"
+    else if (m_script_type == ScriptType::Python) {
+        // 1. Let oldCurrentScript be the value to which document's currentScript object was most recently set.
+        auto old_current_script = document->current_script();
+        // 2. If el's root is not a shadow root, then set document's currentScript attribute to el. Otherwise, set it to null.
+        if (!is<DOM::ShadowRoot>(root()))
+            document->set_current_script({}, this);
+        else
+            document->set_current_script({}, nullptr);
+
+        if (m_from_an_external_file)
+            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running Python script {}", attribute(HTML::AttributeNames::src).value_or(String {}));
+        else
+            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running inline Python script");
+
+        // 3. Run the Python script given by el's result.
+        (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
+
+        // 4. Set document's currentScript attribute to oldCurrentScript.
+        document->set_current_script({}, old_current_script);
+    }
 
     // 7. Decrement the ignore-destructive-writes counter of document, if it was incremented in the earlier step.
     if (incremented_destructive_writes_counter)
@@ -241,6 +263,11 @@ void HTMLScriptElement::prepare_script()
     else if (script_block_type.equals_ignoring_ascii_case("importmap"sv)) {
         // then set el's type to "importmap".
         m_script_type = ScriptType::ImportMap;
+    }
+    // 11.5. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "python" or "text/python",
+    else if (script_block_type.equals_ignoring_ascii_case("python"sv) || script_block_type.equals_ignoring_ascii_case("text/python"sv)) {
+        // then set el's type to "python".
+        m_script_type = ScriptType::Python;
     }
     // 12. Otherwise, return. (No script is executed, and el's type is left as null.)
     else {
@@ -443,6 +470,12 @@ void HTMLScriptElement::prepare_script()
             // Fetch an external module script graph given url, settings object, options, and onComplete.
             fetch_external_module_script_graph(realm(), *url, settings_object, options, on_complete);
         }
+        // -> "python"
+        else if (m_script_type == ScriptType::Python) {
+            // For external Python scripts we'll need to fetch them and then create a PythonScript object.
+            // We'll implement this behavior similar to how classic scripts are handled.
+            fetch_python_script(*this, *url, settings_object, move(options), on_complete).release_value_but_fixme_should_propagate_errors();
+        }
     }
 
     // 32. If el does not have a src content attribute:
@@ -485,10 +518,19 @@ void HTMLScriptElement::prepare_script()
             // 2. Mark as ready el given result.
             mark_as_ready(Result(move(result)));
         }
+        // -> "python"
+        else if (m_script_type == ScriptType::Python) {
+            // 1. Let script be the result of creating a python script using source text, settings object's realm, base URL, and options.
+            // FIXME: Pass options.
+            auto script = PythonScript::create(m_document->url().to_byte_string(), source_text_utf8, settings_object.realm(), base_url);
+
+            // 2. Mark as ready el given script.
+            mark_as_ready(Result(move(script)));
+        }
     }
 
-    // 33. If el's type is "classic" and el has a src attribute, or el's type is "module":
-    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module) {
+    // 33. If el's type is "classic" and el has a src attribute, or el's type is "module", or el's type is "python":
+    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module || m_script_type == ScriptType::Python) {
         // 1. Assert: el's result is "uninitialized".
         // FIXME: I believe this step to be a spec bug, and it should be removed: https://github.com/whatwg/html/issues/8534
 

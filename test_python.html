@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Python Test</title>
+</head>
+<body>
+    <h1>Python Script Test</h1>
+    <div id="python-output"></div>
+    
+    <script type="python">
+        # Simple Python script that manipulates the DOM
+        document.getElementById("python-output").innerHTML = "<p>Hello from Python!</p>"
+        
+        # Test accessing window object
+        print("Window title:", window.document.title)
+        
+        # Test creating elements
+        new_div = document.createElement("div")
+        new_div.innerHTML = "<p>Dynamically created by Python</p>"
+        document.body.appendChild(new_div)
+    </script>
+</body>
+</html>
