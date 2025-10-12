@@ -6,59 +6,94 @@ This directory contains comprehensive documentation for the Python integration i
 
 ## Documentation Files
 
-### [Overview](overview.md)
+### Core Documentation
+#### [Overview](overview.md)
 - Project goals and objectives
 - High-level architecture description
 - Implementation status
 
-### [Technical Architecture](architecture.md)
+#### [Technical Architecture](architecture.md)
 - Detailed system architecture
 - Component interactions
 - Implementation flow
 
-### [Implementation Details](implementation.md)
+#### [Implementation Details](implementation.md)
 - Core implementation files
 - Build system changes
 - Key implementation patterns
 - Testing examples
 
-### [Build System Integration](build_system.md)
+### API Documentation
+#### [API Reference](api_reference.md)
+- Comprehensive Python API reference
+- DOM manipulation methods
+- Event handling APIs
+- Web platform interfaces
+
+#### [DOM API Reference](dom_api_reference.md)
+- Python DOM API reference
+- Element and document methods
+- CSS selector support
+- Object property access
+
+### Component Documentation
+#### [Python Web Module](python_web_module.md)
+- Web module implementation details
+- Module initialization and methods
+- Integration with Python scripts
+- Security considerations
+
+#### [Python Object Bridge](python_object_bridge.md)
+- Object bridging implementation
+- C++ to Python object wrapping
+- Memory management
+- Type safety and validation
+
+#### [Test Python DOM Module](test_python_dom_module.md)
+- Testing framework implementation
+- Automated test execution
+- Performance and security testing
+- CI integration
+
+### Development and Operations
+#### [Build System Integration](build_system.md)
 - CMake configuration changes
 - Dependency requirements
 - Build process instructions
 - Troubleshooting guide
 
-### [Security Model](security.md)
-- Sandboxing implementation
-- Built-in function restrictions
-- Module import controls
-- Filesystem and network access restrictions
-
-### [DOM API Bindings](dom_bindings.md)
-- Python-idiomatic DOM APIs
-- Object wrapping implementation
-- Method signatures and examples
-- Cross-language access
-
-### [Cross-Language Communication](cross_language_communication.md)
-- Bridge implementation details
-- Value conversion mechanisms
-- Function call marshalling
-- Exception handling
-
-### [Testing Strategy](testing.md)
+#### [Testing Strategy](testing.md)
 - Unit testing framework
 - Integration testing approaches
 - Layout tests
 - Security penetration testing
 - Performance benchmarks
 
-### [Performance Optimization](performance.md)
+#### [Performance Optimization](performance.md)
 - Current performance challenges
 - Optimization strategies
 - JIT compilation approaches
 - Profiling and monitoring
 - Benchmark comparisons
+
+#### [Development Roadmap](roadmap.md)
+- Current status and milestones
+- Future development phases
+- Performance targets
+- Security roadmap
+
+### Security and Compliance
+#### [Security Model](security.md)
+- Sandboxing implementation
+- Built-in function restrictions
+- Module import controls
+- Filesystem and network access restrictions
+
+#### [Cross-Language Communication](cross_language_communication.md)
+- Bridge implementation details
+- Value conversion mechanisms
+- Function call marshalling
+- Exception handling
 
 ## Implementation Status
 
@@ -70,6 +105,11 @@ The Python integration is largely complete with these components implemented:
 - ✅ Security model with sandboxing
 - ✅ Cross-language communication between Python and JavaScript
 - ✅ Build system integration with CPython
+- ✅ Python Web Module (web.py) for browser APIs
+- ✅ Python Object Bridge for seamless C++/Python interoperability
+- ✅ Comprehensive testing framework (TestPythonDOMModule)
+- ✅ Complete API documentation and references
+- ✅ Performance optimization strategies and benchmarks
 
 ## Key Features
 
