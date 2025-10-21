@@ -174,7 +174,6 @@
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
-#include <LibWeb/Bindings/PythonDOMBindings.h>
 
 namespace Web::DOM {
 

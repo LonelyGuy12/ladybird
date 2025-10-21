@@ -40,6 +40,36 @@ PyTypeObject PythonWindow::s_type = {0};
 PyObject* PythonDOMAPI::s_module = nullptr;
 bool PythonDOMAPI::s_initialized = false;
 
+// Per-document cache for Python wrappers
+class PythonDOMWrapperCache {
+public:
+    ~PythonDOMWrapperCache()
+    {
+        for (auto const& it : m_wrapper_cache) {
+            Py_DECREF(it.value);
+        }
+    }
+
+    PyObject* get_wrapper(void* cpp_object)
+    {
+        if (auto it = m_wrapper_cache.find(cpp_object); it != m_wrapper_cache.end()) {
+            Py_INCREF(it->value);
+            return it->value;
+        }
+        return nullptr;
+    }
+
+    void set_wrapper(void* cpp_object, PyObject* wrapper)
+    {
+        m_wrapper_cache.set(cpp_object, wrapper);
+        Py_INCREF(wrapper);
+    }
+
+private:
+    HashMap<void*, PyObject*> m_wrapper_cache;
+};
+
+
 // PythonDocument methods
 static void python_document_dealloc(PythonDocumentObject* self)
 {
@@ -165,20 +195,17 @@ void PythonDocument::setup_type()
 PyObject* PythonDocument::create_from_cpp_document(Web::DOM::Document& document)
 {
     setup_type();
-    
+
     if (!document.m_python_dom_wrapper_cache)
         document.m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
 
-    auto it = document.m_python_dom_wrapper_cache->document_cache.find(&document);
-    if (it != document.m_python_dom_wrapper_cache->document_cache.end()) {
-        Py_INCREF(it->second);
-        return it->second;
-    }
+    if (auto* wrapper = document.m_python_dom_wrapper_cache->get_wrapper(&document))
+        return wrapper;
 
     PythonDocumentObject* obj = PyObject_New(PythonDocumentObject, &s_type);
     if (obj) {
         obj->document = &document;
-        document.m_python_dom_wrapper_cache->document_cache[&document] = (PyObject*)obj;
+        document.m_python_dom_wrapper_cache->set_wrapper(&document, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
@@ -413,16 +440,13 @@ PyObject* PythonElement::create_from_cpp_element(Web::DOM::Element& element)
     if (!document.m_python_dom_wrapper_cache)
         document.m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
 
-    auto it = document.m_python_dom_wrapper_cache->element_cache.find(&element);
-    if (it != document.m_python_dom_wrapper_cache->element_cache.end()) {
-        Py_INCREF(it->second);
-        return it->second;
-    }
-    
+    if (auto* wrapper = document.m_python_dom_wrapper_cache->get_wrapper(&element))
+        return wrapper;
+
     PythonElementObject* obj = PyObject_New(PythonElementObject, &s_type);
     if (obj) {
         obj->element = &element;
-        document.m_python_dom_wrapper_cache->element_cache[&element] = (PyObject*)obj;
+        document.m_python_dom_wrapper_cache->set_wrapper(&element, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
@@ -495,20 +519,17 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
 {
     setup_type();
 
-    auto& document = window.associated_document();
+    auto& document = window.document();
     if (!document.m_python_dom_wrapper_cache)
         document.m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
 
-    auto it = document.m_python_dom_wrapper_cache->window_cache.find(&window);
-    if (it != document.m_python_dom_wrapper_cache->window_cache.end()) {
-        Py_INCREF(it->second);
-        return it->second;
-    }
-    
+    if (auto* wrapper = document.m_python_dom_wrapper_cache->get_wrapper(&window))
+        return wrapper;
+
     PythonWindowObject* obj = PyObject_New(PythonWindowObject, &s_type);
     if (obj) {
         obj->window = &window;
-        document.m_python_dom_wrapper_cache->window_cache[&window] = (PyObject*)obj;
+        document.m_python_dom_wrapper_cache->set_wrapper(&window, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }

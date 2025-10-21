@@ -41,7 +41,6 @@ set(SOURCES
     Bindings/PythonJSObjectWrapper.cpp
     Bindings/PythonObjectBridge.cpp
     Bindings/PythonWebModule.cpp
-    Bindings/TestPythonDOMModule.cpp
     Bindings/SyntheticHostDefined.cpp
     Clipboard/Clipboard.cpp
     Clipboard/ClipboardEvent.cpp
@@ -1179,8 +1178,3 @@ if (ENABLE_SWIFT)
     target_link_libraries(LibWeb PRIVATE AK Collections)
     add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx LibGC)
 endif()
-
-install(FILES
-    Bindings/opencode.py
-    DESTINATION ${CMAKE_BINARY_DIR}/bin
-)

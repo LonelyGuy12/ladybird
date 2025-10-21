@@ -119,23 +119,17 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             // Create a new Python thread state to execute the script
             PyGILState_STATE gstate = PyGILState_Ensure();
             
-            // Execute script in a new dictionary context (equivalent to globals/locals)
-            if (!m_globals) {
-                m_globals = PyDict_New();
-                m_locals = PyDict_New();
-            }
-            
-            if (m_globals && m_locals) {
-                // Add basic builtins to the globals
+            if (!m_execution_context) {
+                m_execution_context = PyDict_New();
                 PyObject* builtins = PyEval_GetBuiltins();
-                PyDict_SetItemString(m_globals, "__builtins__", builtins);
-                
+                PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+            }
+
+            if (m_execution_context) {
                 // Set up security restrictions for this script execution
                 URL::URL origin = this->base_url().value_or(URL::URL {});
-                if (!PythonSecurityModel::setup_sandboxed_environment(m_globals, origin)) {
+                if (!PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin)) {
                     evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, "Failed to set up secure execution environment"sv));
-                    Py_DECREF(m_globals);
-                    Py_DECREF(m_locals);
                     PyGILState_Release(gstate);
                     return evaluation_status;
                 }
@@ -144,35 +138,35 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                 if (Bindings::PythonDOMAPI::initialize_module()) {
                     PyObject* web_module = Bindings::PythonDOMAPI::get_module();
                     if (web_module) {
-                        PyDict_SetItemString(m_globals, "web", web_module);
+                        PyDict_SetItemString(m_execution_context, "web", web_module);
                         
                         // For convenience, also add common functions/classes directly
                         PyObject* doc_class = PyObject_GetAttrString(web_module, "Document");
                         if (doc_class) {
-                            PyDict_SetItemString(m_globals, "Document", doc_class);
+                            PyDict_SetItemString(m_execution_context, "Document", doc_class);
                             Py_DECREF(doc_class);
                         }
                         
                         PyObject* elem_class = PyObject_GetAttrString(web_module, "Element");
                         if (elem_class) {
-                            PyDict_SetItemString(m_globals, "Element", elem_class);
+                            PyDict_SetItemString(m_execution_context, "Element", elem_class);
                             Py_DECREF(elem_class);
                         }
                         
                         PyObject* win_class = PyObject_GetAttrString(web_module, "Window");
                         if (win_class) {
-                            PyDict_SetItemString(m_globals, "Window", win_class);
+                            PyDict_SetItemString(m_execution_context, "Window", win_class);
                             Py_DECREF(win_class);
                         }
                     }
                 }
                 
                 // Setup cross-language bridge to enable access to JavaScript objects
-                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_globals, this->realm())) {
+                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_execution_context, this->realm())) {
                     dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
-                PyObject* result = PyEval_EvalCode(m_script_record, m_globals, m_locals);
+                PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
                 
                 if (!result) {
                     // Python error occurred
@@ -206,9 +200,6 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                     Py_DECREF(result);
                     evaluation_status = JS::normal_completion(JS::js_undefined());
                 }
-                
-                Py_DECREF(globals);
-                Py_DECREF(locals);
             } else {
                 evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, "Failed to create Python execution context"sv));
             }
@@ -278,23 +269,21 @@ PythonScript::~PythonScript()
         // Acquire GIL before destroying Python objects
         PyGILState_STATE gstate = PyGILState_Ensure();
         Py_DECREF(m_script_record);
-        if (m_globals) {
-            Py_DECREF(m_globals);
-        }
-        if (m_locals) {
-            Py_DECREF(m_locals);
-        }
         PyGILState_Release(gstate);
         m_script_record = nullptr;
-        m_globals = nullptr;
-        m_locals = nullptr;
+    }
+    if (m_execution_context) {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+        Py_DECREF(m_execution_context);
+        PyGILState_Release(gstate);
+        m_execution_context = nullptr;
     }
 }
 
 void PythonScript::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    // Note: We don't visit m_script_record since it's a Python object, not a GC object
+    // Note: We don't visit m_script_record or m_execution_context since it's a Python object, not a GC object
 }
 
 }
