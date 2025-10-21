@@ -534,51 +534,6 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
     TRY(Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
     return {};
 }
-    auto& realm = settings_object.realm();
-    auto& vm = realm.vm();
-
-    // 1. Let request be a new request whose URL is url, client is fetchClient, destination is destination, initiator type is "other",
-    //    mode is "same-origin", credentials mode is "same-origin", parser metadata is "not parser-inserted",
-    //    and whose use-URL-credentials flag is set.
-    auto request = Fetch::Infrastructure::Request::create(vm);
-    request->set_url(url);
-    request->set_client(&fetch_client);
-    request->set_destination(destination);
-    request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Other);
-
-    // FIXME: Use proper SameOrigin CORS mode once Origins are set properly in WorkerHost processes
-    request->set_mode(Fetch::Infrastructure::Request::Mode::NoCORS);
-
-    request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::SameOrigin);
-    request->set_parser_metadata(Fetch::Infrastructure::Request::ParserMetadata::NotParserInserted);
-    request->set_use_url_credentials(true);
-
-    auto process_response_consume_body = [&settings_object, on_complete = move(on_complete)](auto response, auto body_bytes) {
-        // 1. Set response to response's unsafe response.
-        response = response->unsafe_response();
-
-        // 2. If either of the following conditions are met:
-        // - bodyBytes is null or failure; or
-        // - response's status is not an ok status,
-        if (body_bytes.template has<Empty>() || body_bytes.template has<Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag>() || !Fetch::Infrastructure::is_ok_status(response->status())) {
-            // then run onComplete given null, and abort these steps.
-            on_complete->function()(nullptr);
-            return;
-        }
-
-        // 3. If all of the following are true:
-        // - response's URL's scheme is an HTTP(S) scheme; and
-        // - the result of extracting a MIME type from response's header list is not a JavaScript MIME type,
-        auto maybe_mime_type = response->header_list()->extract_mime_type();
-        auto mime_type_is_javascript = maybe_mime_type.has_value() && maybe_mime_type->is_javascript();
-
-        if (response->url().has_value() && Fetch::Infrastructure::is_http_or_https_scheme(response->url()->scheme()) && !mime_type_is_javascript) {
-            auto mime_type_serialized = maybe_mime_type.has_value() ? maybe_mime_type->serialized() : "unknown"_string;
-            dbgln("Invalid non-javascript mime type \"{}\" for worker script at {}", mime_type_serialized, response->url().value());
-
-            // then run onComplete given null, and abort these steps.
-            on_complete->function()(nullptr);
-            return;
         }
         // NOTE: Other fetch schemes are exempted from MIME type checking for historical web-compatibility reasons.
         //       We might be able to tighten this in the future; see https://github.com/whatwg/html/issues/3255.
@@ -613,6 +568,7 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-classic-worker-imported-script
 WebIDL::ExceptionOr<GC::Ref<ClassicScript>> fetch_a_classic_worker_imported_script(URL::URL const& url, HTML::EnvironmentSettingsObject& settings_object, PerformTheFetchHook perform_fetch)
+{
 {
     auto& realm = settings_object.realm();
     auto& vm = realm.vm();
@@ -1017,3 +973,4 @@ void fetch_descendants_of_and_link_a_module_script(JS::Realm& realm,
 }
 
 }
+

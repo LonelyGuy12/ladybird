@@ -6,16 +6,16 @@
 
 #include <AK/Debug.h>
 #include <LibCore/ElapsedTimer.h>
-#include <Python.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
-#include <LibWeb/HTML/Scripting/PythonScript.h>
+#include <LibWeb/Bindings/PythonDOMBindings.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
-#include <LibWeb/HTML/Scripting/PythonEngine.h>
+// #include <LibWeb/HTML/Scripting/PythonEngine.h> // Temporarily disabled
+#include <LibWeb/HTML/Scripting/PythonScript.h>
+// #include <LibWeb/HTML/Scripting/PythonSecurityModel.h> // TODO: Re-enable when security model is implemented
 #include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
 #include <LibWeb/WebIDL/DOMException.h>
-#include <LibWeb/Bindings/PythonDOMBindings.h>
-#include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
+#include <Python.h>
 
 namespace Web::HTML {
 
@@ -48,34 +48,16 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
 
     // 8. Parse Python source code
     auto parse_timer = Core::ElapsedTimer::start_new();
-    
+
     // Convert StringView to Python-compatible string
-    auto source_utf8 = source.to_utf8();
-    PyObject* compiled_code = Py_CompileString(source_utf8.characters(), filename.characters(), Py_file_input);
-    
+    auto source_bytes = source.to_byte_string();
+    PyObject* compiled_code = Py_CompileString(source_bytes.characters(), filename.characters(), Py_file_input);
+
     if (!compiled_code) {
-        auto error = PyErr_Occurred();
-        if (error) {
-            PyObject* error_str = PyObject_Str(error);
-            if (error_str) {
-                const char* error_cstr = PyUnicode_AsUTF8(error_str);
-                if (error_cstr) {
-                    auto error_message = String::from_utf8(error_cstr).value_or("Unknown Python error"sv);
-                    dbgln("PythonScript: Failed to compile: {}", error_message);
-                    
-                    // Create a Python error object to store
-                    auto python_error = JS::SyntaxError::create(realm, error_message);
-                    script->set_parse_error(python_error);
-                    script->set_error_to_rethrow(script->parse_error());
-                    
-                    Py_DECREF(error_str);
-                    return script;
-                }
-                Py_DECREF(error_str);
-            }
-        }
-        
-        // Fallback error
+        // Handle compilation error
+        dbgln("PythonScript: Failed to compile Python code");
+
+        // Create a simple error
         script->set_parse_error(JS::SyntaxError::create(realm, "Python compilation failed"sv));
         script->set_error_to_rethrow(script->parse_error());
         return script;
@@ -93,18 +75,20 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
 // https://html.spec.whatwg.org/multipage/webappapis.html#run-a-python-script
 JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Environment> lexical_environment_override)
 {
-    // 1. Let realm be the realm of script.
-    auto& realm = this->realm();
+    (void)lexical_environment_override; // TODO: Use when implementing lexical environment support
+    {
+        // 1. Let realm be the realm of script.
+        auto& realm = this->realm();
 
-    // 2. Check if we can run script with realm. If this returns "do not run", then return NormalCompletion(empty).
-    if (can_run_script(realm) == RunScriptDecision::DoNotRun)
-        return JS::normal_completion(JS::js_undefined());
+        // 2. Check if we can run script with realm. If this returns "do not run", then return NormalCompletion(empty).
+        if (can_run_script(realm) == RunScriptDecision::DoNotRun)
+            return JS::normal_completion(JS::js_undefined());
 
-    // 3. Prepare to run script given realm.
-    prepare_to_run_script(realm);
+        // 3. Prepare to run script given realm.
+        prepare_to_run_script(realm);
 
-    // 4. Let evaluationStatus be null.
-    JS::Completion evaluation_status = JS::normal_completion(JS::js_undefined());
+        // 4. Let evaluationStatus be null.
+        JS::Completion evaluation_status = JS::normal_completion(JS::js_undefined());
 
     // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
     if (!error_to_rethrow().is_null()) {
@@ -184,78 +168,129 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                             if (error_cstr) {
                                 auto error_message = String::from_utf8(error_cstr).value_or("Unknown Python error"sv);
                                 evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, error_message));
+        // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
+        if (!error_to_rethrow().is_null()) {
+            evaluation_status = JS::throw_completion(error_to_rethrow());
+        }
+        // 6. Otherwise, execute Python script
+        else {
+            auto timer = Core::ElapsedTimer::start_new();
+
+            // Execute the Python code
+            if (m_script_record) {
+                // Create a new Python thread state to execute the script
+                PyGILState_STATE gstate = PyGILState_Ensure();
+
+                // Execute script in a new dictionary context (equivalent to globals/locals)
+                PyObject* globals = PyDict_New();
+                PyObject* locals = PyDict_New();
+
+                if (globals && locals) {
+                    // Add basic builtins to the globals
+                    PyObject* builtins = PyEval_GetBuiltins();
+                    PyDict_SetItemString(globals, "__builtins__", builtins);
+
+                    // TODO: Set up security restrictions for this script execution
+                    // For now, skip security setup
+
+                    // TODO: Add DOM API and JS bridge when bindings are implemented
+                    // For now, just execute Python code with basic builtins
+
+                    PyObject* result = PyEval_EvalCode(m_script_record, globals, locals);
+
+                    if (!result) {
+                        // Python error occurred
+                        PyObject* error_type = nullptr;
+                        PyObject* error_value = nullptr;
+                        PyObject* error_traceback = nullptr;
+
+                        PyErr_Fetch(&error_type, &error_value, &error_traceback);
+                        PyErr_NormalizeException(&error_type, &error_value, &error_traceback);
+
+                        if (error_value) {
+                            PyObject* error_str = PyObject_Str(error_value);
+                            if (error_str) {
+                                char const* error_cstr = PyUnicode_AsUTF8(error_str);
+                                if (error_cstr) {
+                                    evaluation_status = JS::throw_completion(JS::Error::create(realm, "Python execution error"sv));
+                                }
+                                Py_DECREF(error_str);
                             }
-                            Py_DECREF(error_str);
+                            Py_DECREF(error_value);
                         }
-                        Py_DECREF(error_value);
+                        if (error_type)
+                            Py_DECREF(error_type);
+                        if (error_traceback)
+                            Py_DECREF(error_traceback);
+                    } else {
+                        // Execution was successful
+                        if (result != Py_None) {
+                            // Convert Python result to JavaScript value if needed
+                            // For now, just mark as successful with undefined
+                        }
+                        Py_DECREF(result);
+                        evaluation_status = JS::normal_completion(JS::js_undefined());
                     }
-                    if (error_type) Py_DECREF(error_type);
-                    if (error_traceback) Py_DECREF(error_traceback);
+
+                    Py_DECREF(globals);
+                    Py_DECREF(locals);
                 } else {
-                    // Execution was successful
-                    if (result != Py_None) {
-                        // Convert Python result to JavaScript value if needed
-                        // For now, just mark as successful with undefined
-                    }
-                    Py_DECREF(result);
-                    evaluation_status = JS::normal_completion(JS::js_undefined());
+                    evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to create Python execution context"sv));
                 }
+
+                PyGILState_Release(gstate);
             } else {
-                evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, "Failed to create Python execution context"sv));
+                evaluation_status = JS::throw_completion(JS::Error::create(realm, "No Python code to execute"sv));
             }
-            
-            PyGILState_Release(gstate);
-        } else {
-            evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, "No Python code to execute"sv));
+
+            dbgln_if(HTML_SCRIPT_DEBUG, "PythonScript: Finished running script {}, Duration: {}ms", filename(), timer.elapsed_milliseconds());
         }
 
-        dbgln_if(HTML_SCRIPT_DEBUG, "PythonScript: Finished running script {}, Duration: {}ms", filename(), timer.elapsed_milliseconds());
-    }
+        // 7. If evaluationStatus is an abrupt completion, then:
+        if (evaluation_status.is_abrupt()) {
+            // 1. If rethrow errors is true and script's muted errors is false, then:
+            if (rethrow_errors == RethrowErrors::Yes && m_muted_errors == MutedErrors::No) {
+                // 1. Clean up after running script with realm.
+                clean_up_after_running_script(realm);
 
-    // 7. If evaluationStatus is an abrupt completion, then:
-    if (evaluation_status.is_abrupt()) {
-        // 1. If rethrow errors is true and script's muted errors is false, then:
-        if (rethrow_errors == RethrowErrors::Yes && m_muted_errors == MutedErrors::No) {
-            // 1. Clean up after running script with realm.
+                // 2. Rethrow evaluationStatus.[[Value]].
+                return JS::throw_completion(evaluation_status.value());
+            }
+
+            // 2. If rethrow errors is true and script's muted errors is true, then:
+            if (rethrow_errors == RethrowErrors::Yes && m_muted_errors == MutedErrors::Yes) {
+                // 1. Clean up after running script with realm.
+                clean_up_after_running_script(realm);
+
+                // 2. Throw a "NetworkError" DOMException.
+                return throw_completion(WebIDL::NetworkError::create(realm, "Script error."_utf16));
+            }
+
+            // 3. Otherwise, rethrow errors is false. Perform the following steps:
+            VERIFY(rethrow_errors == RethrowErrors::No);
+
+            // 1. Report an exception given by evaluationStatus.[[Value]] for realms's global object.
+            auto& window_or_worker = as<WindowOrWorkerGlobalScopeMixin>(realm.global_object());
+            window_or_worker.report_an_exception(evaluation_status.value());
+
+            // 2. Clean up after running script with realm.
             clean_up_after_running_script(realm);
 
-            // 2. Rethrow evaluationStatus.[[Value]].
-            return JS::throw_completion(evaluation_status.value());
+            // 3. Return evaluationStatus.
+            return evaluation_status;
         }
 
-        // 2. If rethrow errors is true and script's muted errors is true, then:
-        if (rethrow_errors == RethrowErrors::Yes && m_muted_errors == MutedErrors::Yes) {
-            // 1. Clean up after running script with realm.
-            clean_up_after_running_script(realm);
-
-            // 2. Throw a "NetworkError" DOMException.
-            return throw_completion(WebIDL::NetworkError::create(realm, "Script error."_utf16));
-        }
-
-        // 3. Otherwise, rethrow errors is false. Perform the following steps:
-        VERIFY(rethrow_errors == RethrowErrors::No);
-
-        // 1. Report an exception given by evaluationStatus.[[Value]] for realms's global object.
-        auto& window_or_worker = as<WindowOrWorkerGlobalScopeMixin>(realm.global_object());
-        window_or_worker.report_an_exception(evaluation_status.value());
-
-        // 2. Clean up after running script with realm.
+        // 8. Clean up after running script with realm.
         clean_up_after_running_script(realm);
 
-        // 3. Return evaluationStatus.
-        return evaluation_status;
+        // 9. If evaluationStatus is a normal completion, then return evaluationStatus.
+        if (!evaluation_status.is_abrupt())
+            return evaluation_status;
+
+        // FIXME: 10. If we've reached this point, evaluationStatus was left as null because the script was aborted prematurely during evaluation.
+        //            Return ThrowCompletion(a new "QuotaExceededError" DOMException).
+        return JS::throw_completion(WebIDL::QuotaExceededError::create(realm, "Script execution was aborted"_utf16));
     }
-
-    // 8. Clean up after running script with realm.
-    clean_up_after_running_script(realm);
-
-    // 9. If evaluationStatus is a normal completion, then return evaluationStatus.
-    if (!evaluation_status.is_abrupt())
-        return evaluation_status;
-
-    // FIXME: 10. If we've reached this point, evaluationStatus was left as null because the script was aborted prematurely during evaluation.
-    //            Return ThrowCompletion(a new "QuotaExceededError" DOMException).
-    return JS::throw_completion(WebIDL::QuotaExceededError::create(realm, "Script execution was aborted"_utf16));
 }
 
 PythonScript::PythonScript(URL::URL base_url, ByteString filename, JS::Realm& realm)
