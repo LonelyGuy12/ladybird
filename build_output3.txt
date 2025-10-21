@@ -1,0 +1,134 @@
+[1/2036] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Scripting/Fetching.cpp.o
+FAILED: [code=1] Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Scripting/Fetching.cpp.o 
+/opt/homebrew/bin/ccache /usr/bin/c++ -DENABLE_COMPILETIME_FORMAT_CHECK -DLibWeb_EXPORTS -DSK_ALLOW_STATIC_GLOBAL_INITIALIZERS=1 -DSK_ASSUME_GL=1 -DSK_CODEC_DECODES_BMP -DSK_CODEC_DECODES_GIF -DSK_CODEC_DECODES_ICO -DSK_CODEC_DECODES_JPEG -DSK_CODEC_DECODES_PNG -DSK_CODEC_DECODES_RAW -DSK_CODEC_DECODES_WBMP -DSK_CODEC_DECODES_WEBP -DSK_ENABLE_API_AVAILABLE -DSK_ENABLE_AVX512_OPTS -DSK_ENABLE_DUMP_GPU -DSK_ENABLE_PRECOMPILE -DSK_FONTMGR_ANDROID_AVAILABLE -DSK_FONTMGR_CORETEXT_AVAILABLE -DSK_FONTMGR_FONTCONFIG_AVAILABLE -DSK_FONTMGR_FREETYPE_DIRECTORY_AVAILABLE -DSK_FONTMGR_FREETYPE_EMBEDDED_AVAILABLE -DSK_FONTMGR_FREETYPE_EMPTY_AVAILABLE -DSK_GAMMA_APPLY_TO_A8 -DSK_GANESH -DSK_GL -DSK_HAS_WUFFS_LIBRARY -DSK_METAL -DSK_SUPPORT_PDF -DSK_TRIVIAL_ABI=[[clang::trivial_abi]] -DSK_TYPEFACE_FACTORY_CORETEXT -DSK_TYPEFACE_FACTORY_FREETYPE -DSK_USE_PERFETTO -DSK_XML -I/Users/lonely/important/ladybird -I/Users/lonely/important/ladybird/Services -I/Users/lonely/important/ladybird/Libraries -I/Users/lonely/important/ladybird/Build/debug/Lagom -I/Users/lonely/important/ladybird/Build/debug/Lagom/Services -I/Users/lonely/important/ladybird/Build/debug/Lagom/Libraries -I/Users/lonely/important/ladybird/Meta/Lagom/../.. -I/Users/lonely/important/ladybird/Meta/Lagom/../../Libraries -I/Users/lonely/important/ladybird/Meta/Lagom/../../Services -I/Users/lonely/important/ladybird/Build/debug -isystem /opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/include/python3.13 -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include/skia -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include/libxml2 -g -std=c++2b -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk -mmacosx-version-min=14.0 -fPIC -fcolor-diagnostics -march=native -Wall -Wextra -fno-exceptions -ffp-contract=off -Wcast-qual -Wformat=2 -Wimplicit-fallthrough -Wlogical-op -Wmissing-declarations -Wmissing-field-initializers -Wsuggest-override -Wno-invalid-offsetof -Wno-unknown-warning-option -Wno-unused-command-line-argument -Werror -fconstexpr-steps=16777216 -Wmissing-prototypes -Wno-implicit-const-int-float-conversion -Wno-user-defined-literals -Wno-unqualified-std-cast-call -fstack-protector-strong -fstrict-flex-arrays=2 -Wno-maybe-uninitialized -Wno-shorten-64-to-32 -fsigned-char -ggnu-pubnames -ggdb3 -Og -fvisibility=hidden -MD -MT Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Scripting/Fetching.cpp.o -MF Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Scripting/Fetching.cpp.o.d -o Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Scripting/Fetching.cpp.o -c /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:522:64: error: use of undeclared identifier 'PythonScript'
+  522 |         auto muted_errors = response->is_cors_cross_origin() ? PythonScript::MutedErrors::Yes : PythonScript::MutedErrors::No;
+      |                                                                ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:522:97: error: use of undeclared identifier 'PythonScript'
+  522 |         auto muted_errors = response->is_cors_cross_origin() ? PythonScript::MutedErrors::Yes : PythonScript::MutedErrors::No;
+      |                                                                                                 ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:528:23: error: use of undeclared identifier 'PythonScript'
+  528 |         auto script = PythonScript::create(response_url.to_byte_string(), source_text, settings_object.realm(), response_url, muted_errors);
+      |                       ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:528:88: error: variable 'settings_object' cannot be implicitly captured in a lambda with no capture-default specified
+  528 |         auto script = PythonScript::create(response_url.to_byte_string(), source_text, settings_object.realm(), response_url, muted_errors);
+      |                                                                                        ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:474:131: note: 'settings_object' declared here
+  474 | WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element, URL::URL const& url, EnvironmentSettingsObject& settings_object, ScriptFetchOptions options, OnFetchScriptComplete on_complete)
+      |                                                                                                                                   ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60: note: lambda expression begins here
+  494 |     fetch_algorithms_input.process_response_consume_body = [options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+      |                                                            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:117: note: capture 'settings_object' by reference
+  494 |     fetch_algorithms_input.process_response_consume_body = [options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+      |                                                                                                                     ^
+      |                                                                                                                     , &settings_object
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:61: note: default capture by reference
+  494 |     fetch_algorithms_input.process_response_consume_body = [options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+      |                                                             ^
+      |                                                             &, 
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:58: error: no viable overloaded '='
+  494 |     fetch_algorithms_input.process_response_consume_body = [options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  495 |         // 1. Set response to response's unsafe response.
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  496 |         response = response->unsafe_response();
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  497 | 
+  498 |         // 2. If either of the following conditions are met:
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  499 |         // - bodyBytes is null or failure; or
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  500 |         // - response's status is not an ok status,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  501 |         if (body_bytes.template has<Empty>() || body_bytes.template has<Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag>() || !Fetch::Infrastructure::is_ok_status(response->status())) {
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  502 |             // then run onComplete given null, and abort these steps.
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  503 |             on_complete->function()(nullptr);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  504 |             return;
+      |             ~~~~~~~
+  505 |         }
+      |         ~
+  506 | 
+  507 |         // 3. Let potentialMIMETypeForEncoding be the result of extracting a MIME type given response's header list.
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  508 |         auto potential_mime_type_for_encoding = response->header_list()->extract_mime_type();
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  509 | 
+/Users/lonely/important/ladybird/AK/Function.h:84:5: note: candidate function not viable: no known conversion from '(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)' to 'const Function<void (Ref<Response>, Variant<Empty, ConsumeBodyFailureTag, ByteBuffer<32>>)>' for 1st argument
+   84 |     AK_MAKE_NONCOPYABLE(Function);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/lonely/important/ladybird/AK/Noncopyable.h:12:8: note: expanded from macro 'AK_MAKE_NONCOPYABLE'
+   12 |     c& operator=(c const&) = delete
+      |        ^         ~~~~~~~~
+/Users/lonely/important/ladybird/AK/Function.h:154:15: note: candidate template ignored: constraints not satisfied [with CallableType = (lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)]
+  154 |     Function& operator=(CallableType&& callable)
+      |               ^
+/Users/lonely/important/ladybird/AK/Function.h:155:49: note: because 'IsCallableWithArguments<(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60), void, GC::Ref<Web::Fetch::Infrastructure::Response>, AK::Variant<AK::Empty, Web::Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag, AK::Detail::ByteBuffer<32> > >' evaluated to false
+  155 |     requires((IsFunctionObject<CallableType> && IsCallableWithArguments<CallableType, Out, In...>))
+      |                                                 ^
+/Users/lonely/important/ladybird/AK/Function.h:163:15: note: candidate template ignored: constraints not satisfied [with FunctionType = (lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)]
+  163 |     Function& operator=(FunctionType f)
+      |               ^
+/Users/lonely/important/ladybird/AK/Function.h:164:15: note: because 'IsFunctionPointer<(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)>' evaluated to false
+  164 |     requires((IsFunctionPointer<FunctionType> && IsCallableWithArguments<RemovePointer<FunctionType>, Out, In...>))
+      |               ^
+/Users/lonely/important/ladybird/AK/Function.h:173:15: note: candidate template ignored: constraints not satisfied [with BlockType = (lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)]
+  173 |     Function& operator=(BlockType&& block)
+      |               ^
+/Users/lonely/important/ladybird/AK/Function.h:174:15: note: because 'IsBlockClosure<(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)>' evaluated to false
+  174 |     requires((IsBlockClosure<BlockType> && IsCallableWithArguments<BlockType, Out, In...>))
+      |               ^
+/Users/lonely/important/ladybird/AK/Function.h:181:15: note: candidate function not viable: no known conversion from '(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+  181 |     Function& operator=(nullptr_t)
+      |               ^         ~~~~~~~~~
+/Users/lonely/important/ladybird/AK/Function.h:187:15: note: candidate function not viable: no known conversion from '(lambda at /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:494:60)' to 'Function<void (Ref<Response>, Variant<Empty, ConsumeBodyFailureTag, ByteBuffer<32>>)>' for 1st argument
+  187 |     Function& operator=(Function&& other)
+      |               ^         ~~~~~~~~~~~~~~~~
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:539:19: error: use of undeclared identifier 'settings_object'
+  539 |     auto& realm = settings_object.realm();
+      |                   ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:546:5: error: unknown type name 'request'
+  546 |     request->set_url(url);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:546:12: error: cannot use arrow operator on a type
+  546 |     request->set_url(url);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:547:5: error: unknown type name 'request'
+  547 |     request->set_client(&fetch_client);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:547:12: error: cannot use arrow operator on a type
+  547 |     request->set_client(&fetch_client);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:548:5: error: unknown type name 'request'
+  548 |     request->set_destination(destination);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:548:12: error: cannot use arrow operator on a type
+  548 |     request->set_destination(destination);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:549:5: error: unknown type name 'request'
+  549 |     request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Other);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:549:12: error: cannot use arrow operator on a type
+  549 |     request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Other);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:552:5: error: unknown type name 'request'
+  552 |     request->set_mode(Fetch::Infrastructure::Request::Mode::NoCORS);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:552:12: error: cannot use arrow operator on a type
+  552 |     request->set_mode(Fetch::Infrastructure::Request::Mode::NoCORS);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:554:5: error: unknown type name 'request'
+  554 |     request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::SameOrigin);
+      |     ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:554:12: error: cannot use arrow operator on a type
+  554 |     request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::SameOrigin);
+      |            ^
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/Scripting/Fetching.cpp:555:5: error: unknown type name 'request'
+  555 |     request->set_parser_metadata(Fetch::Infrastructure::Request::ParserMetadata::NotParserInserted);
+      |     ^
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+20 errors generated.
+ninja: build stopped: subcommand failed.

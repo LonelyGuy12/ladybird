@@ -11,7 +11,7 @@
 #include <LibWeb/HTML/CORSSettingAttribute.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/Scripting/ImportMapParseResult.h>
-#include <LibWeb/HTML/Scripting/PythonScript.h>
+// #include <LibWeb/HTML/Scripting/PythonScript.h>  // Disabled Python support
 #include <LibWeb/HTML/Scripting/Script.h>
 #include <LibWeb/ReferrerPolicy/ReferrerPolicy.h>
 #include <LibWeb/TrustedTypes/TrustedScript.h>

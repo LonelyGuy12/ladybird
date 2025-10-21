@@ -1,0 +1,280 @@
+Log file: build_20251013_182851.log
+Build started at: Mon Oct 13 18:28:51 IST 2025
+=== Step 1: Fixing remaining Python-related issues ===
+Commented out PythonScript include in HTMLScriptElement.h
+Commented out PythonScript include in HTMLScriptElement.cpp
+=== Step 2: Running CMake configuration ===
+-- Running vcpkg install
+Detecting compiler hash for triplet arm64-osx-dynamic...
+Compiler found: /usr/bin/c++
+The following packages are already installed:
+    angle[core,metal]:arm64-osx-dynamic@chromium_7258 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/angle
+  * brotli:arm64-osx-dynamic@1.1.0#1
+  * bzip2[core,tool]:arm64-osx-dynamic@1.0.8#6
+    cpptrace:arm64-osx-dynamic@1.0.2 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/cpptrace
+    curl[brotli,core,http2,http3,non-http,openssl,ssl,websockets,zstd]:arm64-osx-dynamic@8.16.0
+  * dav1d:arm64-osx-dynamic@1.5.1#1
+  * dirent:arm64-osx-dynamic@1.26
+  * egl-registry:arm64-osx-dynamic@2024-01-25
+  * expat:arm64-osx-dynamic@2.7.2
+    fast-float:arm64-osx-dynamic@8.1.0
+    ffmpeg[avcodec,avdevice,avfilter,avformat,core,dav1d,openh264,opus,swresample,swscale,theora,vorbis,vpx,webp,zlib]:arm64-osx-dynamic@7.1.1#5
+    fontconfig:arm64-osx-dynamic@2.15.0#4
+  * freetype[brotli,bzip2,core,png,zlib]:arm64-osx-dynamic@2.13.3
+  * gettext:arm64-osx-dynamic@0.22.5#2
+  * gettext-libintl:arm64-osx-dynamic@0.22.5#3
+  * giflib:arm64-osx-dynamic@5.2.2#2
+  * gperf:arm64-osx-dynamic@3.3
+    harfbuzz[core,coretext,freetype,icu]:arm64-osx-dynamic@10.2.0
+  * highway:arm64-osx-dynamic@1.3.0
+    icu[core,tools]:arm64-osx-dynamic@76.1 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/icu
+  * lcms:arm64-osx-dynamic@2.17
+    libavif[core,dav1d]:arm64-osx-dynamic@1.3.0
+  * libdwarf:arm64-osx-dynamic@2.1.0
+  * libiconv:arm64-osx-dynamic@1.18#1
+    libjpeg-turbo:arm64-osx-dynamic@3.1.1
+    libjxl:arm64-osx-dynamic@0.11.1#3
+  * liblzma:arm64-osx-dynamic@5.8.1
+  * libogg:arm64-osx-dynamic@1.3.6#1
+    libpng[apng,core]:arm64-osx-dynamic@1.6.50
+    libproxy:arm64-osx-dynamic@0.4.18#3
+  * libtheora:arm64-osx-dynamic@1.2.0
+    libtommath:arm64-osx-dynamic@1.3.0#2 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/libtommath
+  * libvorbis:arm64-osx-dynamic@1.3.7#4
+  * libvpx:arm64-osx-dynamic@1.15.2#2
+    libwebp[anim,core,img2webp,libwebpmux,mux,nearlossless,simd]:arm64-osx-dynamic@1.6.0#1
+    libxml2[core,iconv,zlib]:arm64-osx-dynamic@2.15.0
+  * libyuv:arm64-osx-dynamic@1916
+  * nghttp2:arm64-osx-dynamic@1.67.1
+  * nghttp3:arm64-osx-dynamic@1.11.0#1
+  * ngtcp2[core,openssl]:arm64-osx-dynamic@1.15.1
+  * opengl-registry:arm64-osx-dynamic@2024-02-10#1
+  * openh264:arm64-osx-dynamic@2.6.0#3
+    openssl:arm64-osx-dynamic@3.5.3
+  * opus:arm64-osx-dynamic@1.5.2
+  * pkgconf:arm64-osx-dynamic@2.5.1#2
+  * pthread:arm64-osx-dynamic@3.0.0#2
+  * pthreads:arm64-osx-dynamic@3.0.0#14
+    sdl3:arm64-osx-dynamic@3.2.22
+    simdutf:arm64-osx-dynamic@7.4.0
+    skia[core,fontconfig,freetype,gl,harfbuzz,icu,metal]:arm64-osx-dynamic@129#2 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/skia
+    sqlite3[core,json1]:arm64-osx-dynamic@3.50.4
+    tiff[core,jpeg,lzma,zip,zstd]:arm64-osx-dynamic@4.7.0
+  * vcpkg-cmake:arm64-osx-dynamic@2024-04-23
+  * vcpkg-cmake-config:arm64-osx-dynamic@2024-05-23
+  * vcpkg-cmake-get-vars:arm64-osx-dynamic@2025-05-29
+  * vcpkg-get-python-packages:arm64-osx-dynamic@2025-04-05
+  * vcpkg-gn:arm64-osx-dynamic@2025-08-05
+  * vcpkg-make:arm64-osx-dynamic@2025-09-14
+  * vcpkg-pkgconfig-get-modules:arm64-osx-dynamic@2024-04-03
+  * vcpkg-tool-gn:arm64-osx-dynamic@2025-08-05#1
+  * vcpkg-tool-meson:arm64-osx-dynamic@1.9.0#1
+    vulkan:arm64-osx-dynamic@2023-12-17 -- /Users/lonely/important/ladybird/Meta/CMake/vcpkg/overlay-ports/vulkan
+    vulkan-headers:arm64-osx-dynamic@1.4.309.0
+    woff2:arm64-osx-dynamic@1.0.2#5
+    zlib:arm64-osx-dynamic@1.3.1
+  * zstd:arm64-osx-dynamic@1.5.7
+All requested installations completed successfully in: 311 us
+-- Running vcpkg install - done
+-- Found ZLIB: optimized;/Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/lib/libz.dylib;debug;/Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libz.dylib (found version "1.3.1")
+-- Found OpenSSL: /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libcrypto.dylib (found version "3.5.3")
+-- Found Python3: /opt/homebrew/bin/python3.13 (found version "3.13.7") found components: Interpreter
+-- Found ICU: /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include (found suitable version "76.1", minimum required is "76") found components: data i18n uc
+-- Found the following WebP libraries:
+--  WebP (required): /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libwebp.dylib
+--  webpdemux (optional): /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libwebpdemux.dylib
+--  mux (optional): /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libwebpmux.dylib
+--  decoder (optional): /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libwebpdecoder.dylib
+-- Found ICU: /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include (found suitable version "76.1", minimum required is "61") found components: uc
+-- Found Python3: /opt/homebrew/bin/python3.13 (found version "3.13.7") found components: Interpreter Development Development.Module Development.Embed
+-- Found Python3: /opt/homebrew/bin/python3.13 (found version "3.13.7") found components: Interpreter
+-- Found OpenSSL: /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libcrypto.dylib (found suitable version "3.5.3", minimum required is "3")
+-- Found ZLIB: optimized;/Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/lib/libz.dylib;debug;/Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/debug/lib/libz.dylib (found suitable version "1.3.1", minimum required is "1")
+-- Found Python3: /opt/homebrew/bin/python3.13 (found version "3.13.7") found components: Interpreter Development Development.Module Development.Embed
+-- Configuring done (2.5s)
+-- Generating done (0.8s)
+-- Build files have been written to: /Users/lonely/important/ladybird/Build/debug
+CMake configuration successful
+=== Step 3: Starting build process ===
+Build started at: Mon Oct 13 18:28:55 IST 2025
+[1/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/AnimationTimeline.cpp.o
+[2/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/AnimationEffect.cpp.o
+[3/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/Animation.cpp.o
+[4/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/Animatable.cpp.o
+[5/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/DocumentTimeline.cpp.o
+[6/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Bindings/AudioConstructor.cpp.o
+[7/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Bindings/ImageConstructor.cpp.o
+[8/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Animations/KeyframeEffect.cpp.o
+[9/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Bindings/PlatformObject.cpp.o
+[10/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Bindings/OptionConstructor.cpp.o
+[11/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Bindings/MainThreadVM.cpp.o
+[12/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Clipboard/Clipboard.cpp.o
+[13/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/ContentSecurityPolicy/Directives/DirectiveOperations.cpp.o
+[14/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/ContentSecurityPolicy/BlockingAlgorithms.cpp.o
+[15/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/ContentSecurityPolicy/Directives/FrameAncestorsDirective.cpp.o
+[16/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/ContentSecurityPolicy/PolicyList.cpp.o
+[17/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/ContentSecurityPolicy/Violation.cpp.o
+[18/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CookieStore/CookieStore.cpp.o
+[19/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/ComputedProperties.cpp.o
+[20/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSS.cpp.o
+[21/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSGroupingRule.cpp.o
+[22/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSImportRule.cpp.o
+[23/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSRuleList.cpp.o
+[24/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSStyleDeclaration.cpp.o
+[25/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSStyleSheet.cpp.o
+[26/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSStyleProperties.cpp.o
+[27/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/CSSTransition.cpp.o
+[28/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Fetch.cpp.o
+[29/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/FontFaceSet.cpp.o
+[30/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Length.cpp.o
+[31/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/FontFace.cpp.o
+[32/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Interpolation.cpp.o
+[33/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/MediaQueryList.cpp.o
+[34/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/MediaQuery.cpp.o
+[35/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/ParsedFontFace.cpp.o
+[36/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Parser/ArbitrarySubstitutionFunctions.cpp.o
+[37/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Parser/Helpers.cpp.o
+[38/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Screen.cpp.o
+[39/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Parser/Parser.cpp.o
+[40/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/SelectorEngine.cpp.o
+[41/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StylePropertyMapReadOnly.cpp.o
+[42/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleSheetList.cpp.o
+[43/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/ColorMixStyleValue.cpp.o
+[44/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/ConicGradientStyleValue.cpp.o
+[45/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleComputer.cpp.o
+[46/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/CursorStyleValue.cpp.o
+[47/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/FilterValueListStyleValue.cpp.o
+[48/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/ImageStyleValue.cpp.o
+[49/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/KeywordStyleValue.cpp.o
+[50/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/LightDarkStyleValue.cpp.o
+[51/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/LinearGradientStyleValue.cpp.o
+[52/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/RadialGradientStyleValue.cpp.o
+[53/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/StyleValues/StyleValue.cpp.o
+[54/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/Transformation.cpp.o
+[55/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/CSS/VisualViewport.cpp.o
+[56/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/AbstractElement.cpp.o
+[57/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/AbortSignal.cpp.o
+[58/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/AbstractRange.cpp.o
+[59/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/AccessibilityTreeNode.cpp.o
+[60/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Attr.cpp.o
+[61/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/AdoptedStyleSheets.cpp.o
+[62/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/CharacterData.cpp.o
+[63/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Comment.cpp.o
+[64/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DocumentFragment.cpp.o
+[65/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DocumentLoadEventDelayer.cpp.o
+[66/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DocumentLoading.cpp.o
+[67/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DocumentObserver.cpp.o
+[68/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DocumentType.cpp.o
+[69/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DOMImplementation.cpp.o
+[70/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Document.cpp.o
+[71/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/DOMTokenList.cpp.o
+[72/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/EditingHostManager.cpp.o
+[73/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/EventDispatcher.cpp.o
+[74/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/ElementFactory.cpp.o
+[75/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/EventTarget.cpp.o
+[76/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Element.cpp.o
+[77/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/HTMLCollection.cpp.o
+[78/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/NamedNodeMap.cpp.o
+[79/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/NodeIterator.cpp.o
+[80/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/NodeOperations.cpp.o
+[81/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Node.cpp.o
+[82/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/ParentNode.cpp.o
+[83/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/ProcessingInstruction.cpp.o
+[84/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/PseudoElement.cpp.o
+[85/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/ShadowRoot.cpp.o
+[86/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Range.cpp.o
+[87/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/StyleElementUtils.cpp.o
+[88/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/Text.cpp.o
+[89/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/DOM/XMLDocument.cpp.o
+[90/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Dump.cpp.o
+[91/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Editing/ExecCommand.cpp.o
+[92/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Editing/Commands.cpp.o
+[93/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/EntriesAPI/FileSystemEntry.cpp.o
+[94/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/EncryptedMediaExtensions/NavigatorEncryptedMediaExtensionsPartial.cpp.o
+[95/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Editing/Internal/Algorithms.cpp.o
+[96/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/FileAPI/BlobURLStore.cpp.o
+[97/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Fetch/Fetching/Fetching.cpp.o
+[98/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Gamepad/Gamepad.cpp.o
+[99/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Gamepad/GamepadHapticActuator.cpp.o
+[100/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Gamepad/NavigatorGamepad.cpp.o
+[101/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Serial/Serial.cpp.o
+[102/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Geolocation/Geolocation.cpp.o
+[103/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Geometry/DOMMatrix.cpp.o
+[104/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/GraphemeEdgeTracker.cpp.o
+[105/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/Geometry/DOMMatrixReadOnly.cpp.o
+[106/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HighResolutionTime/Performance.cpp.o
+[107/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/AudioTrack.cpp.o
+[108/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/BarProp.cpp.o
+[109/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/BroadcastChannel.cpp.o
+[110/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Canvas/CanvasDrawImage.cpp.o
+[111/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/BrowsingContext.cpp.o
+[112/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Canvas/CanvasPath.cpp.o
+[113/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Canvas/SerializeBitmap.cpp.o
+[114/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Canvas/CanvasState.cpp.o
+[115/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CanvasPattern.cpp.o
+[116/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CloseWatcher.cpp.o
+[117/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CanvasRenderingContext2D.cpp.o
+[118/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CloseWatcherManager.cpp.o
+[119/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CrossOrigin/AbstractOperations.cpp.o
+[120/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CrossOrigin/Reporting.cpp.o
+[121/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/DedicatedWorkerGlobalScope.cpp.o
+[122/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/CustomElements/CustomElementRegistry.cpp.o
+[123/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/DocumentState.cpp.o
+[124/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/DOMParser.cpp.o
+[125/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/DOMStringMap.cpp.o
+[126/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/DragEvent.cpp.o
+[127/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/EventLoop/EventLoop.cpp.o
+[128/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/EventLoop/Task.cpp.o
+[129/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/Focus.cpp.o
+[130/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/EventSource.cpp.o
+[131/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/FormAssociatedElement.cpp.o
+[132/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/History.cpp.o
+[133/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLAllCollection.cpp.o
+[134/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLAnchorElement.cpp.o
+[135/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLAreaElement.cpp.o
+[136/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLAudioElement.cpp.o
+[137/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLBaseElement.cpp.o
+[138/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLBodyElement.cpp.o
+[139/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLBRElement.cpp.o
+[140/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLButtonElement.cpp.o
+[141/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLDetailsElement.cpp.o
+[142/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLCanvasElement.cpp.o
+[143/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLDialogElement.cpp.o
+[144/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLDirectoryElement.cpp.o
+[145/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLDListElement.cpp.o
+[146/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLDocument.cpp.o
+[147/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLFieldSetElement.cpp.o
+[148/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLFrameElement.cpp.o
+[149/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLElement.cpp.o
+[150/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLFormElement.cpp.o
+[151/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLFrameSetElement.cpp.o
+[152/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLHtmlElement.cpp.o
+[153/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLHyperlinkElementUtils.cpp.o
+[154/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLIFrameElement.cpp.o
+[155/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLLabelElement.cpp.o
+[156/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLImageElement.cpp.o
+[157/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLLegendElement.cpp.o
+[158/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLInputElement.cpp.o
+[159/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLLIElement.cpp.o
+[160/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLLinkElement.cpp.o
+[161/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLMetaElement.cpp.o
+[162/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLMediaElement.cpp.o
+[163/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLMeterElement.cpp.o
+[164/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLObjectElement.cpp.o
+[165/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLOListElement.cpp.o
+[166/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLOptionElement.cpp.o
+[167/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLOrSVGElement.cpp.o
+[168/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLProgressElement.cpp.o
+[169/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLScriptElement.cpp.o
+FAILED: [code=1] Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLScriptElement.cpp.o 
+/opt/homebrew/bin/ccache /usr/bin/c++ -DENABLE_COMPILETIME_FORMAT_CHECK -DLibWeb_EXPORTS -DSK_ALLOW_STATIC_GLOBAL_INITIALIZERS=1 -DSK_ASSUME_GL=1 -DSK_CODEC_DECODES_BMP -DSK_CODEC_DECODES_GIF -DSK_CODEC_DECODES_ICO -DSK_CODEC_DECODES_JPEG -DSK_CODEC_DECODES_PNG -DSK_CODEC_DECODES_RAW -DSK_CODEC_DECODES_WBMP -DSK_CODEC_DECODES_WEBP -DSK_ENABLE_API_AVAILABLE -DSK_ENABLE_AVX512_OPTS -DSK_ENABLE_DUMP_GPU -DSK_ENABLE_PRECOMPILE -DSK_FONTMGR_ANDROID_AVAILABLE -DSK_FONTMGR_CORETEXT_AVAILABLE -DSK_FONTMGR_FONTCONFIG_AVAILABLE -DSK_FONTMGR_FREETYPE_DIRECTORY_AVAILABLE -DSK_FONTMGR_FREETYPE_EMBEDDED_AVAILABLE -DSK_FONTMGR_FREETYPE_EMPTY_AVAILABLE -DSK_GAMMA_APPLY_TO_A8 -DSK_GANESH -DSK_GL -DSK_HAS_WUFFS_LIBRARY -DSK_METAL -DSK_SUPPORT_PDF -DSK_TRIVIAL_ABI=[[clang::trivial_abi]] -DSK_TYPEFACE_FACTORY_CORETEXT -DSK_TYPEFACE_FACTORY_FREETYPE -DSK_USE_PERFETTO -DSK_XML -I/Users/lonely/important/ladybird -I/Users/lonely/important/ladybird/Services -I/Users/lonely/important/ladybird/Libraries -I/Users/lonely/important/ladybird/Build/debug/Lagom -I/Users/lonely/important/ladybird/Build/debug/Lagom/Services -I/Users/lonely/important/ladybird/Build/debug/Lagom/Libraries -I/Users/lonely/important/ladybird/Meta/Lagom/../.. -I/Users/lonely/important/ladybird/Meta/Lagom/../../Libraries -I/Users/lonely/important/ladybird/Meta/Lagom/../../Services -I/Users/lonely/important/ladybird/Build/debug -isystem /opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/include/python3.13 -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include/skia -isystem /Users/lonely/important/ladybird/Build/debug/vcpkg_installed/arm64-osx-dynamic/include/libxml2 -g -std=c++2b -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk -mmacosx-version-min=14.0 -fPIC -fcolor-diagnostics -march=native -Wall -Wextra -fno-exceptions -ffp-contract=off -Wcast-qual -Wformat=2 -Wimplicit-fallthrough -Wlogical-op -Wmissing-declarations -Wmissing-field-initializers -Wsuggest-override -Wno-invalid-offsetof -Wno-unknown-warning-option -Wno-unused-command-line-argument -Werror -fconstexpr-steps=16777216 -Wmissing-prototypes -Wno-implicit-const-int-float-conversion -Wno-user-defined-literals -Wno-unqualified-std-cast-call -fstack-protector-strong -fstrict-flex-arrays=2 -Wno-maybe-uninitialized -Wno-shorten-64-to-32 -fsigned-char -ggnu-pubnames -ggdb3 -Og -fvisibility=hidden -MD -MT Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLScriptElement.cpp.o -MF Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLScriptElement.cpp.o.d -o Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLScriptElement.cpp.o -c /Users/lonely/important/ladybird/Libraries/LibWeb/HTML/HTMLScriptElement.cpp
+/Users/lonely/important/ladybird/Libraries/LibWeb/HTML/HTMLScriptElement.cpp:531:39: error: use of undeclared identifier 'script'
+  531 |             mark_as_ready(Result(move(script)));
+      |                                       ^
+1 error generated.
+[170/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLStyleElement.cpp.o
+[171/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLSelectElement.cpp.o
+[172/2241] Building CXX object Lagom/Libraries/LibWeb/CMakeFiles/LibWeb.dir/HTML/HTMLTableCellElement.cpp.o
+ninja: build stopped: subcommand failed.
+Build failed at: Mon Oct 13 18:30:30 IST 2025
+=== FAILED ===
