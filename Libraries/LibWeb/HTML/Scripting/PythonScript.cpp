@@ -120,20 +120,22 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             PyGILState_STATE gstate = PyGILState_Ensure();
             
             // Execute script in a new dictionary context (equivalent to globals/locals)
-            PyObject* globals = PyDict_New();
-            PyObject* locals = PyDict_New();
+            if (!m_globals) {
+                m_globals = PyDict_New();
+                m_locals = PyDict_New();
+            }
             
-            if (globals && locals) {
+            if (m_globals && m_locals) {
                 // Add basic builtins to the globals
                 PyObject* builtins = PyEval_GetBuiltins();
-                PyDict_SetItemString(globals, "__builtins__", builtins);
+                PyDict_SetItemString(m_globals, "__builtins__", builtins);
                 
                 // Set up security restrictions for this script execution
                 URL::URL origin = this->base_url().value_or(URL::URL {});
-                if (!PythonSecurityModel::setup_sandboxed_environment(globals, origin)) {
+                if (!PythonSecurityModel::setup_sandboxed_environment(m_globals, origin)) {
                     evaluation_status = JS::throw_completion(JS::Error::create(realm, JS::ErrorType::Generic, "Failed to set up secure execution environment"sv));
-                    Py_DECREF(globals);
-                    Py_DECREF(locals);
+                    Py_DECREF(m_globals);
+                    Py_DECREF(m_locals);
                     PyGILState_Release(gstate);
                     return evaluation_status;
                 }
@@ -142,35 +144,35 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                 if (Bindings::PythonDOMAPI::initialize_module()) {
                     PyObject* web_module = Bindings::PythonDOMAPI::get_module();
                     if (web_module) {
-                        PyDict_SetItemString(globals, "web", web_module);
+                        PyDict_SetItemString(m_globals, "web", web_module);
                         
                         // For convenience, also add common functions/classes directly
                         PyObject* doc_class = PyObject_GetAttrString(web_module, "Document");
                         if (doc_class) {
-                            PyDict_SetItemString(globals, "Document", doc_class);
+                            PyDict_SetItemString(m_globals, "Document", doc_class);
                             Py_DECREF(doc_class);
                         }
                         
                         PyObject* elem_class = PyObject_GetAttrString(web_module, "Element");
                         if (elem_class) {
-                            PyDict_SetItemString(globals, "Element", elem_class);
+                            PyDict_SetItemString(m_globals, "Element", elem_class);
                             Py_DECREF(elem_class);
                         }
                         
                         PyObject* win_class = PyObject_GetAttrString(web_module, "Window");
                         if (win_class) {
-                            PyDict_SetItemString(globals, "Window", win_class);
+                            PyDict_SetItemString(m_globals, "Window", win_class);
                             Py_DECREF(win_class);
                         }
                     }
                 }
                 
                 // Setup cross-language bridge to enable access to JavaScript objects
-                if (!Bindings::PythonJSBridge::setup_bridge_in_context(globals, this->realm())) {
+                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_globals, this->realm())) {
                     dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
-                PyObject* result = PyEval_EvalCode(m_script_record, globals, locals);
+                PyObject* result = PyEval_EvalCode(m_script_record, m_globals, m_locals);
                 
                 if (!result) {
                     // Python error occurred
@@ -276,8 +278,16 @@ PythonScript::~PythonScript()
         // Acquire GIL before destroying Python objects
         PyGILState_STATE gstate = PyGILState_Ensure();
         Py_DECREF(m_script_record);
+        if (m_globals) {
+            Py_DECREF(m_globals);
+        }
+        if (m_locals) {
+            Py_DECREF(m_locals);
+        }
         PyGILState_Release(gstate);
         m_script_record = nullptr;
+        m_globals = nullptr;
+        m_locals = nullptr;
     }
 }
 

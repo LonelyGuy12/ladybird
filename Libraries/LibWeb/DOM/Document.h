@@ -46,6 +46,7 @@
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/ObservableArray.h>
 #include <LibWeb/XPath/XPath.h>
+#include <LibWeb/Bindings/PythonDOMBindings.h>
 
 namespace Web::DOM {
 
@@ -945,6 +946,8 @@ public:
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& registered_custom_properties();
 
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
+
+    OwnPtr<Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
 
 protected:
     virtual void initialize(JS::Realm&) override;

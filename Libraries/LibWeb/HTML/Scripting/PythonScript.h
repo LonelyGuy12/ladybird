@@ -48,6 +48,8 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     PyObject* m_script_record { nullptr };
+    PyObject* m_globals { nullptr };
+    PyObject* m_locals { nullptr };
     MutedErrors m_muted_errors { MutedErrors::No };
 };
 

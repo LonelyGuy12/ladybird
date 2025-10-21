@@ -8,6 +8,7 @@
 
 #include <Python.h>
 #include <LibWeb/Forward.h>
+#include <unordered_map>
 
 namespace Web::Bindings {
 
@@ -45,6 +46,13 @@ private:
 };
 
 // Python DOM API module
+class PythonDOMWrapperCache {
+public:
+    std::unordered_map<void*, PyObject*> document_cache;
+    std::unordered_map<void*, PyObject*> element_cache;
+    std::unordered_map<void*, PyObject*> window_cache;
+};
+
 class PythonDOMAPI {
 public:
     static bool initialize_module();
