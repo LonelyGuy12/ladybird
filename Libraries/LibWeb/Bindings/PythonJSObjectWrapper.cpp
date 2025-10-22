@@ -7,9 +7,8 @@
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
 #include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibJS/Runtime/Object.h>
-#include <LibJS/Runtime/PropertyName.h>
+#include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Value.h>
-#include <LibJS/PropertyKey.h>
 
 namespace Web::Bindings {
 

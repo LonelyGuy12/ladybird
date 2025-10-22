@@ -4,13 +4,18 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/StringView.h>
+#include <AK/Utf16String.h>
+#include <LibGC/RootVector.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
+#include <cstring>
 
 namespace Web::Bindings {
 
@@ -63,7 +68,7 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
     if (PyUnicode_Check(py_obj)) {
         char const* str = PyUnicode_AsUTF8(py_obj);
         if (str) {
-            return JS::PrimitiveString::create(realm.vm(), String::from_utf8(str).release_value_but_fixme_should_propagate_errors());
+            return JS::PrimitiveString::create(realm.vm(), MUST(String::from_utf8(StringView { str, strlen(str) })));
         }
         return JS::js_undefined();
     }
@@ -80,7 +85,7 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
                 char const* key_str = PyUnicode_AsUTF8(key);
                 if (key_str) {
                     auto js_value = python_to_js(value, realm);
-                    js_obj->put_without_side_effects(key_str, js_value);
+                    MUST(js_obj->create_data_property(MUST(String::from_utf8(StringView { key_str, strlen(key_str) })), js_value));
                 }
             }
         }
@@ -90,14 +95,14 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
 
     if (PyList_Check(py_obj) || PyTuple_Check(py_obj)) {
         // Create a JS array from Python list/tuple
-        auto js_array = JS::Array::create(realm, 0);
+        auto js_array = MUST(JS::Array::create(realm, 0));
         Py_ssize_t size = PySequence_Size(py_obj);
 
         for (Py_ssize_t i = 0; i < size; ++i) {
             PyObject* item = PySequence_GetItem(py_obj, i);
             if (item) {
                 auto js_value = python_to_js(item, realm);
-                js_array->set_index(i, js_value);
+                MUST(js_array->set(JS::PropertyKey(static_cast<u32>(i)), js_value, JS::ShouldThrowExceptions::Yes));
                 Py_DECREF(item);
             }
         }
@@ -110,10 +115,8 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
     return JS::js_undefined();
 }
 
-PyObject* PythonJSBridge::js_to_python(JS::Value js_val)
+PyObject* PythonJSBridge::js_to_python(JS::Value js_val, JS::VM& vm)
 {
-    auto& vm = js_val.as_pointer()->shape().realm().vm();
-
     if (js_val.is_undefined() || js_val.is_null()) {
         Py_RETURN_NONE;
     }
@@ -123,46 +126,70 @@ PyObject* PythonJSBridge::js_to_python(JS::Value js_val)
     }
 
     if (js_val.is_number()) {
-        double num = js_val.as_double();
-        if (num == (i32)num) {
-            return PyLong_FromLong((i32)num);
-        }
-        return PyFloat_FromDouble(num);
+        return PyFloat_FromDouble(js_val.as_double());
     }
 
     if (js_val.is_string()) {
         auto str = js_val.as_string().string();
-        return PyUnicode_FromString(str.to_utf8().characters());
+        return PyUnicode_FromString(str.characters());
     }
 
     if (js_val.is_object()) {
         auto& obj = js_val.as_object();
 
-        // Check if it's an array
-        if (is<JS::Array>(obj)) {
-            auto& js_array = static_cast<JS::Array&>(obj);
-            PyObject* py_list = PyList_New(0);
+        // Handle arrays
+        if (obj.is_array()) {
+            auto& array = static_cast<JS::Array&>(obj);
+            Py_ssize_t length = static_cast<Py_ssize_t>(MUST(array.length()));
 
-            for (size_t i = 0; i < js_array.array_like_size(); ++i) {
-                auto element = js_array.get_index(i);
-                if (!element.is_exception()) {
-                    PyObject* py_elem = js_to_python(element.release_value());
-                    if (py_elem) {
-                        PyList_Append(py_list, py_elem);
-                        Py_DECREF(py_elem);
-                    }
+            PyObject* py_list = PyList_New(length);
+            if (!py_list) {
+                return nullptr;
+            }
+
+            for (Py_ssize_t i = 0; i < length; ++i) {
+                auto element = MUST(array.get(JS::PropertyKey(static_cast<u32>(i))));
+                PyObject* py_element = js_to_python(element, vm);
+                if (!py_element) {
+                    Py_DECREF(py_list);
+                    return nullptr;
                 }
+                PyList_SetItem(py_list, i, py_element);
             }
 
             return py_list;
         }
 
-        // For other objects, we'd create a more sophisticated proxy
-        // For now, return None as a placeholder
-        Py_RETURN_NONE;
+        // Handle regular objects
+        PyObject* py_dict = PyDict_New();
+        if (!py_dict) {
+            return nullptr;
+        }
+
+        // Get all enumerable properties
+        auto properties = MUST(obj.enumerable_own_property_names(JS::PropertyKind::Key));
+        for (auto& property : properties) {
+            auto key = property.as_string().utf8_string();
+            auto value = MUST(obj.get(property));
+            PyObject* py_key = PyUnicode_FromString(key.characters());
+            PyObject* py_value = js_to_python(value, vm);
+
+            if (!py_key || !py_value) {
+                Py_DECREF(py_key);
+                Py_DECREF(py_value);
+                Py_DECREF(py_dict);
+                return nullptr;
+            }
+
+            PyDict_SetItem(py_dict, py_key, py_value);
+            Py_DECREF(py_key);
+            Py_DECREF(py_value);
+        }
+
+        return py_dict;
     }
 
-    // For other types, return None as a default
+    // For other types, return None
     Py_RETURN_NONE;
 }
 
@@ -172,7 +199,7 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
 
     // Lookup function on JS global object by name
     auto& global_obj = realm.global_object();
-    auto property_key = JS::PropertyKey::from_string(vm, function_name);
+    auto property_key = JS::PropertyKey(Utf16String::from_utf8(function_name).release_value_but_fixme_should_propagate_errors());
     auto get_result = global_obj.get(property_key);
     if (get_result.is_error()) {
         Py_RETURN_NONE;
@@ -184,9 +211,9 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
 
     auto& js_function = js_value.as_function();
 
-    // Convert Python tuple args to JS::MarkedVector<JS::Value>
+    // Convert Python tuple args to JS arguments
     Py_ssize_t argc = args ? PyTuple_Size(args) : 0;
-    JS::MarkedVector<JS::Value> js_args(vm.heap());
+    auto js_args = GC::RootVector<JS::Value>(vm.heap());
     js_args.ensure_capacity(static_cast<size_t>(max<Py_ssize_t>(0, argc)));
     for (Py_ssize_t i = 0; i < argc; ++i) {
         PyObject* py_arg = PyTuple_GetItem(args, i); // Borrowed ref
@@ -194,11 +221,11 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
         js_args.unchecked_append(converted);
     }
 
-    auto call_result = JS::call(vm, js_function, JS::js_undefined(), js_args);
-    if (call_result.is_abrupt()) {
+    auto call_result = JS::call(vm, js_function, JS::js_undefined(), js_args.span());
+    if (call_result.is_error()) {
         Py_RETURN_NONE;
     }
-    return js_to_python(call_result.release_value());
+    return js_to_python(call_result.value(), vm);
 }
 
 JS::Value PythonJSBridge::call_python_function(PyObject* func, GC::RootVector<JS::Value>& js_args, JS::Realm& realm)
@@ -210,7 +237,7 @@ JS::Value PythonJSBridge::call_python_function(PyObject* func, GC::RootVector<JS
     }
 
     for (size_t i = 0; i < js_args.size(); ++i) {
-        PyObject* py_arg = js_to_python(js_args[i]);
+        PyObject* py_arg = js_to_python(js_args[i], realm.vm());
         if (!py_arg) {
             Py_DECREF(py_args);
             return JS::js_undefined();

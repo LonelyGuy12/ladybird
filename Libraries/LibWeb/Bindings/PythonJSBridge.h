@@ -23,7 +23,7 @@ public:
     static JS::Value python_to_js(PyObject* py_obj, JS::Realm& realm);
 
     // Convert JavaScript value to Python value
-    static PyObject* js_to_python(JS::Value js_val);
+    static PyObject* js_to_python(JS::Value js_val, JS::VM& vm);
 
     // Call a JavaScript function from Python
     static PyObject* call_js_function(String const& function_name, PyObject* args, JS::Realm& realm);

@@ -36,9 +36,9 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/PrincipalHostDefined.cpp
-    # Bindings/PythonDOMBindings.cpp
-    # Bindings/PythonJSBridge.cpp
-    # Bindings/PythonJSObjectWrapper.cpp
+    Bindings/PythonDOMBindings.cpp
+    Bindings/PythonJSBridge.cpp
+    Bindings/PythonJSObjectWrapper.cpp
     # Bindings/PythonObjectBridge.cpp
     # Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
