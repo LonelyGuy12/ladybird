@@ -1,4 +1,5 @@
-# Ladybird
+# Ladybird with Python Integration
+[![build](https://github.com/LonelyGuy12/ladybird/actions/workflows/build.yml/badge.svg)](https://github.com/LonelyGuy12/ladybird/actions/workflows/build.yml)
 
 [Ladybird](https://ladybird.org) is a truly independent web browser, using a novel engine based on web standards.
 
@@ -6,9 +7,33 @@
 > Ladybird is in a pre-alpha state, and only suitable for use by developers
 >
 
+## 🐍 Python Integration (Experimental)
+
+This fork adds **Python scripting support** to Ladybird, enabling web pages to run Python code alongside JavaScript.
+
+### Goals
+
+- **`<script type="python">`** - Execute Python in web pages with browser API access
+- **`requests`-compatible HTTP client** - Familiar Python HTTP library for web requests
+- **`aiofiles`-like local storage** - Asynchronous file I/O with browser security
+- **`socket.io` connections** - Real-time bidirectional communication
+- **Transformers model support** - Run ML models (remote inference, ONNX Runtime, or lightweight runtimes)
+
+### Security Model
+
+- Sandboxed execution environment
+- Same-origin policy enforcement
+- Restricted module imports (safe modules only)
+- No direct filesystem or raw socket access
+- Origin-scoped storage
+
+### Current Status
+
+Python integration is under active development. The core infrastructure is in place, with API bindings being updated for the latest Ladybird codebase.
+
 ## Features
 
-We aim to build a complete, usable browser for the modern web.
+We aim to build a complete, usable browser for the modern web, now with Python scripting capabilities.
 
 Ladybird uses a multi-process architecture with a main UI process, several WebContent renderer processes,
 an ImageDecoder process, and a RequestServer process.

@@ -48,11 +48,15 @@
 #include <LibWeb/WebIDL/ObservableArray.h>
 #include <LibWeb/XPath/XPath.h>
 
+namespace Web::Bindings {
+class PythonDOMWrapperCache;
+}
+
 namespace Web::DOM {
 
 enum class QuirksMode {
-    No,
-    Limited,
+	No,
+	Limited,
     Yes
 };
 
@@ -943,6 +947,8 @@ public:
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& registered_custom_properties();
+
+    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
 
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
 

@@ -26,6 +26,7 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
+#include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/Strings.h>
@@ -469,6 +470,71 @@ WebIDL::ExceptionOr<void> fetch_classic_worker_script(URL::URL const& url, Envir
     return {};
 }
 
+// https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-python-script
+WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element, URL::URL const& url, EnvironmentSettingsObject& settings_object, ScriptFetchOptions options, OnFetchScriptComplete on_complete)
+{
+    auto& realm = element->realm();
+    auto& vm = realm.vm();
+
+    // 1. Let request be the result of creating a potential-CORS request given url, "script", and CORS setting "no-cors".
+    auto request = create_potential_CORS_request(vm, url, Fetch::Infrastructure::Request::Destination::Script, CORSSettingAttribute::NoCORS);
+
+    // 2. Set request's client to settings object.
+    request->set_client(&settings_object);
+
+    // 3. Set request's initiator type to "script".
+    request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Script);
+
+    // 4. Set up the python script request given request and options.
+    set_up_classic_script_request(*request, options);
+
+    // 5. Fetch request with the following processResponseConsumeBody steps given response response and null,
+    //    or a byte sequence bodyBytes:
+    Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
+    fetch_algorithms_input.process_response_consume_body = [&settings_object, options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+        // 1. Set response to response's unsafe response.
+        response = response->unsafe_response();
+
+        // 2. If either of the following conditions are met:
+        // - bodyBytes is null or failure; or
+        // - response's status is not an ok status,
+        if (body_bytes.template has<Empty>() || body_bytes.template has<Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag>() || !Fetch::Infrastructure::is_ok_status(response->status())) {
+            // then run onComplete given null, and abort these steps.
+            on_complete->function()(nullptr);
+            return;
+        }
+
+        // 3. Let potentialMIMETypeForEncoding be the result of extracting a MIME type given response's header list.
+        auto potential_mime_type_for_encoding = response->header_list()->extract_mime_type();
+
+        // 4. Set character encoding to the result of legacy extracting an encoding given potentialMIMETypeForEncoding
+        //    and UTF-8 (fallback).
+        auto extracted_character_encoding = Fetch::Infrastructure::legacy_extract_an_encoding(potential_mime_type_for_encoding, "UTF-8"_string);
+
+        // 5. Let source text be the result of decoding bodyBytes to Unicode, using character encoding as the fallback
+        //    encoding.
+        auto fallback_decoder = TextCodec::decoder_for(extracted_character_encoding);
+        VERIFY(fallback_decoder.has_value());
+
+        auto source_text = TextCodec::convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(*fallback_decoder, body_bytes.template get<ByteBuffer>()).release_value_but_fixme_should_propagate_errors();
+
+        // 6. Let muted errors be true if response was CORS-cross-origin, and false otherwise.
+        auto muted_errors = response->is_cors_cross_origin() ? PythonScript::MutedErrors::Yes : PythonScript::MutedErrors::No;
+
+        // 7. Let script be the result of creating a python script given source text, settings object's realm, response's URL,
+        //    options, and muted errors.
+        // FIXME: Pass options.
+        auto response_url = response->url().value_or({});
+        auto script = PythonScript::create(response_url.to_byte_string(), source_text, settings_object.realm(), response_url, muted_errors);
+
+        // 8. Run onComplete given script.
+        on_complete->function()(script);
+    };
+
+    TRY(Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+    return {};
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-classic-worker-imported-script
 WebIDL::ExceptionOr<GC::Ref<ClassicScript>> fetch_a_classic_worker_imported_script(URL::URL const& url, HTML::EnvironmentSettingsObject& settings_object, PerformTheFetchHook perform_fetch)
 {
@@ -875,3 +941,4 @@ void fetch_descendants_of_and_link_a_module_script(JS::Realm& realm,
 }
 
 }
+

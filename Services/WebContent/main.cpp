@@ -20,6 +20,7 @@
 #include <LibRequests/RequestClient.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/HTML/Scripting/PythonEngine.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Internals/Internals.h>
 #include <LibWeb/Loader/ContentFilter.h>
@@ -197,6 +198,12 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         Web::Bindings::main_thread_vm().heap().set_should_collect_on_every_allocation(true);
 
     TRY(initialize_resource_loader(Web::Bindings::main_thread_vm().heap(), request_server_socket));
+
+    // Set up cleanup handler for Python engine
+    auto cleanup_handler = []() {
+        Web::Bindings::shutdown_python_engine();
+    };
+    atexit(cleanup_handler);
 
     if (log_all_js_exceptions) {
         JS::set_log_all_js_exceptions(true);

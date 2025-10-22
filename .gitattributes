@@ -1,8 +1,9 @@
 # Set the default behavior to always use LF file endings
 * text=auto eol=lf
-
 # Denote all files that are truly binary and should not be modified.
 *.bmp binary
 *.gif binary
 *.jpg binary
 *.png binary
+downloaded-artifacts/**/*.so filter=lfs diff=lfs merge=lfs -text
+downloaded-artifacts/**/*.a filter=lfs diff=lfs merge=lfs -text

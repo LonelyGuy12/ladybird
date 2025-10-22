@@ -36,6 +36,11 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/PrincipalHostDefined.cpp
+    Bindings/PythonDOMBindings.cpp
+    Bindings/PythonJSBridge.cpp
+    Bindings/PythonJSObjectWrapper.cpp
+    Bindings/PythonObjectBridge.cpp
+    Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
     Clipboard/Clipboard.cpp
     Clipboard/ClipboardEvent.cpp
@@ -617,6 +622,9 @@ set(SOURCES
     HTML/Scripting/ImportMapParseResult.cpp
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
+    HTML/Scripting/PythonEngine.cpp
+    HTML/Scripting/PythonScript.cpp
+    HTML/Scripting/PythonSecurityModel.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/Scripting/SimilarOriginWindowAgent.cpp
@@ -1085,6 +1093,24 @@ set(SOURCES
     XPath/XPathExpression.cpp
     XPath/XPathNSResolver.cpp
     XPath/XPathResult.cpp
+    HTML/Scripting/Agent.h
+    HTML/Scripting/ClassicScript.h
+    HTML/Scripting/Environments.h
+    HTML/Scripting/EnvironmentSettingsSnapshot.h
+    HTML/Scripting/ExceptionReporter.h
+    HTML/Scripting/Fetching.h
+    HTML/Scripting/ImportMap.h
+    HTML/Scripting/ImportMapParseResult.h
+    HTML/Scripting/ModuleMap.h
+    HTML/Scripting/ModuleScript.h
+    HTML/Scripting/Script.h
+    HTML/Scripting/SerializedEnvironmentSettingsObject.h
+    HTML/Scripting/SimilarOriginWindowAgent.h
+    HTML/Scripting/SyntheticRealmSettings.h
+    HTML/Scripting/TemporaryExecutionContext.h
+    HTML/Scripting/WindowEnvironmentSettingsObject.h
+    HTML/Scripting/WorkerAgent.h
+    HTML/Scripting/WorkerEnvironmentSettingsObject.h
 )
 
 compile_ipc(Worker/WebWorkerClient.ipc Worker/WebWorkerClientEndpoint.h)
@@ -1129,14 +1155,18 @@ set(GENERATED_SOURCES
     HTML/Parser/NamedCharacterReferences.cpp
 )
 
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
+
+# Enable Python support
+# target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON)
 
 find_package(LibXml2 REQUIRED)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2)
+target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2 Python3::Python)
 
-# FIXME: https://github.com/microsoft/vcpkg/issues/42324
-target_include_directories(LibWeb PRIVATE ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include)
+target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
 
 generate_js_bindings(LibWeb)
 

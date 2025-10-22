@@ -1,0 +1,80 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ladybird-build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
+      VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          verbose: 1
+          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            Build/vcpkg
+            Build/release/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf autoconf-archive automake ccache cmake curl \
+            libgl1-mesa-dev libdrm-dev libtool nasm ninja-build pkg-config \
+            mesa-common-dev python3-venv python3-dev unzip zip \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-wayland \
+            qt6-multimedia-dev libpulse-dev
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+
+      - name: Configure timezone (workaround for some toolchain date issues)
+        run: |
+          sudo ln -snf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+          echo "Etc/UTC" | sudo tee /etc/timezone
+
+      - name: Build Ladybird
+        env:
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
+        run: ./Meta/ladybird.py build
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            Build/release/**/*.log
+            Build/release/**/*.txt
+
+      - name: Upload binaries (optional)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-build
+          path: |
+            Build/release/bin/**
+            Build/release/lib/**
+            Build/release/*.log

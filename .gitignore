@@ -29,6 +29,7 @@ output/
 .helix/
 .flatpak-builder/
 
+
 # Environments
 .venv/
 .venv*/
@@ -61,3 +62,4 @@ Meta/CMake/vcpkg/user-variables.cmake
 .DS_Store
 
 __pycache__
+downloaded-artifacts/

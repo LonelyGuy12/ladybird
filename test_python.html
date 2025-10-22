@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Python Test</title>
+</head>
+<body>
+    <h1>Python Script Test</h1>
+    <div id="python-output"></div>
+    
+    <script type="python">
+        # Simple Python script that manipulates the DOM using Python-idiomatic APIs
+        output = document.find("#python-output")
+        if output is not None:
+            output.html = "<p>Hello from Python!</p>"
+
+        # Test accessing window object
+        print("Window title:", window.document)
+
+        # Test creating elements
+        new_div = document.create_element("div")
+        new_div.html = "<p>Dynamically created by Python</p>"
+        # Append via selecting body
+        body = document.find("body")
+        if body is not None:
+            # PythonElement append_child is not implemented; set via HTML concatenation for now
+            body.html = body.html + new_div.html
+    </script>
+</body>
+</html>
