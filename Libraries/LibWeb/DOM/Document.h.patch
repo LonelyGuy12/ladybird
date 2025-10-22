@@ -1,0 +1,32 @@
+diff --git a/Libraries/LibWeb/DOM/Document.h b/Libraries/LibWeb/DOM/Document.h
+index 12345678..87654321 100644
+--- a/Libraries/LibWeb/DOM/Document.h
++++ b/Libraries/LibWeb/DOM/Document.h
+@@ -29,6 +29,7 @@
+ #include <LibWeb/CSS/StyleSheetList.h>
+ #include <LibWeb/DOM/NonElementParentNode.h>
+ #include <LibWeb/DOM/ParentNode.h>
++#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+ 
+ namespace Web::DOM {
+ 
+@@ -389,6 +390,9 @@ public:
+     // Hook for animations
+     void did_set_attribute(FlyString const& name, String const& value);
+ 
++    Bindings::PythonDOMWrapperCache* wrapper_cache() const { return m_python_wrapper_cache.ptr(); }
++    void set_wrapper_cache(NonnullOwnPtr<Bindings::PythonDOMWrapperCache> cache) { m_python_wrapper_cache = move(cache); }
++
+ private:
+     explicit Document(const URL::URL& = {});
+     virtual ~Document() override;
+@@ -501,6 +505,9 @@ private:
+     Bindings::ElementMouseWheelEventListeners m_element_mousewheel_event_listeners;
+     EventHandler<> on_end_of_parse;
+     Vector<WeakPtr<ShadowRoot>> m_shadow_roots;
++
++    // Python integration
++    OwnPtr<Bindings::PythonDOMWrapperCache> m_python_wrapper_cache;
+ };
+ 
+ }

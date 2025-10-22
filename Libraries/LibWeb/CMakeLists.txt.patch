@@ -1,0 +1,54 @@
+diff --git a/Libraries/LibWeb/CMakeLists.txt b/Libraries/LibWeb/CMakeLists.txt
+index 12345678..87654321 100644
+--- a/Libraries/LibWeb/CMakeLists.txt
++++ b/Libraries/LibWeb/CMakeLists.txt
+@@ -10,6 +10,14 @@
+     set(PYTHON_FOUND FALSE)
+ endif()
+ 
++# Improved Python detection
++if(ENABLE_PYTHON)
++    find_package(Python3 COMPONENTS Development)
++    if(Python3_FOUND)
++        set(PYTHON_FOUND TRUE)
++    endif()
++endif()
++
+ serenity_component(
+     LibWeb
+     TARGETS LibWeb
+@@ -370,11 +378,23 @@ if(PYTHON_FOUND)
+         Bindings/PythonJSBridge.cpp
+         Bindings/PythonJSObjectWrapper.cpp
+         Bindings/PythonDOMBindings.cpp
++        HTML/Scripting/IndependentPythonEngine.cpp
++        HTML/Scripting/PythonError.cpp
++        HTML/Scripting/PythonSecurityModel.cpp
++        HTML/Scripting/PythonStdLib.cpp
++        HTML/Scripting/PythonPerformanceMetrics.cpp
+     )
+ endif()
+ 
+ target_include_directories(LibWeb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ 
++if(PYTHON_FOUND)
++    target_include_directories(LibWeb PUBLIC ${Python3_INCLUDE_DIRS})
++    target_link_libraries(LibWeb PRIVATE ${Python3_LIBRARIES})
++    target_compile_definitions(LibWeb PRIVATE -DENABLE_PYTHON_SCRIPTING=1)
++    message(STATUS "Building Ladybird with Python integration using Python ${Python3_VERSION}")
++endif()
++
+ if(ENABLE_WASM)
+     target_compile_definitions(LibWeb PUBLIC -DENABLE_WASM=1)
+ endif()
+@@ -407,3 +423,10 @@ foreach(imported_target ${imported_targets})
+             "-fno-exceptions -fno-rtti")
+     endif()
+ endforeach()
++
++# Python integration test
++if(PYTHON_FOUND)
++    add_executable(PythonIntegrationTest Tests/Python/PythonIntegrationTest.cpp)
++    target_link_libraries(PythonIntegrationTest LibWeb LibTest)
++    add_test(NAME PythonIntegrationTest COMMAND PythonIntegrationTest)
++endif()

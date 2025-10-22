@@ -1,0 +1,43 @@
+/*
+ * Copyright (c) 2025, Ladybird Browser Project
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <Python.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/DOM/Forward.h>
+#include <LibWeb/HTML/Forward.h>
+
+namespace Web::Bindings {
+
+// Python wrapper for DOM Document with Python-friendly API
+class PythonDocument {
+public:
+    static bool init_document_type();
+    static PyObject* create_from_cpp_document(DOM::Document& document);
+    static DOM::Document* get_cpp_document(PyObject* obj);
+};
+
+// Python wrapper for DOM Elements with Python-friendly API
+class PythonElement {
+public:
+    static bool init_element_type();
+    static PyObject* create_from_cpp_element(DOM::Element& element);
+    static DOM::Element* get_cpp_element(PyObject* obj);
+};
+
+// Python wrapper for Window object
+class PythonWindow {
+public:
+    static bool init_window_type();
+    static PyObject* create_from_cpp_window(HTML::Window& window);
+    static HTML::Window* get_cpp_window(PyObject* obj);
+};
+
+// Initialize all DOM bindings
+bool initialize_python_dom_bindings();
+
+} // namespace Web::Bindings
