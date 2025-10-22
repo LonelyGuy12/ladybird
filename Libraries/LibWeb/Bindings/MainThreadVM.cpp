@@ -100,10 +100,10 @@ void initialize_main_thread_vm(AgentType type)
     VERIFY(!s_main_thread_vm);
 
     // Initialize Python engine before creating the JS VM
-    HTML::PythonEngine::initialize();
+    // HTML::PythonEngine::initialize();
 
     // Initialize Python DOM API bindings
-    Web::Bindings::PythonDOMAPI::initialize_module();
+    // Web::Bindings::PythonDOMAPI::initialize_module();
 
     s_main_thread_vm = JS::VM::create();
     s_main_thread_vm->set_agent(create_agent(s_main_thread_vm->heap(), type));
@@ -718,7 +718,7 @@ JS::VM& main_thread_vm()
 // Function to properly shut down the Python engine when the application exits
 WEB_API void shutdown_python_engine()
 {
-    HTML::PythonEngine::shutdown();
+    // HTML::PythonEngine::shutdown();
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-observer-compound-microtask

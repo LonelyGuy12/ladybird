@@ -519,16 +519,16 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
         auto source_text = TextCodec::convert_input_to_utf8_using_given_decoder_unless_there_is_a_byte_order_mark(*fallback_decoder, body_bytes.template get<ByteBuffer>()).release_value_but_fixme_should_propagate_errors();
 
         // 6. Let muted errors be true if response was CORS-cross-origin, and false otherwise.
-        auto muted_errors = response->is_cors_cross_origin() ? PythonScript::MutedErrors::Yes : PythonScript::MutedErrors::No;
+        // auto muted_errors = response->is_cors_cross_origin() ? PythonScript::MutedErrors::Yes : PythonScript::MutedErrors::No;
 
         // 7. Let script be the result of creating a python script given source text, settings object's realm, response's URL,
         //    options, and muted errors.
         // FIXME: Pass options.
-        auto response_url = response->url().value_or({});
-        auto script = PythonScript::create(response_url.to_byte_string(), source_text, settings_object.realm(), response_url, muted_errors);
+        // auto response_url = response->url().value_or({});
+        // auto script = PythonScript::create(response_url.to_byte_string(), source_text, settings_object.realm(), response_url, muted_errors);
 
         // 8. Run onComplete given script.
-        on_complete->function()(script);
+        on_complete->function()(nullptr);
     };
 
     TRY(Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));

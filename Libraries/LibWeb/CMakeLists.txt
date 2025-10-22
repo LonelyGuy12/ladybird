@@ -36,11 +36,11 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/PrincipalHostDefined.cpp
-    Bindings/PythonDOMBindings.cpp
-    Bindings/PythonJSBridge.cpp
-    Bindings/PythonJSObjectWrapper.cpp
-    Bindings/PythonObjectBridge.cpp
-    Bindings/PythonWebModule.cpp
+    # Bindings/PythonDOMBindings.cpp
+    # Bindings/PythonJSBridge.cpp
+    # Bindings/PythonJSObjectWrapper.cpp
+    # Bindings/PythonObjectBridge.cpp
+    # Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
     Clipboard/Clipboard.cpp
     Clipboard/ClipboardEvent.cpp
@@ -622,9 +622,9 @@ set(SOURCES
     HTML/Scripting/ImportMapParseResult.cpp
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
-    HTML/Scripting/PythonEngine.cpp
-    HTML/Scripting/PythonScript.cpp
-    HTML/Scripting/PythonSecurityModel.cpp
+    # HTML/Scripting/PythonEngine.cpp
+    # HTML/Scripting/PythonScript.cpp
+    # HTML/Scripting/PythonSecurityModel.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/Scripting/SimilarOriginWindowAgent.cpp

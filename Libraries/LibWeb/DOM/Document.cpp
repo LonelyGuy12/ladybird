@@ -28,7 +28,7 @@
 #include <LibUnicode/Segmenter.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/AnimationPlaybackEvent.h>
-#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+#include <LibWeb/Bindings/HostDefined.h>
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Bindings/DocumentPrototype.h>
