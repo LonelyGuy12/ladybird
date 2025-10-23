@@ -63,4 +63,3 @@ Meta/CMake/vcpkg/user-variables.cmake
 
 __pycache__
 downloaded-artifacts/
-ladybird-build/
