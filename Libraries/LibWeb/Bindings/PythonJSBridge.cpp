@@ -6,14 +6,16 @@
 
 #include <AK/StringView.h>
 #include <AK/Utf16String.h>
-#include <LibGC/RootVector.h>
+#include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/ExecutionContext.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/Object.h>
-#include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/PropertyKey.h>
+#include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
-#include <LibWeb/Bindings/PythonJSBridge.h>
+#include <AK/StringView.h>
+#include <AK/Utf16String.h>
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
 #include <cstring>
 
@@ -176,7 +178,12 @@ PyObject* PythonJSBridge::js_to_python(JS::Value js_val, JS::VM& vm)
             if (!property_value.is_string())
                 continue;
             auto key_str = property_value.as_string().utf8_string();
-            auto property_key = TRY_OR_THROW_OOM(vm, JS::PropertyKey::from_value(vm, property_value));
+            auto property_key_result = JS::PropertyKey::from_value(vm, property_value);
+            if (property_key_result.is_error()) {
+                Py_DECREF(py_dict);
+                return nullptr;
+            }
+            auto property_key = property_key_result.release_value();
             auto value = MUST(obj.get(property_key));
             auto key_byte_str = key_str.to_byte_string();
             PyObject* py_key = PyUnicode_FromString(key_byte_str.characters());
@@ -231,7 +238,10 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
         js_args.unchecked_append(converted);
     }
 
-    auto call_result = JS::call(vm, js_function, JS::js_undefined(), js_args.span());
+    // Call the JS function using internal_call
+    auto execution_context = JS::ExecutionContext::create();
+    execution_context->arguments = js_args.span();
+    auto call_result = js_function.internal_call(*execution_context, JS::js_undefined());
     if (call_result.is_error()) {
         Py_RETURN_NONE;
     }

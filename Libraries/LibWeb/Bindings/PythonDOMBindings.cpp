@@ -81,7 +81,7 @@ static PyObject* python_document_select(PythonDocumentObject* self, PyObject* ar
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
         if (node && is<Web::DOM::Element>(*node)) {
-            auto& element = static_cast<Web::DOM::Element&>(*node);
+            auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
                 PyList_Append(result, element_wrapper);
@@ -106,14 +106,14 @@ static PyObject* python_document_find(PythonDocumentObject* self, PyObject* args
     }
 
     // Use the document's querySelector method (converted to Python API)
-    auto selector_view = StringView(selector);
-    auto element = self->document->query_selector(selector_view);
-    if (element.is_error()) {
+    auto selector_view = StringView { selector, strlen(selector) };
+    auto element_result = self->document->query_selector(selector_view);
+    if (element_result.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid selector");
         return nullptr;
     }
 
-    auto found_element = element.release_value();
+    auto found_element = element_result.release_value();
     if (found_element) {
         return PythonElement::create_from_cpp_element(*found_element);
     }
@@ -135,7 +135,7 @@ static PyObject* python_document_create_element(PythonDocumentObject* self, PyOb
 
     auto tag_name_view = StringView { tag_name, strlen(tag_name) };
     auto tag_name_str = MUST(String::from_utf8(tag_name_view));
-    auto element = self->document->create_element(tag_name_str, {});
+    auto element = self->document->create_element(tag_name_str, Web::DOM::ElementCreationOptions{});
     if (element.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid element tag name");
         return nullptr;
@@ -180,6 +180,28 @@ static PyTypeObject document_type = {
     0,                           /* tp_iter */
     0,                           /* tp_iternext */
     python_document_methods,     /* tp_methods */
+    0,                           /* tp_members */
+    0,                           /* tp_getset */
+    0,                           /* tp_base */
+    0,                           /* tp_dict */
+    0,                           /* tp_descr_get */
+    0,                           /* tp_descr_set */
+    0,                           /* tp_dictoffset */
+    0,                           /* tp_init */
+    0,                           /* tp_alloc */
+    0,                           /* tp_new */
+    0,                           /* tp_free */
+    0,                           /* tp_is_gc */
+    0,                           /* tp_bases */
+    0,                           /* tp_mro */
+    0,                           /* tp_cache */
+    0,                           /* tp_subclasses */
+    0,                           /* tp_weaklist */
+    0,                           /* tp_del */
+    0,                           /* tp_version_tag */
+    0,                           /* tp_finalize */
+    0,                           /* tp_vectorcall */
+    0,                           /* tp_watched */
 };
 
 void PythonDocument::setup_type()
@@ -254,7 +276,7 @@ static PyObject* python_element_select(PythonElementObject* self, PyObject* args
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
         if (node && is<Web::DOM::Element>(*node)) {
-            auto& element = static_cast<Web::DOM::Element&>(*node);
+            auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
                 PyList_Append(result, element_wrapper);
@@ -344,7 +366,7 @@ static PyObject* python_element_set_attribute(PythonElementObject* self, PyObjec
     Py_RETURN_NONE;
 }
 
-static PyObject* python_element_get_text_content(PythonElementObject* self, void* closure)
+static PyObject* python_element_get_text_content(PythonElementObject* self, void*)
 {
     if (!self->element) {
         PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
@@ -361,7 +383,7 @@ static PyObject* python_element_get_text_content(PythonElementObject* self, void
     return PyUnicode_FromString("");
 }
 
-static int python_element_set_text_content(PythonElementObject* self, PyObject* value, void* closure)
+static int python_element_set_text_content(PythonElementObject* self, PyObject* value, void*)
 {
     if (!self->element) {
         PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
@@ -384,7 +406,7 @@ static int python_element_set_text_content(PythonElementObject* self, PyObject* 
     return 0;
 }
 
-static PyObject* python_element_get_inner_html(PythonElementObject* self, void* closure)
+static PyObject* python_element_get_inner_html(PythonElementObject* self, void*)
 {
     if (!self->element) {
         PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
@@ -399,7 +421,7 @@ static PyObject* python_element_get_inner_html(PythonElementObject* self, void* 
     return PyUnicode_FromString(html_byte_str.characters());
 }
 
-static int python_element_set_inner_html(PythonElementObject* self, PyObject* value, void* closure)
+static int python_element_set_inner_html(PythonElementObject* self, PyObject* value, void*)
 {
     if (!self->element) {
         PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
@@ -470,6 +492,26 @@ static PyTypeObject element_type = {
     python_element_methods,      /* tp_methods */
     0,                           /* tp_members */
     python_element_getset,       /* tp_getset */
+    0,                           /* tp_base */
+    0,                           /* tp_dict */
+    0,                           /* tp_descr_get */
+    0,                           /* tp_descr_set */
+    0,                           /* tp_dictoffset */
+    0,                           /* tp_init */
+    0,                           /* tp_alloc */
+    0,                           /* tp_new */
+    0,                           /* tp_free */
+    0,                           /* tp_is_gc */
+    0,                           /* tp_bases */
+    0,                           /* tp_mro */
+    0,                           /* tp_cache */
+    0,                           /* tp_subclasses */
+    0,                           /* tp_weaklist */
+    0,                           /* tp_del */
+    0,                           /* tp_version_tag */
+    0,                           /* tp_finalize */
+    0,                           /* tp_vectorcall */
+    0,                           /* tp_watched */
 };
 
 void PythonElement::setup_type()
@@ -516,7 +558,7 @@ static void python_window_dealloc(PythonWindowObject* self)
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* python_window_get_document(PythonWindowObject* self, void* closure)
+static PyObject* python_window_get_document(PythonWindowObject* self, void*)
 {
     if (!self->window) {
         PyErr_SetString(PyExc_RuntimeError, "Window object is invalid");
@@ -531,7 +573,7 @@ static PyObject* python_window_get_document(PythonWindowObject* self, void* clos
     return PythonDocument::create_from_cpp_document(const_cast<Web::DOM::Document&>(*document_ref));
 }
 
-static PyObject* python_window_get_location(PythonWindowObject* self, void* closure)
+static PyObject* python_window_get_location(PythonWindowObject* self, void*)
 {
     if (!self->window) {
         PyErr_SetString(PyExc_RuntimeError, "Window object is invalid");
@@ -589,6 +631,26 @@ static PyTypeObject window_type = {
     0,                           /* tp_methods */
     0,                           /* tp_members */
     python_window_getset,        /* tp_getset */
+    0,                           /* tp_base */
+    0,                           /* tp_dict */
+    0,                           /* tp_descr_get */
+    0,                           /* tp_descr_set */
+    0,                           /* tp_dictoffset */
+    0,                           /* tp_init */
+    0,                           /* tp_alloc */
+    0,                           /* tp_new */
+    0,                           /* tp_free */
+    0,                           /* tp_is_gc */
+    0,                           /* tp_bases */
+    0,                           /* tp_mro */
+    0,                           /* tp_cache */
+    0,                           /* tp_subclasses */
+    0,                           /* tp_weaklist */
+    0,                           /* tp_del */
+    0,                           /* tp_version_tag */
+    0,                           /* tp_finalize */
+    0,                           /* tp_vectorcall */
+    0,                           /* tp_watched */
 };
 
 void PythonWindow::setup_type()
@@ -609,16 +671,18 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
     auto document_ref = window.document();
     if (!document_ref)
         return nullptr;
-        
-    if (!document_ref->m_python_dom_wrapper_cache)
-        document_ref->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
-    if (auto* wrapper = document_ref->m_python_dom_wrapper_cache->get_wrapper(&window))
+    
+    // Cast away const to access mutable wrapper cache    
+    auto* document_mut = const_cast<Web::DOM::Document*>(document_ref.ptr());
+    if (!document_mut->m_python_dom_wrapper_cache)
+        document_mut->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
+    if (auto* wrapper = document_mut->m_python_dom_wrapper_cache->get_wrapper(&window))
         return wrapper;
 
     PythonWindowObject* obj = PyObject_New(PythonWindowObject, &s_type);
     if (obj) {
         obj->window = &window;
-        document_ref->m_python_dom_wrapper_cache->set_wrapper(&window, (PyObject*)obj);
+        document_mut->m_python_dom_wrapper_cache->set_wrapper(&window, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
