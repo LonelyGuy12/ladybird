@@ -6,32 +6,32 @@
 
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
 #include <LibWeb/Bindings/PythonJSBridge.h>
+#include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/PropertyKey.h>
+#include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
+#include <AK/Utf16String.h>
 
 namespace Web::Bindings {
 
-PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type = {0};
+PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+};
 
 void PythonJSObjectWrapper::setup_js_object_wrapper_type()
 {
     if (s_js_object_wrapper_type.tp_name) return; // Already set up
     
-    static PyTypeObject type = {
-        PyVarObject_HEAD_INIT(NULL, 0)
-        .tp_name = "web.JSObject",
-        .tp_doc = "JavaScript object wrapper for Python",
-        .tp_basicsize = sizeof(JSObjectWrapper),
-        .tp_itemsize = 0,
-        .tp_flags = Py_TPFLAGS_DEFAULT,
-        .tp_methods = NULL,
-        .tp_getattro = (getattrofunc)wrapper_getattr,
-        .tp_setattro = (setattrofunc)wrapper_setattr,
-        .tp_call = (ternaryfunc)wrapper_call,
-    };
-    
-    memcpy(&s_js_object_wrapper_type, &type, sizeof(PyTypeObject));
+    s_js_object_wrapper_type.tp_name = "web.JSObject";
+    s_js_object_wrapper_type.tp_doc = "JavaScript object wrapper for Python";
+    s_js_object_wrapper_type.tp_basicsize = sizeof(JSObjectWrapper);
+    s_js_object_wrapper_type.tp_itemsize = 0;
+    s_js_object_wrapper_type.tp_flags = Py_TPFLAGS_DEFAULT;
+    s_js_object_wrapper_type.tp_methods = NULL;
+    s_js_object_wrapper_type.tp_getattro = (getattrofunc)wrapper_getattr;
+    s_js_object_wrapper_type.tp_setattro = (setattrofunc)wrapper_setattr;
+    s_js_object_wrapper_type.tp_call = (ternaryfunc)wrapper_call;
     
     if (PyType_Ready(&s_js_object_wrapper_type) < 0) {
         // Handle error appropriately
@@ -67,7 +67,8 @@ PyObject* PythonJSObjectWrapper::wrapper_getattr(JSObjectWrapper* self, PyObject
     }
     
     JS::Object* js_obj = static_cast<JS::Object*>(self->js_object_ptr);
-    auto& vm = js_obj->shape().realm().vm();
+    auto& realm = *js_obj->realm();
+    auto& vm = realm.vm();
     
     // Convert Python string to JS PropertyKey
     if (PyUnicode_Check(attr_name)) {
@@ -76,7 +77,9 @@ PyObject* PythonJSObjectWrapper::wrapper_getattr(JSObjectWrapper* self, PyObject
             return nullptr;
         }
         
-        auto js_key = JS::PropertyKey::symbol_or_string(vm, attr_str);
+        auto attr_view = StringView { attr_str, strlen(attr_str) };
+        auto attr_utf16 = Utf16String::from_utf8(attr_view);
+        auto js_key = JS::PropertyKey(attr_utf16);
         auto js_value = js_obj->get(js_key);
         
         if (js_value.is_error()) {
@@ -84,7 +87,7 @@ PyObject* PythonJSObjectWrapper::wrapper_getattr(JSObjectWrapper* self, PyObject
             return nullptr;
         }
         
-        return PythonJSBridge::js_to_python(js_value.release_value());
+        return PythonJSBridge::js_to_python(js_value.release_value(), vm);
     }
     
     PyErr_SetString(PyExc_TypeError, "Attribute name must be a string");
@@ -99,7 +102,8 @@ int PythonJSObjectWrapper::wrapper_setattr(JSObjectWrapper* self, PyObject* attr
     }
     
     JS::Object* js_obj = static_cast<JS::Object*>(self->js_object_ptr);
-    auto& vm = js_obj->shape().realm().vm();
+    auto& realm = *js_obj->realm();
+    auto& vm = realm.vm();
     
     // Convert Python string to JS PropertyKey and Python value to JS value
     if (PyUnicode_Check(attr_name)) {
@@ -108,10 +112,12 @@ int PythonJSObjectWrapper::wrapper_setattr(JSObjectWrapper* self, PyObject* attr
             return -1;
         }
         
-        auto js_key = JS::PropertyKey::symbol_or_string(vm, attr_str);
-        auto js_value = PythonJSBridge::python_to_js(value, js_obj->shape().realm());
+        auto attr_view = StringView { attr_str, strlen(attr_str) };
+        auto attr_utf16 = Utf16String::from_utf8(attr_view);
+        auto js_key = JS::PropertyKey(attr_utf16);
+        auto js_value = PythonJSBridge::python_to_js(value, realm);
         
-        auto result = js_obj->put(js_key, js_value);
+        auto result = js_obj->set(js_key, js_value, JS::Object::ShouldThrowExceptions::Yes);
         if (result.is_error()) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to set property");
             return -1;
@@ -132,19 +138,19 @@ PyObject* PythonJSObjectWrapper::wrapper_call(JSObjectWrapper* self, PyObject* a
     }
     
     JS::Object* js_obj = static_cast<JS::Object*>(self->js_object_ptr);
-    auto& realm = js_obj->shape().realm();
+    auto& realm = *js_obj->realm();
     auto& vm = realm.vm();
     
-    if (!js_obj->is_function()) {
+    if (!is<JS::FunctionObject>(*js_obj)) {
         PyErr_SetString(PyExc_TypeError, "JavaScript object is not callable");
         return nullptr;
     }
     
-    JS::FunctionObject& js_func = static_cast<JS::FunctionObject&>(*js_obj);
+    auto& js_func = static_cast<JS::FunctionObject&>(*js_obj);
     
     // Convert Python arguments to JS values
     Py_ssize_t arg_count = PyTuple_Size(args);
-    JS::MarkedVector<JS::Value> js_args(vm.heap());
+    auto js_args = GC::RootVector<JS::Value>(vm.heap());
     js_args.ensure_capacity(arg_count);
     
     for (Py_ssize_t i = 0; i < arg_count; ++i) {
@@ -156,7 +162,7 @@ PyObject* PythonJSObjectWrapper::wrapper_call(JSObjectWrapper* self, PyObject* a
     }
     
     // Call the JS function
-    auto result = JS::call(vm, js_func, JS::js_undefined(), move(js_args));
+    auto result = JS::call(vm, js_func, JS::js_undefined(), js_args.span());
     
     if (result.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Error calling JavaScript function");
@@ -164,7 +170,7 @@ PyObject* PythonJSObjectWrapper::wrapper_call(JSObjectWrapper* self, PyObject* a
     }
     
     // Convert result back to Python
-    return PythonJSBridge::js_to_python(result.release_value());
+    return PythonJSBridge::js_to_python(result.release_value(), vm);
 }
 
 }

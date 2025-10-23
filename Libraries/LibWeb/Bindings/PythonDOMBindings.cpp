@@ -15,6 +15,7 @@
 #include <LibWeb/HTML/Location.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibGC/Heap.h>
+#include <AK/OwnPtr.h>
 
 namespace Web::Bindings {
 
@@ -64,7 +65,7 @@ static PyObject* python_document_select(PythonDocumentObject* self, PyObject* ar
     }
 
     // Use the document's querySelectorAll method (converted to Python API)
-    auto selector_view = StringView(selector);
+    auto selector_view = StringView { selector, strlen(selector) };
     auto elements = self->document->query_selector_all(selector_view);
     if (elements.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid selector");
@@ -132,7 +133,8 @@ static PyObject* python_document_create_element(PythonDocumentObject* self, PyOb
         return nullptr;
     }
 
-    auto tag_name_str = String(tag_name);
+    auto tag_name_view = StringView { tag_name, strlen(tag_name) };
+    auto tag_name_str = MUST(String::from_utf8(tag_name_view));
     auto element = self->document->create_element(tag_name_str, {});
     if (element.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid element tag name");
@@ -195,17 +197,15 @@ PyObject* PythonDocument::create_from_cpp_document(Web::DOM::Document& document)
 {
     setup_type();
 
-    auto* cache = document.wrapper_cache();
-    if (!cache)
-        document.set_wrapper_cache(make<PythonDOMWrapperCache>());
-
-    if (auto* wrapper = document.wrapper_cache()->get_wrapper(&document))
+    if (!document.m_python_dom_wrapper_cache)
+        document.m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
+    if (auto* wrapper = document.m_python_dom_wrapper_cache->get_wrapper(&document))
         return wrapper;
 
     PythonDocumentObject* obj = PyObject_New(PythonDocumentObject, &s_type);
     if (obj) {
         obj->document = &document;
-        document.wrapper_cache()->set_wrapper(&document, (PyObject*)obj);
+        document.m_python_dom_wrapper_cache->set_wrapper(&document, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
@@ -238,7 +238,7 @@ static PyObject* python_element_select(PythonElementObject* self, PyObject* args
     }
 
     // Use the element's querySelectorAll method on itself
-    auto selector_view = StringView(selector);
+    auto selector_view = StringView { selector, strlen(selector) };
     auto elements = self->element->query_selector_all(selector_view);
     if (elements.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid selector");
@@ -278,7 +278,7 @@ static PyObject* python_element_find(PythonElementObject* self, PyObject* args)
         return nullptr;
     }
 
-    auto selector_view = StringView(selector);
+    auto selector_view = StringView { selector, strlen(selector) };
     auto element = self->element->query_selector(selector_view);
     if (element.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Invalid selector");
@@ -305,10 +305,13 @@ static PyObject* python_element_get_attribute(PythonElementObject* self, PyObjec
         return nullptr;
     }
 
-    auto name_fly = FlyString(name);
-    auto value = self->element->get_attribute(name_fly);
-    if (value.has_value()) {
-        return PyUnicode_FromString(value->characters());
+    auto name_view = StringView { name, strlen(name) };
+    auto name_str = MUST(String::from_utf8(name_view));
+    auto name_fly = FlyString(name_str);
+    auto attr = self->element->get_attribute(name_fly);
+    if (attr.has_value()) {
+        auto attr_byte_str = attr->to_byte_string();
+        return PyUnicode_FromString(attr_byte_str.characters());
     }
 
     Py_RETURN_NONE;
@@ -327,8 +330,11 @@ static PyObject* python_element_set_attribute(PythonElementObject* self, PyObjec
         return nullptr;
     }
 
-    auto name_fly = FlyString(name);
-    auto value_str = String(value);
+    auto name_view = StringView { name, strlen(name) };
+    auto name_str = MUST(String::from_utf8(name_view));
+    auto name_fly = FlyString(name_str);
+    auto value_view = StringView { value, strlen(value) };
+    auto value_str = MUST(String::from_utf8(value_view));
     auto result = self->element->set_attribute(name_fly, value_str);
     if (result.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to set attribute");
@@ -347,8 +353,9 @@ static PyObject* python_element_get_text_content(PythonElementObject* self, void
 
     auto text = self->element->text_content();
     if (text.has_value()) {
-        auto text_str = text->to_string();
-        return PyUnicode_FromString(text_str.characters());
+        auto text_str = text.value();
+        auto text_byte_str = text_str.to_byte_string();
+        return PyUnicode_FromString(text_byte_str.characters());
     }
 
     return PyUnicode_FromString("");
@@ -371,10 +378,9 @@ static int python_element_set_text_content(PythonElementObject* self, PyObject* 
         return -1;
     }
 
-    auto text_utf16_result = Utf16String::from_utf8(text);
-    if (text_utf16_result.is_error())
-        return -1;
-    self->element->set_text_content(text_utf16_result.release_value());
+    auto text_view = StringView { text, strlen(text) };
+    auto text_utf16 = Utf16String::from_utf8(text_view);
+    self->element->set_text_content(text_utf16);
     return 0;
 }
 
@@ -389,7 +395,8 @@ static PyObject* python_element_get_inner_html(PythonElementObject* self, void* 
     if (html_result.is_error())
         return PyUnicode_FromString("");
     auto html = html_result.release_value();
-    return PyUnicode_FromString(html.characters());
+    auto html_byte_str = html.to_byte_string();
+    return PyUnicode_FromString(html_byte_str.characters());
 }
 
 static int python_element_set_inner_html(PythonElementObject* self, PyObject* value, void* closure)
@@ -409,7 +416,7 @@ static int python_element_set_inner_html(PythonElementObject* self, PyObject* va
         return -1;
     }
 
-    auto html_view = StringView(html);
+    auto html_view = StringView { html, strlen(html) };
     auto result = self->element->set_inner_html(html_view);
     if (result.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to set inner HTML");
@@ -480,21 +487,17 @@ PyObject* PythonElement::create_from_cpp_element(Web::DOM::Element& element)
 {
     setup_type();
 
-    auto* document_ptr = element.document();
-    if (!document_ptr)
-        return nullptr;
-        
-    auto* cache = document_ptr->wrapper_cache();
-    if (!cache)
-        document_ptr->set_wrapper_cache(make<PythonDOMWrapperCache>());
-
-    if (auto* wrapper = document_ptr->wrapper_cache()->get_wrapper(&element))
+    auto& document_ref = element.document();
+    auto* document_ptr = &document_ref;
+    if (!document_ptr->m_python_dom_wrapper_cache)
+        document_ptr->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
+    if (auto* wrapper = document_ptr->m_python_dom_wrapper_cache->get_wrapper(&element))
         return wrapper;
 
     PythonElementObject* obj = PyObject_New(PythonElementObject, &s_type);
     if (obj) {
         obj->element = &element;
-        document_ptr->wrapper_cache()->set_wrapper(&element, (PyObject*)obj);
+        document_ptr->m_python_dom_wrapper_cache->set_wrapper(&element, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
@@ -525,7 +528,7 @@ static PyObject* python_window_get_document(PythonWindowObject* self, void* clos
         PyErr_SetString(PyExc_RuntimeError, "Window has no document");
         return nullptr;
     }
-    return PythonDocument::create_from_cpp_document(*document_ref);
+    return PythonDocument::create_from_cpp_document(const_cast<Web::DOM::Document&>(*document_ref));
 }
 
 static PyObject* python_window_get_location(PythonWindowObject* self, void* closure)
@@ -541,9 +544,12 @@ static PyObject* python_window_get_location(PythonWindowObject* self, void* clos
         return nullptr;
     }
     // For simplicity, return the href as a string
-    auto href = location_ref->href();
-    auto href_str = href.to_string();
-    return PyUnicode_FromString(href_str.characters());
+    auto href_result = location_ref->href();
+    if (href_result.is_error())
+        return PyUnicode_FromString("");
+    auto href = href_result.release_value();
+    auto href_byte_str = href.to_byte_string();
+    return PyUnicode_FromString(href_byte_str.characters());
 }
 
 static PyGetSetDef python_window_getset[] = {
@@ -604,17 +610,15 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
     if (!document_ref)
         return nullptr;
         
-    auto* cache = document_ref->wrapper_cache();
-    if (!cache)
-        document_ref->set_wrapper_cache(make<PythonDOMWrapperCache>());
-
-    if (auto* wrapper = document_ref->wrapper_cache()->get_wrapper(&window))
+    if (!document_ref->m_python_dom_wrapper_cache)
+        document_ref->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
+    if (auto* wrapper = document_ref->m_python_dom_wrapper_cache->get_wrapper(&window))
         return wrapper;
 
     PythonWindowObject* obj = PyObject_New(PythonWindowObject, &s_type);
     if (obj) {
         obj->window = &window;
-        document_ref->wrapper_cache()->set_wrapper(&window, (PyObject*)obj);
+        document_ref->m_python_dom_wrapper_cache->set_wrapper(&window, (PyObject*)obj);
     }
     return (PyObject*)obj;
 }
