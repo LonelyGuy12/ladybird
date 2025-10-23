@@ -39,6 +39,7 @@ set(SOURCES
     Bindings/PythonDOMBindings.cpp
     Bindings/PythonJSBridge.cpp
     Bindings/PythonJSObjectWrapper.cpp
+    Bindings/TestPythonDOMModule.cpp
     # Bindings/PythonObjectBridge.cpp
     # Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
