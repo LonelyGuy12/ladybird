@@ -16,19 +16,19 @@ PyObject* TestPythonDOMModule::s_module = nullptr;
 bool TestPythonDOMModule::s_initialized = false;
 
 // Test functions
-static PyObject* test_document_access(PyObject* self, PyObject* args)
+static PyObject* test_document_access(PyObject*, PyObject*)
 {
     // This is a placeholder for testing document access
     Py_RETURN_TRUE;
 }
 
-static PyObject* test_element_manipulation(PyObject* self, PyObject* args)
+static PyObject* test_element_manipulation(PyObject*, PyObject*)
 {
     // This is a placeholder for testing element manipulation
     Py_RETURN_TRUE;
 }
 
-static PyObject* test_window_object(PyObject* self, PyObject* args)
+static PyObject* test_window_object(PyObject*, PyObject*)
 {
     // This is a placeholder for testing window object access
     Py_RETURN_TRUE;
@@ -44,10 +44,14 @@ static PyMethodDef s_module_methods[] = {
 
 static struct PyModuleDef test_module_def = {
     PyModuleDef_HEAD_INIT,
-    .m_name = "test_web",
-    .m_doc = "Test Python Web API module",
-    .m_size = -1,
-    .m_methods = s_module_methods,
+    "test_web",           /* m_name */
+    "Test Python Web API module", /* m_doc */
+    -1,                   /* m_size */
+    s_module_methods,     /* m_methods */
+    0,                    /* m_slots */
+    0,                    /* m_traverse */
+    0,                    /* m_clear */
+    0,                    /* m_free */
 };
 
 bool TestPythonDOMModule::initialize_module()
