@@ -1160,14 +1160,36 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 
-# Enable Python support
-# target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON)
+# Enable Python support with platform-specific configuration
+if(WIN32)
+    # Windows-specific Python configuration
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_WINDOWS)
+    # Ensure we link against the correct Python library
+    if(Python3_FOUND)
+        target_link_libraries(LibWeb PRIVATE Python3::Python)
+    endif()
+elseif(APPLE)
+    # macOS-specific Python configuration
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_MACOS)
+    # On macOS, prefer Framework Python if available
+    if(Python3_FOUND)
+        target_link_libraries(LibWeb PRIVATE Python3::Python)
+    endif()
+else()
+    # Linux and other Unix-like systems
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_LINUX)
+    if(Python3_FOUND)
+        target_link_libraries(LibWeb PRIVATE Python3::Python)
+    endif()
+endif()
 
 find_package(LibXml2 REQUIRED)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2 Python3::Python)
+target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2)
 
-target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
+if(Python3_FOUND)
+    target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
+endif()
 
 generate_js_bindings(LibWeb)
 
