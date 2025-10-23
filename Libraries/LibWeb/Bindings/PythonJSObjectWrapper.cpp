@@ -12,18 +12,21 @@
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
+#include <LibJS/Runtime/VM.h>
 #include <AK/Utf16String.h>
 
 namespace Web::Bindings {
 
-PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type = { PyVarObject_HEAD_INIT(NULL, 0) };
+PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type = {0};
 
 void PythonJSObjectWrapper::setup_js_object_wrapper_type()
 {
     if (s_js_object_wrapper_type.tp_name) return; // Already set up
     
     memset(&s_js_object_wrapper_type, 0, sizeof(PyTypeObject));
-    PyVarObject_HEAD_INIT(&s_js_object_wrapper_type, 0)
+    s_js_object_wrapper_type.ob_base.ob_base.ob_refcnt = 1;
+    s_js_object_wrapper_type.ob_base.ob_base.ob_type = &PyType_Type;
+    s_js_object_wrapper_type.ob_base.ob_size = 0;
     s_js_object_wrapper_type.tp_name = "web.JSObject";
     s_js_object_wrapper_type.tp_doc = "JavaScript object wrapper for Python";
     s_js_object_wrapper_type.tp_basicsize = sizeof(JSObjectWrapper);
@@ -104,7 +107,6 @@ int PythonJSObjectWrapper::wrapper_setattr(JSObjectWrapper* self, PyObject* attr
     
     JS::Object* js_obj = static_cast<JS::Object*>(self->js_object_ptr);
     auto& realm = js_obj->shape().realm();
-    auto& vm = realm.vm();
     
     // Convert Python string to JS PropertyKey and Python value to JS value
     if (PyUnicode_Check(attr_name)) {
@@ -165,7 +167,7 @@ PyObject* PythonJSObjectWrapper::wrapper_call(JSObjectWrapper* self, PyObject* a
     }
     
     // Call the JS function using internal_call
-    auto execution_context = JS::ExecutionContext::create();
+    auto execution_context = JS::ExecutionContext::create(0, static_cast<u32>(arg_count));
     execution_context->arguments = js_args.span();
     auto result = js_func.internal_call(*execution_context, JS::js_undefined());
     

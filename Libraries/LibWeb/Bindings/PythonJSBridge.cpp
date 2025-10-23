@@ -239,7 +239,7 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
     }
 
     // Call the JS function using internal_call
-    auto execution_context = JS::ExecutionContext::create();
+    auto execution_context = JS::ExecutionContext::create(0, static_cast<u32>(argc));
     execution_context->arguments = js_args.span();
     auto call_result = js_function.internal_call(*execution_context, JS::js_undefined());
     if (call_result.is_error()) {

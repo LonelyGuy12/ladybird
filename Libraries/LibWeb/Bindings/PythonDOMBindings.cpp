@@ -148,7 +148,7 @@ static PyMethodDef python_document_methods[] = {
     { "select", (PyCFunction)python_document_select, METH_VARARGS, "Select elements using CSS selector" },
     { "find", (PyCFunction)python_document_find, METH_VARARGS, "Find first element using CSS selector" },
     { "create_element", (PyCFunction)python_document_create_element, METH_VARARGS, "Create a new element" },
-    { NULL } // Sentinel
+    { NULL, NULL, 0, NULL } // Sentinel
 };
 
 static PyTypeObject document_type = {
@@ -452,13 +452,13 @@ static PyMethodDef python_element_methods[] = {
     { "find", (PyCFunction)python_element_find, METH_VARARGS, "Find first child element using CSS selector" },
     { "get_attribute", (PyCFunction)python_element_get_attribute, METH_VARARGS, "Get an attribute value" },
     { "set_attribute", (PyCFunction)python_element_set_attribute, METH_VARARGS, "Set an attribute value" },
-    { NULL } // Sentinel
+    { NULL, NULL, 0, NULL } // Sentinel
 };
 
 static PyGetSetDef python_element_getset[] = {
     { "text", (getter)python_element_get_text_content, (setter)python_element_set_text_content, "Text content of the element", NULL },
     { "html", (getter)python_element_get_inner_html, (setter)python_element_set_inner_html, "Inner HTML of the element", NULL },
-    { NULL } // Sentinel
+    { NULL, NULL, NULL, NULL, NULL } // Sentinel
 };
 
 static PyTypeObject element_type = {
@@ -597,7 +597,7 @@ static PyObject* python_window_get_location(PythonWindowObject* self, void*)
 static PyGetSetDef python_window_getset[] = {
     { "document", (getter)python_window_get_document, NULL, "The document object", NULL },
     { "location", (getter)python_window_get_location, NULL, "The location object", NULL },
-    { NULL } // Sentinel
+    { NULL, NULL, NULL, NULL, NULL } // Sentinel
 };
 
 static PyTypeObject window_type = {
