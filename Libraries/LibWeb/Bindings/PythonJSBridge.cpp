@@ -85,7 +85,9 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
                 char const* key_str = PyUnicode_AsUTF8(key);
                 if (key_str) {
                     auto js_value = python_to_js(value, realm);
-                    MUST(js_obj->create_data_property(MUST(String::from_utf8(StringView { key_str, strlen(key_str) })), js_value));
+                    auto key_string = MUST(String::from_utf8(StringView { key_str, strlen(key_str) }));
+                    auto property_key = JS::PropertyKey(key_string);
+                    MUST(js_obj->create_data_property(property_key, js_value));
                 }
             }
         }
@@ -102,7 +104,7 @@ JS::Value PythonJSBridge::python_to_js(PyObject* py_obj, JS::Realm& realm)
             PyObject* item = PySequence_GetItem(py_obj, i);
             if (item) {
                 auto js_value = python_to_js(item, realm);
-                MUST(js_array->set(JS::PropertyKey(static_cast<u32>(i)), js_value, JS::ShouldThrowExceptions::Yes));
+                MUST(js_array->set(JS::PropertyKey(static_cast<u32>(i)), js_value, true));
                 Py_DECREF(item);
             }
         }
@@ -130,7 +132,7 @@ PyObject* PythonJSBridge::js_to_python(JS::Value js_val, JS::VM& vm)
     }
 
     if (js_val.is_string()) {
-        auto str = js_val.as_string().string();
+        auto str = js_val.as_string().utf8_string();
         return PyUnicode_FromString(str.characters());
     }
 
@@ -138,9 +140,9 @@ PyObject* PythonJSBridge::js_to_python(JS::Value js_val, JS::VM& vm)
         auto& obj = js_val.as_object();
 
         // Handle arrays
-        if (obj.is_array()) {
+        if (is<JS::Array>(obj)) {
             auto& array = static_cast<JS::Array&>(obj);
-            Py_ssize_t length = static_cast<Py_ssize_t>(MUST(array.length()));
+            Py_ssize_t length = static_cast<Py_ssize_t>(MUST(array.indexed_property_length()));
 
             PyObject* py_list = PyList_New(length);
             if (!py_list) {
@@ -167,7 +169,7 @@ PyObject* PythonJSBridge::js_to_python(JS::Value js_val, JS::VM& vm)
         }
 
         // Get all enumerable properties
-        auto properties = MUST(obj.enumerable_own_property_names(JS::PropertyKind::Key));
+        auto properties = MUST(obj.enumerable_own_property_names(JS::Object::PropertyKind::Key));
         for (auto& property : properties) {
             auto key = property.as_string().utf8_string();
             auto value = MUST(obj.get(property));
@@ -199,7 +201,10 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
 
     // Lookup function on JS global object by name
     auto& global_obj = realm.global_object();
-    auto property_key = JS::PropertyKey(Utf16String::from_utf8(function_name).release_value_but_fixme_should_propagate_errors());
+    auto utf16_result = Utf16String::from_utf8(function_name);
+    if (utf16_result.is_error())
+        Py_RETURN_NONE;
+    auto property_key = JS::PropertyKey(utf16_result.release_value());
     auto get_result = global_obj.get(property_key);
     if (get_result.is_error()) {
         Py_RETURN_NONE;
@@ -221,11 +226,11 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
         js_args.unchecked_append(converted);
     }
 
-    auto call_result = JS::call(vm, js_function, JS::js_undefined(), js_args.span());
+    auto call_result = JS::call(vm, &js_function, &global_obj, js_args);
     if (call_result.is_error()) {
         Py_RETURN_NONE;
     }
-    return js_to_python(call_result.value(), vm);
+    return js_to_python(call_result.release_value(), vm);
 }
 
 JS::Value PythonJSBridge::call_python_function(PyObject* func, GC::RootVector<JS::Value>& js_args, JS::Realm& realm)
