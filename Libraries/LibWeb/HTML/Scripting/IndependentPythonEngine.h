@@ -28,7 +28,7 @@ public:
     ErrorOr<void> initialize();
 
     // Execute Python code in the global scope
-    ErrorOr<JS::Value> run(StringView source, StringView filename = "<string>");
+    ErrorOr<JS::Value> run(StringView source, StringView filename = "<string>"sv);
 
     // Execute a Python module
     ErrorOr<JS::Value> run_module(StringView module_name);
@@ -40,7 +40,8 @@ public:
     bool is_initialized() const { return m_initialized; }
 
     // Get performance statistics
-    PythonPerformanceMetrics::ExecutionStats get_performance_stats() const;
+    // TODO: Implement performance metrics
+    // PythonPerformanceMetrics::ExecutionStats get_performance_stats() const;
 
 private:
     IndependentPythonEngine() = default;

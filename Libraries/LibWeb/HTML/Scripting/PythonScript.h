@@ -45,8 +45,9 @@ public:
     ErrorOr<JS::Value> execute_with_independent_engine();
 
     // Performance monitoring
-    PythonPerformanceMetrics::ExecutionStats get_execution_stats() const;
-    void reset_performance_stats();
+    // TODO: Implement performance metrics
+    // PythonPerformanceMetrics::ExecutionStats get_execution_stats() const;
+    // void reset_performance_stats();
 
     // Async support
     ErrorOr<JS::Value> execute_async(JS::Realm& realm);
@@ -64,7 +65,8 @@ private:
 
     // Independent Python engine
     OwnPtr<IndependentPythonEngine> m_independent_engine;
-    PythonPerformanceMetrics::ExecutionStats m_execution_stats;
+    // TODO: Implement performance metrics
+    // PythonPerformanceMetrics::ExecutionStats m_execution_stats;
 };
 
 }
