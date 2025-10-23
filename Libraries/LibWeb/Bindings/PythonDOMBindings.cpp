@@ -6,6 +6,7 @@
 
 #include <LibWeb/Bindings/PythonDOMBindings.h>
 #include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibWeb/Bindings/TestPythonDOMModule.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>

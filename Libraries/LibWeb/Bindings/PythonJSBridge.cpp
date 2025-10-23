@@ -7,6 +7,7 @@
 #include <AK/StringView.h>
 #include <AK/Utf16String.h>
 #include <LibWeb/Bindings/PythonJSBridge.h>
+#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ExecutionContext.h>
 #include <LibJS/Runtime/FunctionObject.h>

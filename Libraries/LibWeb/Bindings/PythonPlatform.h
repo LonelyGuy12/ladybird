@@ -12,13 +12,22 @@
 #if defined(_WIN32) || defined(_WIN64)
     // Windows Python configuration
     #define PYTHON_PLATFORM_WINDOWS
-    #include <Python.h>
     
-    // Windows-specific definitions
-    #ifdef _DEBUG
+    // On Windows, we need to handle Debug vs Release Python libraries
+    #if defined(_DEBUG) && !defined(Py_DEBUG)
+        // Using Release Python with Debug build
         #undef _DEBUG
         #include <Python.h>
         #define _DEBUG
+    #else
+        #include <Python.h>
+    #endif
+    
+    // Windows needs explicit dllimport
+    #ifndef PyMODINIT_FUNC
+        #if defined(_MSC_VER)
+            #define PyMODINIT_FUNC __declspec(dllexport) PyObject*
+        #endif
     #endif
     
 #elif defined(__APPLE__) && defined(__MACH__)

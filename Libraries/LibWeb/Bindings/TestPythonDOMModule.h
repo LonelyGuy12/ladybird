@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <Python.h>
+#include <LibWeb/Bindings/PythonPlatform.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::Bindings {

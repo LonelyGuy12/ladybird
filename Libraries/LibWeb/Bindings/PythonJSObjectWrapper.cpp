@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
+#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibJS/Runtime/ExecutionContext.h>
 #include <LibJS/Runtime/FunctionObject.h>

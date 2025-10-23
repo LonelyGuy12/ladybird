@@ -1156,40 +1156,23 @@ set(GENERATED_SOURCES
     HTML/Parser/NamedCharacterReferences.cpp
 )
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# Include platform-aware Python finder
+include(${CMAKE_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
 
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 
 # Enable Python support with platform-specific configuration
-if(WIN32)
-    # Windows-specific Python configuration
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_WINDOWS)
-    # Ensure we link against the correct Python library
-    if(Python3_FOUND)
-        target_link_libraries(LibWeb PRIVATE Python3::Python)
-    endif()
-elseif(APPLE)
-    # macOS-specific Python configuration
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_MACOS)
-    # On macOS, prefer Framework Python if available
-    if(Python3_FOUND)
-        target_link_libraries(LibWeb PRIVATE Python3::Python)
-    endif()
-else()
-    # Linux and other Unix-like systems
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON PYTHON_PLATFORM_LINUX)
-    if(Python3_FOUND)
-        target_link_libraries(LibWeb PRIVATE Python3::Python)
-    endif()
+if(Python3_FOUND)
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
+    target_link_libraries(LibWeb PRIVATE Python3::Python)
+    target_include_directories(LibWeb PRIVATE ${PYTHON_INCLUDE_DIRS})
+    
+    message(STATUS "Python support enabled for LibWeb")
 endif()
 
 find_package(LibXml2 REQUIRED)
 
 target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2)
-
-if(Python3_FOUND)
-    target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
-endif()
 
 generate_js_bindings(LibWeb)
 

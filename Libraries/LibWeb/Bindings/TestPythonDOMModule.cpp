@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/TestPythonDOMModule.h>
+#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/Window.h>
