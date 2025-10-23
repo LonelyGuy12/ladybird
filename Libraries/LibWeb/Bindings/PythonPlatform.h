@@ -11,7 +11,9 @@
 
 #if defined(_WIN32) || defined(_WIN64)
     // Windows Python configuration
-    #define PYTHON_PLATFORM_WINDOWS
+    #ifndef PYTHON_PLATFORM_WINDOWS
+        #define PYTHON_PLATFORM_WINDOWS
+    #endif
     
     // On Windows, we need to handle Debug vs Release Python libraries
     #if defined(_DEBUG) && !defined(Py_DEBUG)
@@ -32,7 +34,9 @@
     
 #elif defined(__APPLE__) && defined(__MACH__)
     // macOS Python configuration
-    #define PYTHON_PLATFORM_MACOS
+    #ifndef PYTHON_PLATFORM_MACOS
+        #define PYTHON_PLATFORM_MACOS
+    #endif
     
     // Try framework Python first, fall back to regular
     #if __has_include(<Python/Python.h>)
@@ -43,7 +47,9 @@
     
 #else
     // Linux and other Unix-like systems
-    #define PYTHON_PLATFORM_LINUX
+    #ifndef PYTHON_PLATFORM_LINUX
+        #define PYTHON_PLATFORM_LINUX
+    #endif
     #include <Python.h>
 #endif
 
