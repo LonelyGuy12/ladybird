@@ -17,7 +17,7 @@
 
 namespace Web::Bindings {
 
-PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type = {0};
+PyTypeObject PythonJSObjectWrapper::s_js_object_wrapper_type;
 
 void PythonJSObjectWrapper::setup_js_object_wrapper_type()
 {
