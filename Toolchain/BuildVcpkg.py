@@ -18,7 +18,7 @@ def build_vcpkg():
         vcpkg_json = json.load(vcpkg_json_file)
 
     git_repo = "https://github.com/microsoft/vcpkg.git"
-    git_rev = vcpkg_json["builtin-baseline"]
+    git_rev = "d80785c4ee1df22a4119a3451452f59e978e06aa"
 
     build_dir = script_dir.parent / "Build"
     build_dir.mkdir(parents=True, exist_ok=True)
