@@ -1,5 +1,5 @@
 {
-  "builtin-baseline": "b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f",
+  "builtin-baseline": "3f1c2b2a2a6f0e6b0f8e2b1a7b0a9e6d8c7b5a4d",
   "dependencies": [
     {
       "name": "angle",
@@ -32,7 +32,7 @@
     {
       "name": "dbus",
       "default-features": false,
-      "platform": "linux | freebsd"
+      "platform": "linux"
     },
     {
       "name": "dirent",
@@ -209,7 +209,7 @@
   "overrides": [
     {
       "name": "angle",
-      "version": "chromium_7258#0"
+      "version": "chromium_7400#0"
     },
     {
       "name": "curl",
