@@ -9,12 +9,21 @@
 // Platform-specific Python configuration
 // This header handles Python C API differences across platforms
 
-#if defined(_WIN32) || defined(_WIN64)
-    // Windows Python configuration
-    #ifndef PYTHON_PLATFORM_WINDOWS
+#if !defined(PYTHON_PLATFORM_WINDOWS) && !defined(PYTHON_PLATFORM_MACOS) && !defined(PYTHON_PLATFORM_LINUX)
+    // Auto-detect platform if not supplied via -D macro
+    #if defined(_WIN32) || defined(_WIN64)
         #define PYTHON_PLATFORM_WINDOWS
+    #elif defined(__APPLE__) && defined(__MACH__)
+        #define PYTHON_PLATFORM_MACOS
+    #elif defined(__linux__)
+        #define PYTHON_PLATFORM_LINUX
+    #else
+        #error "Unknown platform for Python integration"
     #endif
-    
+#endif
+
+#if defined(PYTHON_PLATFORM_WINDOWS)
+    // Windows Python configuration
     // On Windows, we need to handle Debug vs Release Python libraries
     #if defined(_DEBUG) && !defined(Py_DEBUG)
         // Using Release Python with Debug build
@@ -32,7 +41,7 @@
         #endif
     #endif
     
-#elif defined(__APPLE__) && defined(__MACH__)
+#elif defined(PYTHON_PLATFORM_MACOS)
     // macOS Python configuration
     #ifndef PYTHON_PLATFORM_MACOS
         #define PYTHON_PLATFORM_MACOS
