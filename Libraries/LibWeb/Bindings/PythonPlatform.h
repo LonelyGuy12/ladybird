@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#ifndef LIBRARIES_LIBWEB_BINDINGS_PYTHONPLATFORM_H
+#define LIBRARIES_LIBWEB_BINDINGS_PYTHONPLATFORM_H
 #pragma once
 
 // Platform-specific Python configuration
@@ -79,6 +81,7 @@ inline constexpr char const* get_platform_name()
 #endif
 }
 
+#endif // LIBRARIES_LIBWEB_BINDINGS_PYTHONPLATFORM_H
 // Platform-specific Python library suffix
 inline constexpr char const* get_library_suffix()
 {
