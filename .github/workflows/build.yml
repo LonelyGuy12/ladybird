@@ -98,16 +98,24 @@ jobs:
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
       VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
-      CC: /usr/bin/clang
-      CXX: /usr/bin/clang++
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install dependencies including Clang 19+
         run: |
           brew update
-          brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
+          brew install cmake ninja ccache qt python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
+          # Install LLVM 20 which includes Clang 20
+          brew install llvm@20
+          # Create symlinks so find_compiler.py can discover Clang 20
+          sudo mkdir -p /opt/homebrew/opt/llvm/bin
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang /opt/homebrew/opt/llvm/bin/clang-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang++ /opt/homebrew/opt/llvm/bin/clang++-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang /opt/homebrew/bin/clang-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang++ /opt/homebrew/bin/clang++-20
+          ls -la /opt/homebrew/opt/llvm/bin/ || true
+          /opt/homebrew/opt/llvm@20/bin/clang --version
 
       - name: Nuclear clean - remove ALL caches
         run: |
@@ -119,7 +127,7 @@ jobs:
           mkdir -p .vcpkg_cache
           echo "All caches cleared - fresh Clang-only build guaranteed"
 
-      - name: Hide Homebrew GCC to force Clang
+      - name: Hide Homebrew GCC to prevent CMake from finding it
         run: |
           echo "=== Hiding Homebrew GCC to prevent CMake from finding it ==="
           # Temporarily rename GCC so CMake cannot find it
@@ -135,7 +143,7 @@ jobs:
           if [ -f /opt/homebrew/bin/g++-14 ]; then
             sudo mv /opt/homebrew/bin/g++-14 /opt/homebrew/bin/g++-14.hidden || true
           fi
-          echo "GCC hidden from PATH"
+          echo "GCC hidden - only Clang available now"
           
       - name: Force PATH to prioritize Apple toolchain
         run: |
@@ -156,11 +164,14 @@ jobs:
           CMAKE_GENERATOR: Ninja
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
         run: |
-          echo "Building with Clang: CC=$CC CXX=$CXX"
-          echo "PATH: $PATH"
-          which cc
-          which c++
-          python3 Meta/ladybird.py build --cc /usr/bin/clang --cxx /usr/bin/clang++
+          echo "=== Building Ladybird with Homebrew Clang 20 ==="
+          echo "Available compilers:"
+          which clang-20 || echo "clang-20 not found"
+          which clang || echo "clang not found"
+          /opt/homebrew/opt/llvm/bin/clang-20 --version || true
+          # Let find_compiler.py discover Homebrew Clang 20 automatically
+          # GCC is hidden, so it will find Clang 20 and use it
+          python3 Meta/ladybird.py build
 
       - name: Upload build logs on failure
         if: failure()
