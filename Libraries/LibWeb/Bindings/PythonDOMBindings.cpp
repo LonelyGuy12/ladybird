@@ -204,6 +204,7 @@ static PyTypeObject document_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+    0,                           /* tp_versions_used */
 };
 
 void PythonDocument::setup_type()
@@ -529,6 +530,7 @@ static PyTypeObject element_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+    0,                           /* tp_versions_used */
 };
 
 void PythonElement::setup_type()
@@ -583,10 +585,7 @@ static PyObject* python_window_get_document(PythonWindowObject* self, void*)
     }
 
     auto document_ref = self->window->document();
-    if (!document_ref.ptr()) {
-        PyErr_SetString(PyExc_RuntimeError, "Window has no document");
-        return nullptr;
-    }
+    // GC::Ref is guaranteed non-null, no need to check
     return PythonDocument::create_from_cpp_document(const_cast<Web::DOM::Document&>(*document_ref));
 }
 
@@ -598,10 +597,7 @@ static PyObject* python_window_get_location(PythonWindowObject* self, void*)
     }
 
     auto location_ref = self->window->location();
-    if (!location_ref.ptr()) {
-        PyErr_SetString(PyExc_RuntimeError, "Window has no location");
-        return nullptr;
-    }
+    // GC::Ref is guaranteed non-null, no need to check
     // For simplicity, return the href as a string
     auto href_result = location_ref->href();
     if (href_result.is_error())
@@ -668,6 +664,7 @@ static PyTypeObject window_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+    0,                           /* tp_versions_used */
 };
 
 void PythonWindow::setup_type()
@@ -686,11 +683,9 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
     setup_type();
 
     auto document_ref = window.document();
-    if (!document_ref.ptr())
-        return nullptr;
     
     // Cast away const to access mutable wrapper cache    
-    auto* document_mut = const_cast<Web::DOM::Document*>(document_ref.ptr());
+    auto* document_mut = const_cast<Web::DOM::Document*>(document_ref);
     if (!document_mut->m_python_dom_wrapper_cache)
         document_mut->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
     if (auto* wrapper = document_mut->m_python_dom_wrapper_cache->get_wrapper(&window))
