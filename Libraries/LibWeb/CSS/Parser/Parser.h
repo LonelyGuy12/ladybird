@@ -26,7 +26,6 @@
 #include <LibWeb/CSS/Parser/TokenStream.h>
 #include <LibWeb/CSS/Parser/Tokenizer.h>
 #include <LibWeb/CSS/Parser/Types.h>
-#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
@@ -380,6 +379,7 @@ private:
     Optional<FlyString> parse_custom_ident(TokenStream<ComponentValue>&, ReadonlySpan<StringView> blacklist);
     RefPtr<CustomIdentStyleValue const> parse_custom_ident_value(TokenStream<ComponentValue>&, ReadonlySpan<StringView> blacklist);
     Optional<FlyString> parse_dashed_ident(TokenStream<ComponentValue>&);
+    RefPtr<CustomIdentStyleValue const> parse_dashed_ident_value(TokenStream<ComponentValue>&);
     // NOTE: Implemented in generated code. (GenerateCSSMathFunctions.cpp)
     RefPtr<CalculationNode const> parse_math_function(Function const&, CalculationContext const&);
     RefPtr<CalculationNode const> parse_a_calc_function_node(Function const&, CalculationContext const&);
@@ -445,6 +445,7 @@ private:
     using ParseFunction = AK::Function<RefPtr<StyleValue const>(TokenStream<ComponentValue>&)>;
     RefPtr<StyleValue const> parse_comma_separated_value_list(TokenStream<ComponentValue>&, ParseFunction);
     RefPtr<StyleValue const> parse_simple_comma_separated_value_list(PropertyID, TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_coordinating_value_list_shorthand(TokenStream<ComponentValue>&, PropertyID shorthand_id, Vector<PropertyID> const& longhand_ids);
     RefPtr<StyleValue const> parse_all_as_single_keyword_value(TokenStream<ComponentValue>&, Keyword);
 
     RefPtr<StyleValue const> parse_anchor_name_value(TokenStream<ComponentValue>&);

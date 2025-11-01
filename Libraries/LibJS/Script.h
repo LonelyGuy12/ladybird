@@ -40,20 +40,20 @@ public:
 
     Realm& realm() { return *m_realm; }
     Program const& parse_node() const { return *m_parse_node; }
-    Vector<ModuleWithSpecifier>& loaded_modules() { return m_loaded_modules; }
-    Vector<ModuleWithSpecifier> const& loaded_modules() const { return m_loaded_modules; }
+    Vector<LoadedModuleRequest>& loaded_modules() { return m_loaded_modules; }
+    Vector<LoadedModuleRequest> const& loaded_modules() const { return m_loaded_modules; }
 
     HostDefined* host_defined() const { return m_host_defined; }
     StringView filename() const LIFETIME_BOUND { return m_filename; }
 
 private:
-    Script(Realm&, StringView filename, NonnullRefPtr<Program>, HostDefined* = nullptr);
+    Script(Realm&, StringView filename, NonnullRefPtr<Program>, HostDefined*);
 
     virtual void visit_edges(Cell::Visitor&) override;
 
     GC::Ptr<Realm> m_realm;                       // [[Realm]]
     NonnullRefPtr<Program> m_parse_node;          // [[ECMAScriptCode]]
-    Vector<ModuleWithSpecifier> m_loaded_modules; // [[LoadedModules]]
+    Vector<LoadedModuleRequest> m_loaded_modules; // [[LoadedModules]]
 
     // Needed for potential lookups of modules.
     ByteString m_filename;

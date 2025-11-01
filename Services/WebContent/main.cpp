@@ -16,8 +16,8 @@
 #include <LibIPC/ConnectionFromClient.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibMain/Main.h>
-#include <LibMedia/Audio/Loader.h>
 #include <LibRequests/RequestClient.h>
+#include <LibUnicode/TimeZone.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/Fetching/Fetching.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
@@ -28,7 +28,6 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Painting/BackingStoreManager.h>
 #include <LibWeb/Painting/PaintableBox.h>
-#include <LibWeb/Platform/AudioCodecPluginAgnostic.h>
 #include <LibWeb/Platform/EventLoopPluginSerenity.h>
 #include <LibWeb/WebIDL/Tracing.h>
 #include <LibWebView/Plugins/FontPlugin.h>
@@ -38,12 +37,6 @@
 #include <WebContent/ConnectionFromClient.h>
 #include <WebContent/PageClient.h>
 #include <WebContent/WebDriverConnection.h>
-
-#if defined(HAVE_QT_MULTIMEDIA)
-#    include <LibWebView/EventLoop/EventLoopImplementationQt.h>
-#    include <QCoreApplication>
-#    include <UI/Qt/AudioCodecPluginQt.h>
-#endif
 
 #if defined(AK_OS_MACOS)
 #    include <LibCore/Platform/ProcessStatisticsMach.h>
@@ -69,24 +62,11 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         return -1;
     }
 
-#if defined(HAVE_QT_MULTIMEDIA)
-    QCoreApplication app(arguments.argc, arguments.argv);
-
-    Core::EventLoopManager::install(*new WebView::EventLoopManagerQt);
-#endif
     Core::EventLoop event_loop;
 
     WebView::platform_init();
 
     Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPluginSerenity);
-
-    Web::Platform::AudioCodecPlugin::install_creation_hook([](auto loader) {
-#if defined(HAVE_QT_MULTIMEDIA)
-        return Ladybird::AudioCodecPluginQt::create(move(loader));
-#else
-        return Web::Platform::AudioCodecPluginAgnostic::create(move(loader));
-#endif
-    });
 
     StringView command_line {};
     StringView executable_path {};
@@ -108,6 +88,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool is_headless = false;
     bool disable_scrollbar_painting = false;
     StringView echo_server_port_string_view {};
+    StringView default_time_zone {};
 
     Core::ArgsParser args_parser;
     args_parser.add_option(command_line, "Browser process command line", "command-line", 0, "command_line");
@@ -130,11 +111,17 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(disable_scrollbar_painting, "Don't paint horizontal or vertical viewport scrollbars", "disable-scrollbar-painting");
     args_parser.add_option(echo_server_port_string_view, "Echo server port used in test internals", "echo-server-port", 0, "echo_server_port");
     args_parser.add_option(is_headless, "Report that the browser is running in headless mode", "headless");
+    args_parser.add_option(default_time_zone, "Default time zone", "default-time-zone", 0, "time-zone-id");
 
     args_parser.parse(arguments);
 
     if (wait_for_debugger) {
         Core::Process::wait_for_debugger_and_break();
+    }
+
+    if (!default_time_zone.is_empty()) {
+        if (auto result = Unicode::set_current_time_zone(default_time_zone); result.is_error())
+            dbgln("Failed to set default time zone: {}", result.error());
     }
 
     auto& font_provider = static_cast<Gfx::PathFontProvider&>(Gfx::FontDatabase::the().install_system_font_provider(make<Gfx::PathFontProvider>()));

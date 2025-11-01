@@ -280,7 +280,6 @@ set(SOURCES
     CSS/StyleValues/SuperellipseStyleValue.cpp
     CSS/StyleValues/TextUnderlinePositionStyleValue.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
-    CSS/StyleValues/TransitionStyleValue.cpp
     CSS/StyleValues/TreeCountingFunctionStyleValue.cpp
     CSS/StyleValues/UnicodeRangeStyleValue.cpp
     CSS/StyleValues/UnresolvedStyleValue.cpp
@@ -441,9 +440,11 @@ set(SOURCES
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextGroup.cpp
     HTML/Canvas/CanvasDrawImage.cpp
+    HTML/Canvas/CanvasFillStrokeStyles.cpp
     HTML/Canvas/CanvasPath.cpp
     HTML/Canvas/CanvasSettings.cpp
     HTML/Canvas/CanvasState.cpp
+    HTML/Canvas/CanvasTextDrawingStyles.cpp
     HTML/Canvas/SerializeBitmap.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasPattern.cpp
@@ -573,6 +574,7 @@ set(SOURCES
     HTML/ListOfAvailableImages.cpp
     HTML/Location.cpp
     HTML/MediaError.cpp
+    HTML/MediaTrackBase.cpp
     HTML/MessageChannel.cpp
     HTML/MessageEvent.cpp
     HTML/MessagePort.cpp
@@ -843,8 +845,6 @@ set(SOURCES
     PerformanceTimeline/PerformanceObserverEntryList.cpp
     PermissionsPolicy/AutoplayAllowlist.cpp
     PixelUnits.cpp
-    Platform/AudioCodecPlugin.cpp
-    Platform/AudioCodecPluginAgnostic.cpp
     Platform/EventLoopPlugin.cpp
     Platform/EventLoopPluginSerenity.cpp
     Platform/FontPlugin.cpp
@@ -922,6 +922,7 @@ set(SOURCES
     SVG/SVGElement.cpp
     SVG/SVGEllipseElement.cpp
     SVG/SVGFEBlendElement.cpp
+    SVG/SVGFEColorMatrixElement.cpp
     SVG/SVGFECompositeElement.cpp
     SVG/SVGFEFloodElement.cpp
     SVG/SVGFEGaussianBlurElement.cpp
@@ -930,6 +931,7 @@ set(SOURCES
     SVG/SVGFEMergeNodeElement.cpp
     SVG/SVGFEOffsetElement.cpp
     SVG/SVGFilterElement.cpp
+    SVG/SVGFilterPrimitiveStandardAttributes.cpp
     SVG/SVGFitToViewBox.cpp
     SVG/SVGForeignObjectElement.cpp
     SVG/SVGGElement.cpp
@@ -1089,6 +1091,7 @@ set(SOURCES
     XHR/XMLHttpRequestUpload.cpp
     XLink/AttributeNames.cpp
     XML/XMLDocumentBuilder.cpp
+    XML/XMLFragmentParser.cpp
     XPath/XPath.cpp
     XPath/XPathEvaluator.cpp
     XPath/XPathExpression.cpp

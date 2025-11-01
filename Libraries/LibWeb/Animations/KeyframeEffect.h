@@ -11,7 +11,6 @@
 #include <LibWeb/Animations/AnimationEffect.h>
 #include <LibWeb/Bindings/KeyframeEffectPrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
-#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 
@@ -24,6 +23,8 @@ struct KeyframeEffectOptions : public EffectTiming {
     Bindings::CompositeOperation composite { Bindings::CompositeOperation::Replace };
     Optional<String> pseudo_element {};
 };
+
+Bindings::CompositeOperation css_animation_composition_to_bindings_composite_operation(CSS::AnimationComposition composition);
 
 // https://www.w3.org/TR/web-animations-1/#dictdef-basepropertyindexedkeyframe
 // Note: This is an intermediate structure used only when parsing Keyframes provided by the caller in a slightly

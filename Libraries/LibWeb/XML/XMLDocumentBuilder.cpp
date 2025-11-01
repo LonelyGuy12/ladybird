@@ -39,7 +39,9 @@ ErrorOr<Variant<ByteString, Vector<XML::MarkupDeclaration>>> resolve_xml_resourc
             "-//W3C//DTD XHTML 1.1 plus MathML 2.0//EN",
             "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN",
             "-//W3C//DTD MathML 2.0//EN",
-            "-//WAPFORUM//DTD XHTML Mobile 1.0//EN"))
+            "-//WAPFORUM//DTD XHTML Mobile 1.0//EN",
+            "-//WAPFORUM//DTD XHTML Mobile 1.1//EN",
+            "-//WAPFORUM//DTD XHTML Mobile 1.2//EN"))
         return Error::from_string_literal("Refusing to load disallowed external entity");
 
     if (!s_parsed_xhtml_unified_dtd.has_value()) {
@@ -162,16 +164,16 @@ void XMLDocumentBuilder::element_start(XML::Name const& name, OrderedHashMap<XML
         if (attribute.key == "xmlns" || attribute.key.starts_with("xmlns:"sv)) {
             // The prefix xmlns is used only to declare namespace bindings and is by definition bound to the namespace name http://www.w3.org/2000/xmlns/.
             if (!attribute.key.is_one_of("xmlns:"sv, "xmlns:xmlns"sv)) {
-                if (!node->set_attribute_ns(Namespace::XMLNS, MUST(String::from_byte_string(attribute.key)), MUST(String::from_byte_string(attribute.value))).is_error())
+                if (!node->set_attribute_ns(Namespace::XMLNS, MUST(String::from_byte_string(attribute.key)), Utf16String::from_utf8(attribute.value)).is_error())
                     continue;
             }
             m_has_error = true;
         } else if (attribute.key.contains(':')) {
             if (auto ns = namespace_for_name(attribute.key); ns.has_value()) {
-                if (!node->set_attribute_ns(ns.value(), MUST(String::from_byte_string(attribute.key)), MUST(String::from_byte_string(attribute.value))).is_error())
+                if (!node->set_attribute_ns(ns.value(), MUST(String::from_byte_string(attribute.key)), Utf16String::from_utf8(attribute.value)).is_error())
                     continue;
             } else if (attribute.key.starts_with("xml:"sv)) {
-                if (auto maybe_error = node->set_attribute_ns(Namespace::XML, MUST(String::from_byte_string(attribute.key)), MUST(String::from_byte_string(attribute.value))); !maybe_error.is_error())
+                if (auto maybe_error = node->set_attribute_ns(Namespace::XML, MUST(String::from_byte_string(attribute.key)), Utf16String::from_utf8(attribute.value)); !maybe_error.is_error())
                     continue;
             }
             m_has_error = true;

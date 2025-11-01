@@ -18,6 +18,7 @@
 #include <LibWeb/CSS/CharacterTypes.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderImageSliceStyleValue.h>
@@ -59,9 +60,9 @@
 #include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
-#include <LibWeb/CSS/StyleValues/TransitionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
+#include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/Infra/Strings.h>
 
@@ -94,6 +95,71 @@ RefPtr<StyleValue const> Parser::parse_simple_comma_separated_value_list(Propert
         tokens.reconsume_current_input_token();
         return nullptr;
     });
+}
+
+RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenStream<ComponentValue>& tokens, PropertyID shorthand_id, Vector<PropertyID> const& longhand_ids)
+{
+    HashMap<PropertyID, StyleValueVector> longhand_vectors;
+
+    auto transaction = tokens.begin_transaction();
+
+    do {
+        Vector<PropertyID> remaining_longhands {};
+        remaining_longhands.extend(longhand_ids);
+
+        HashMap<PropertyID, NonnullRefPtr<StyleValue const>> parsed_values;
+
+        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
+            auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
+
+            if (!property_and_value.has_value())
+                return {};
+
+            remove_property(remaining_longhands, property_and_value->property);
+
+            parsed_values.set(property_and_value->property, property_and_value->style_value.release_nonnull());
+        }
+
+        if (parsed_values.is_empty())
+            return {};
+
+        for (auto const& longhand_id : longhand_ids)
+            longhand_vectors.ensure(longhand_id).append(*parsed_values.get(longhand_id).value_or_lazy_evaluated([&]() -> ValueComparingNonnullRefPtr<StyleValue const> {
+                auto initial_value = property_initial_value(longhand_id);
+
+                if (initial_value->is_value_list())
+                    return initial_value->as_value_list().values()[0];
+
+                return initial_value;
+            }));
+
+        if (tokens.has_next_token()) {
+            if (tokens.next_token().is(Token::Type::Comma))
+                tokens.discard_a_token();
+            else
+                return {};
+        }
+    } while (tokens.has_next_token());
+
+    transaction.commit();
+
+    // FIXME: This is for compatibility with parse_comma_separated_value_list(), which returns a single value directly
+    //        instead of a list if there's only one, it would be nicer if we always returned a list.
+    if (longhand_vectors.get(longhand_ids[0])->size() == 1) {
+        StyleValueVector longhand_values {};
+
+        for (auto const& longhand_id : longhand_ids)
+            longhand_values.append((*longhand_vectors.get(longhand_id))[0]);
+
+        return ShorthandStyleValue::create(shorthand_id, longhand_ids, longhand_values);
+    }
+
+    StyleValueVector longhand_values {};
+
+    for (auto const& longhand_id : longhand_ids)
+        longhand_values.append(StyleValueList::create(move(*longhand_vectors.get(longhand_id)), StyleValueList::Separator::Comma));
+
+    return ShorthandStyleValue::create(shorthand_id, longhand_ids, longhand_values);
 }
 
 RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens)
@@ -157,6 +223,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     if (auto parsed = parse_for_type(ValueType::CornerShape); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::Counter); parsed.has_value())
+        return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::DashedIdent); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::EasingFunction); parsed.has_value())
         return parsed.release_value();
@@ -1203,10 +1271,7 @@ RefPtr<StyleValue const> Parser::parse_anchor_name_value(TokenStream<ComponentVa
         return none;
 
     return parse_comma_separated_value_list(tokens, [this](TokenStream<ComponentValue>& inner_tokens) -> RefPtr<StyleValue const> {
-        auto dashed_ident = parse_dashed_ident(inner_tokens);
-        if (!dashed_ident.has_value())
-            return nullptr;
-        return CustomIdentStyleValue::create(*dashed_ident);
+        return parse_dashed_ident_value(inner_tokens);
     });
 }
 
@@ -1221,10 +1286,7 @@ RefPtr<StyleValue const> Parser::parse_anchor_scope_value(TokenStream<ComponentV
         return all;
 
     return parse_comma_separated_value_list(tokens, [this](TokenStream<ComponentValue>& inner_tokens) -> RefPtr<StyleValue const> {
-        auto dashed_ident = parse_dashed_ident(inner_tokens);
-        if (!dashed_ident.has_value())
-            return {};
-        return CustomIdentStyleValue::create(*dashed_ident);
+        return parse_dashed_ident_value(inner_tokens);
     });
 }
 
@@ -1295,60 +1357,8 @@ RefPtr<StyleValue const> Parser::parse_animation_value(TokenStream<ComponentValu
         PropertyID::AnimationName
     };
 
-    HashMap<PropertyID, StyleValueVector> longhand_vectors;
-
-    auto transaction = tokens.begin_transaction();
-
-    do {
-        Vector<PropertyID> remaining_longhands {};
-        remaining_longhands.extend(longhand_ids);
-
-        HashMap<PropertyID, NonnullRefPtr<StyleValue const>> parsed_values;
-
-        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
-            auto property_and_value = parse_css_value_for_properties(remaining_longhands, tokens);
-
-            if (!property_and_value.has_value())
-                return {};
-
-            remove_property(remaining_longhands, property_and_value->property);
-
-            parsed_values.set(property_and_value->property, property_and_value->style_value.release_nonnull());
-        }
-
-        if (parsed_values.is_empty())
-            return {};
-
-        for (auto const& longhand_id : longhand_ids)
-            longhand_vectors.ensure(longhand_id).append(*parsed_values.get(longhand_id).value_or(property_initial_value(longhand_id)));
-
-        if (tokens.has_next_token()) {
-            if (tokens.next_token().is(Token::Type::Comma))
-                tokens.discard_a_token();
-            else
-                return {};
-        }
-    } while (tokens.has_next_token());
-
-    transaction.commit();
-
-    // FIXME: This is for compatibility with parse_comma_separated_value_list(), which returns a single value directly
-    //        instead of a list if there's only one, it would be nicer if we always returned a list.
-    if (longhand_vectors.get(PropertyID::AnimationDuration)->size() == 1) {
-        StyleValueVector longhand_values {};
-
-        for (auto const& longhand_id : longhand_ids)
-            longhand_values.append((*longhand_vectors.get(longhand_id))[0]);
-
-        return ShorthandStyleValue::create(PropertyID::Animation, longhand_ids, longhand_values);
-    }
-
-    StyleValueVector longhand_values {};
-
-    for (auto const& longhand_id : longhand_ids)
-        longhand_values.append(StyleValueList::create(move(*longhand_vectors.get(longhand_id)), StyleValueList::Separator::Comma));
-
-    return ShorthandStyleValue::create(PropertyID::Animation, longhand_ids, longhand_values);
+    // FIXME: The animation-trigger properties are reset-only sub-properties of the animation shorthand.
+    return parse_coordinating_value_list_shorthand(tokens, PropertyID::Animation, longhand_ids);
 }
 
 RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentValue>& tokens)
@@ -3840,12 +3850,10 @@ RefPtr<StyleValue const> Parser::parse_mask_value(TokenStream<ComponentValue>& t
         mask_composites.append(mask_composite ? mask_composite.release_nonnull() : initial_mask_composite);
         mask_modes.append(mask_mode ? mask_mode.release_nonnull() : initial_mask_mode);
 
-        if (!mask_origin && !mask_clip) {
+        if (!mask_origin)
             mask_origin = initial_mask_origin;
-            mask_clip = initial_mask_clip;
-        } else if (!mask_clip) {
+        if (!mask_clip)
             mask_clip = mask_origin;
-        }
         mask_origins.append(mask_origin.release_nonnull());
         mask_clips.append(mask_clip.release_nonnull());
 
@@ -4224,10 +4232,7 @@ RefPtr<StyleValue const> Parser::parse_position_anchor_value(TokenStream<Compone
         return auto_keyword;
 
     // <anchor-name> = <dashed-ident>
-    auto dashed_ident = parse_dashed_ident(tokens);
-    if (!dashed_ident.has_value())
-        return nullptr;
-    return CustomIdentStyleValue::create(*dashed_ident);
+    return parse_dashed_ident_value(tokens);
 }
 
 // https://drafts.csswg.org/css-anchor-position/#position-try-fallbacks
@@ -4254,17 +4259,17 @@ RefPtr<StyleValue const> Parser::parse_single_position_try_fallbacks_value(Token
         return position_area;
     }
 
-    Optional<FlyString> dashed_ident;
+    RefPtr<StyleValue const> dashed_ident;
     RefPtr<StyleValue const> try_tactic;
     while (tokens.has_next_token()) {
         if (auto try_tactic_value = parse_try_tactic_value(tokens)) {
             if (try_tactic)
                 return {};
             try_tactic = try_tactic_value.release_nonnull();
-        } else if (auto maybe_dashed_ident = parse_dashed_ident(tokens); maybe_dashed_ident.has_value()) {
-            if (dashed_ident.has_value())
+        } else if (auto maybe_dashed_ident = parse_dashed_ident_value(tokens)) {
+            if (dashed_ident)
                 return {};
-            dashed_ident = maybe_dashed_ident.release_value();
+            dashed_ident = maybe_dashed_ident.release_nonnull();
         } else {
             break;
         }
@@ -4272,8 +4277,8 @@ RefPtr<StyleValue const> Parser::parse_single_position_try_fallbacks_value(Token
     }
 
     StyleValueVector values;
-    if (dashed_ident.has_value())
-        values.append(CustomIdentStyleValue::create(dashed_ident.release_value()));
+    if (dashed_ident)
+        values.append(dashed_ident.release_nonnull());
     if (try_tactic)
         values.append(try_tactic.release_nonnull());
 
@@ -5069,122 +5074,38 @@ RefPtr<StyleValue const> Parser::parse_transform_origin_value(TokenStream<Compon
     return make_list(x_value.release_nonnull(), y_value.release_nonnull(), third_value.release_nonnull());
 }
 
+// https://drafts.csswg.org/css-transitions-2/#transition-shorthand-property
 RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentValue>& tokens)
 {
-    if (auto none = parse_all_as_single_keyword_value(tokens, Keyword::None))
-        return none;
+    // [ [ none | <single-transition-property> ] || <time> || <easing-function> || <time> || <transition-behavior-value> ]#
+    Vector<PropertyID> longhand_ids {
+        PropertyID::TransitionProperty,
+        PropertyID::TransitionDuration,
+        PropertyID::TransitionTimingFunction,
+        PropertyID::TransitionDelay,
+        PropertyID::TransitionBehavior
+    };
 
-    Vector<TransitionStyleValue::Transition> transitions;
-    auto transaction = tokens.begin_transaction();
+    auto parsed_value = parse_coordinating_value_list_shorthand(tokens, PropertyID::Transition, longhand_ids);
 
-    while (tokens.has_next_token()) {
-        TransitionStyleValue::Transition transition;
-        auto time_value_count = 0;
-        bool transition_behavior_found = false;
-        while (tokens.has_next_token() && !tokens.next_token().is(Token::Type::Comma)) {
-            if (auto maybe_time = parse_time(tokens); maybe_time.has_value()) {
-                auto time = maybe_time.release_value();
-                switch (time_value_count) {
-                case 0:
-                    if (!time.is_calculated() && !property_accepts_time(PropertyID::TransitionDuration, time.value()))
-                        return nullptr;
-                    transition.duration = move(time);
-                    break;
-                case 1:
-                    if (!time.is_calculated() && !property_accepts_time(PropertyID::TransitionDelay, time.value()))
-                        return nullptr;
-                    transition.delay = move(time);
-                    break;
-                default:
-                    ErrorReporter::the().report(InvalidPropertyError {
-                        .property_name = "transition"_fly_string,
-                        .value_string = tokens.dump_string(),
-                        .description = "Contains more than two time values"_string,
-                    });
-                    return {};
-                }
-                time_value_count++;
-                continue;
-            }
+    if (!parsed_value)
+        return nullptr;
 
-            if (auto easing = parse_css_value_for_property(PropertyID::TransitionTimingFunction, tokens)) {
-                if (transition.easing) {
-                    ErrorReporter::the().report(InvalidPropertyError {
-                        .property_name = "transition"_fly_string,
-                        .value_string = tokens.dump_string(),
-                        .description = "Contains multiple easing values"_string,
-                    });
-                    return {};
-                }
+    // https://drafts.csswg.org/css-transitions-1/#transition-shorthand-property
+    // If there is more than one <single-transition> in the shorthand, and any of the transitions has none as the
+    // <single-transition-property>, then the declaration is invalid.
+    auto const& transition_properties_style_value = parsed_value->as_shorthand().longhand(PropertyID::TransitionProperty);
 
-                transition.easing = easing;
-                continue;
-            }
+    // FIXME: This can be removed once parse_coordinating_value_list_shorthand returns a list for single values too.
+    if (!transition_properties_style_value->is_value_list())
+        return parsed_value;
 
-            if (!transition_behavior_found && (tokens.peek_token().is_ident("normal"sv) || tokens.peek_token().is_ident("allow-discrete"sv))) {
-                transition_behavior_found = true;
-                auto ident = tokens.consume_a_token().token().ident();
-                if (ident == "allow-discrete"sv)
-                    transition.transition_behavior = TransitionBehavior::AllowDiscrete;
-                continue;
-            }
+    auto const& transition_properties = transition_properties_style_value->as_value_list().values();
 
-            if (auto token = tokens.peek_token(); token.is_ident("all"sv)) {
-                auto transition_keyword = parse_keyword_value(tokens);
-                VERIFY(transition_keyword->to_keyword() == Keyword::All);
-                if (transition.property_name) {
-                    ErrorReporter::the().report(InvalidPropertyError {
-                        .property_name = "transition"_fly_string,
-                        .value_string = tokens.dump_string(),
-                        .description = "Contains multiple property identifiers"_string,
-                    });
-                    return {};
-                }
-                transition.property_name = transition_keyword.release_nonnull();
-                continue;
-            }
+    if (transition_properties.size() > 1 && transition_properties.find_first_index_if([](auto const& transition_property) { return transition_property->to_keyword() == Keyword::None; }).has_value())
+        return nullptr;
 
-            if (auto transition_property = parse_custom_ident_value(tokens, { { "all"sv, "none"sv } })) {
-                if (transition.property_name) {
-                    ErrorReporter::the().report(InvalidPropertyError {
-                        .property_name = "transition"_fly_string,
-                        .value_string = tokens.dump_string(),
-                        .description = "Contains multiple property identifiers"_string,
-                    });
-                    return {};
-                }
-
-                auto custom_ident = transition_property->custom_ident();
-                if (auto property = property_id_from_string(custom_ident); property.has_value()) {
-                    transition.property_name = CustomIdentStyleValue::create(custom_ident);
-                    continue;
-                }
-            }
-
-            ErrorReporter::the().report(InvalidPropertyError {
-                .property_name = "transition"_fly_string,
-                .value_string = tokens.dump_string(),
-                .description = MUST(String::formatted("Unexpected token \"{}\"", tokens.next_token().to_string())),
-            });
-            return {};
-        }
-
-        if (!transition.property_name)
-            transition.property_name = KeywordStyleValue::create(Keyword::All);
-
-        if (!transition.easing)
-            transition.easing = KeywordStyleValue::create(Keyword::Ease);
-
-        transitions.append(move(transition));
-
-        if (!tokens.next_token().is(Token::Type::Comma))
-            break;
-
-        tokens.discard_a_token();
-    }
-
-    transaction.commit();
-    return TransitionStyleValue::create(move(transitions));
+    return parsed_value;
 }
 
 RefPtr<StyleValue const> Parser::parse_list_of_time_values(PropertyID property_id, TokenStream<ComponentValue>& tokens)

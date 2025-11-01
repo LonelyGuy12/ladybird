@@ -52,7 +52,7 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm,
         break;
     }
 
-    auto shared_data = adopt_ref(*new SharedFunctionInstanceData(
+    auto shared_data = realm.heap().allocate<SharedFunctionInstanceData>(
         realm.vm(),
         kind,
         move(name),
@@ -63,7 +63,7 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm,
         is_strict,
         is_arrow_function,
         parsing_insights,
-        move(local_variables_names)));
+        move(local_variables_names));
 
     shared_data->m_class_field_initializer_name = move(class_field_initializer_name);
 
@@ -76,7 +76,7 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm,
 
 GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm, Utf16FlyString name, Object& prototype, ByteString source_text, Statement const& ecmascript_code, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, Vector<LocalVariable> local_variables_names, Environment* parent_environment, PrivateEnvironment* private_environment, FunctionKind kind, bool is_strict, FunctionParsingInsights parsing_insights, bool is_arrow_function, Variant<PropertyKey, PrivateName, Empty> class_field_initializer_name)
 {
-    auto shared_data = adopt_ref(*new SharedFunctionInstanceData(
+    auto shared_data = realm.heap().allocate<SharedFunctionInstanceData>(
         realm.vm(),
         kind,
         move(name),
@@ -87,7 +87,7 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create(Realm& realm,
         is_strict,
         is_arrow_function,
         parsing_insights,
-        move(local_variables_names)));
+        move(local_variables_names));
     shared_data->m_class_field_initializer_name = move(class_field_initializer_name);
     return realm.create<ECMAScriptFunctionObject>(
         move(shared_data),
@@ -119,10 +119,11 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create_from_function
         break;
     }
 
-    RefPtr<SharedFunctionInstanceData> shared_data = function_node.shared_data();
+    auto shared_data = function_node.shared_data();
 
     if (!shared_data) {
-        shared_data = adopt_ref(*new SharedFunctionInstanceData(realm->vm(),
+        shared_data = realm->heap().allocate<SharedFunctionInstanceData>(
+            realm->vm(),
             function_node.kind(),
             move(name),
             function_node.function_length(),
@@ -132,12 +133,12 @@ GC::Ref<ECMAScriptFunctionObject> ECMAScriptFunctionObject::create_from_function
             function_node.is_strict_mode(),
             function_node.is_arrow_function(),
             function_node.parsing_insights(),
-            function_node.local_variables_names()));
+            function_node.local_variables_names());
         function_node.set_shared_data(shared_data);
     }
 
     return realm->create<ECMAScriptFunctionObject>(
-        shared_data.release_nonnull(),
+        *shared_data,
         parent_environment,
         private_environment,
         *prototype);
@@ -420,13 +421,23 @@ SharedFunctionInstanceData::SharedFunctionInstanceData(
     m_function_environment_needed = arguments_object_needs_binding || m_function_environment_bindings_count > 0 || m_var_environment_bindings_count > 0 || m_lex_environment_bindings_count > 0 || parsing_insights.uses_this_from_environment || m_contains_direct_call_to_eval;
 }
 
+GC_DEFINE_ALLOCATOR(SharedFunctionInstanceData);
+
+void SharedFunctionInstanceData::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_executable);
+}
+
+SharedFunctionInstanceData::~SharedFunctionInstanceData() = default;
+
 ECMAScriptFunctionObject::ECMAScriptFunctionObject(
-    NonnullRefPtr<SharedFunctionInstanceData> shared_data,
+    GC::Ref<SharedFunctionInstanceData> shared_data,
     Environment* parent_environment,
     PrivateEnvironment* private_environment,
     Object& prototype)
     : FunctionObject(prototype)
-    , m_shared_data(move(shared_data))
+    , m_shared_data(shared_data)
     , m_environment(parent_environment)
     , m_private_environment(private_environment)
 {
@@ -488,17 +499,15 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
 
 ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count)
 {
-    if (!m_bytecode_executable) {
-        if (!ecmascript_code().bytecode_executable()) {
-            if (is_module_wrapper()) {
-                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm(), ecmascript_code(), kind(), name())));
-            } else {
-                const_cast<Statement&>(ecmascript_code()).set_bytecode_executable(TRY(Bytecode::compile(vm(), *this)));
-            }
+    auto& executable = shared_data().m_executable;
+    if (!executable) {
+        if (is_module_wrapper()) {
+            executable = TRY(Bytecode::compile(vm(), ecmascript_code(), kind(), name()));
+        } else {
+            executable = TRY(Bytecode::compile(vm(), *this));
         }
-        m_bytecode_executable = ecmascript_code().bytecode_executable();
     }
-    registers_and_constants_and_locals_count = m_bytecode_executable->number_of_registers + m_bytecode_executable->constants.size() + m_bytecode_executable->local_variable_names.size();
+    registers_and_constants_and_locals_count = executable->registers_and_constants_and_locals_count;
     argument_count = max(argument_count, formal_parameters().size());
     return {};
 }
@@ -508,7 +517,7 @@ FLATTEN ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Executi
 {
     auto& vm = this->vm();
 
-    ASSERT(m_bytecode_executable);
+    ASSERT(bytecode_executable());
 
     // 1. Let callerContext be the running execution context.
     // NOTE: No-op, kept by the VM in its execution context stack.
@@ -537,7 +546,7 @@ FLATTEN ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Executi
         ordinary_call_bind_this(vm, callee_context, this_argument);
 
     // 6. Let result be Completion(OrdinaryCallEvaluateBody(F, argumentsList)).
-    auto result = ordinary_call_evaluate_body(vm);
+    auto result = ordinary_call_evaluate_body(vm, callee_context);
 
     // 7. Remove calleeContext from the execution context stack and restore callerContext as the running execution context.
     vm.pop_execution_context();
@@ -553,7 +562,7 @@ FLATTEN ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_co
 {
     auto& vm = this->vm();
 
-    ASSERT(m_bytecode_executable);
+    ASSERT(bytecode_executable());
 
     // 1. Let callerContext be the running execution context.
     // NOTE: No-op, kept by the VM in its execution context stack.
@@ -598,7 +607,7 @@ FLATTEN ThrowCompletionOr<GC::Ref<Object>> ECMAScriptFunctionObject::internal_co
     auto constructor_env = callee_context.lexical_environment;
 
     // 8. Let result be Completion(OrdinaryCallEvaluateBody(F, argumentsList)).
-    auto result = ordinary_call_evaluate_body(vm);
+    auto result = ordinary_call_evaluate_body(vm, callee_context);
 
     // 9. Remove calleeContext from the execution context stack and restore callerContext as the running execution context.
     vm.pop_execution_context();
@@ -641,8 +650,7 @@ void ECMAScriptFunctionObject::visit_edges(Visitor& visitor)
     visitor.visit(m_private_environment);
     visitor.visit(m_home_object);
     visitor.visit(m_name_string);
-
-    visitor.visit(m_bytecode_executable);
+    visitor.visit(m_shared_data);
 
     if (m_class_data) {
         for (auto& field : m_class_data->fields) {
@@ -681,15 +689,11 @@ void ECMAScriptFunctionObject::make_method(Object& home_object)
 // 10.2.1.1 PrepareForOrdinaryCall ( F, newTarget ), https://tc39.es/ecma262/#sec-prepareforordinarycall
 void ECMAScriptFunctionObject::prepare_for_ordinary_call(VM& vm, ExecutionContext& callee_context, Object* new_target)
 {
-    // Non-standard
-    callee_context.is_strict_mode = is_strict_mode();
-
     // 1. Let callerContext be the running execution context.
     // 2. Let calleeContext be a new ECMAScript code execution context.
 
     // 3. Set the Function of calleeContext to F.
     callee_context.function = this;
-    callee_context.function_name = m_name_string;
 
     // 4. Let calleeRealm be F.[[Realm]].
     // 5. Set the Realm of calleeContext to calleeRealm.
@@ -819,7 +823,7 @@ void async_block_start(VM& vm, T const& async_body, PromiseCapability const& pro
             if (maybe_executable.is_error())
                 result = maybe_executable.release_error();
             else
-                result = vm.bytecode_interpreter().run_executable(*maybe_executable.value(), {}).value;
+                result = vm.bytecode_interpreter().run_executable(vm.running_execution_context(), *maybe_executable.value(), {});
         }
         // c. Else,
         else {
@@ -880,33 +884,26 @@ template void async_function_start(VM&, PromiseCapability const&, GC::Function<C
 
 // 10.2.1.4 OrdinaryCallEvaluateBody ( F, argumentsList ), https://tc39.es/ecma262/#sec-ordinarycallevaluatebody
 // 15.8.4 Runtime Semantics: EvaluateAsyncFunctionBody, https://tc39.es/ecma262/#sec-runtime-semantics-evaluatefunctionbody
-ThrowCompletionOr<Value> ECMAScriptFunctionObject::ordinary_call_evaluate_body(VM& vm)
+ThrowCompletionOr<Value> ECMAScriptFunctionObject::ordinary_call_evaluate_body(VM& vm, ExecutionContext& context)
 {
-    auto result_and_frame = vm.bytecode_interpreter().run_executable(*m_bytecode_executable, {});
-
-    if (result_and_frame.value.is_error()) [[unlikely]] {
-        return result_and_frame.value.release_error();
-    }
-
-    auto result = result_and_frame.value.release_value();
+    auto result = TRY(vm.bytecode_interpreter().run_executable(context, *bytecode_executable(), {}));
 
     // NOTE: Running the bytecode should eventually return a completion.
     // Until it does, we assume "return" and include the undefined fallback from the call site.
     if (kind() == FunctionKind::Normal)
         return result;
 
-    auto& realm = *vm.current_realm();
     if (kind() == FunctionKind::AsyncGenerator) {
-        auto async_generator_object = TRY(AsyncGenerator::create(realm, result, this, vm.running_execution_context().copy()));
+        auto async_generator_object = TRY(AsyncGenerator::create(*context.realm, result, this, context.copy()));
         return async_generator_object;
     }
 
-    auto generator_object = TRY(GeneratorObject::create(realm, result, this, vm.running_execution_context().copy()));
+    auto generator_object = TRY(GeneratorObject::create(*context.realm, result, this, context.copy()));
 
     // NOTE: Async functions are entirely transformed to generator functions, and wrapped in a custom driver that returns a promise
     //       See AwaitExpression::generate_bytecode() for the transformation.
     if (kind() == FunctionKind::Async)
-        return AsyncFunctionDriverWrapper::create(realm, generator_object);
+        return AsyncFunctionDriverWrapper::create(*context.realm, generator_object);
 
     ASSERT(kind() == FunctionKind::Generator);
     return generator_object;
@@ -926,6 +923,11 @@ ECMAScriptFunctionObject::ClassData& ECMAScriptFunctionObject::ensure_class_data
     if (!m_class_data)
         m_class_data = make<ClassData>();
     return *m_class_data;
+}
+
+Utf16String ECMAScriptFunctionObject::name_for_call_stack() const
+{
+    return m_name_string->utf16_string();
 }
 
 }

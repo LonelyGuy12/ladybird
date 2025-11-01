@@ -43,6 +43,7 @@ struct PropertyLookupCache {
         Optional<u32> property_offset;
         GC::Weak<Object> prototype;
         GC::Weak<PrototypeChainValidity> prototype_chain_validity;
+        Optional<u32> shape_dictionary_generation;
     };
     AK::Array<Entry, max_number_of_shapes_to_remember> entries;
 };
@@ -74,7 +75,7 @@ public:
         size_t number_of_property_lookup_caches,
         size_t number_of_global_variable_caches,
         size_t number_of_registers,
-        bool is_strict_mode);
+        Strict);
 
     virtual ~Executable() override;
 
@@ -90,6 +91,8 @@ public:
     NonnullRefPtr<SourceCode const> source_code;
     size_t number_of_registers { 0 };
     bool is_strict_mode { false };
+
+    size_t registers_and_constants_and_locals_count { 0 };
 
     struct ExceptionHandlers {
         size_t start_offset;

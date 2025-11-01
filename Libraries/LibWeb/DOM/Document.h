@@ -75,56 +75,60 @@ enum class InvalidateLayoutTreeReason {
 
 [[nodiscard]] StringView to_string(InvalidateLayoutTreeReason);
 
-#define ENUMERATE_UPDATE_LAYOUT_REASONS(X) \
-    X(CanvasRenderingContext2DSetFilter)   \
-    X(CursorBlinkTimer)                    \
-    X(Debugging)                           \
-    X(DocumentElementFromPoint)            \
-    X(DocumentElementsFromPoint)           \
-    X(DocumentFindMatchingText)            \
-    X(DocumentSetDesignMode)               \
-    X(DumpDisplayList)                     \
-    X(ElementCheckVisibility)              \
-    X(ElementClientHeight)                 \
-    X(ElementClientLeft)                   \
-    X(ElementClientTop)                    \
-    X(ElementClientWidth)                  \
-    X(ElementGetClientRects)               \
-    X(ElementIsPotentiallyScrollable)      \
-    X(ElementScroll)                       \
-    X(ElementScrollHeight)                 \
-    X(ElementScrollIntoView)               \
-    X(ElementScrollLeft)                   \
-    X(ElementScrollTop)                    \
-    X(ElementScrollWidth)                  \
-    X(ElementSetScrollLeft)                \
-    X(ElementSetScrollTop)                 \
-    X(EventHandlerHandleDoubleClick)       \
-    X(EventHandlerHandleDragAndDrop)       \
-    X(EventHandlerHandleMouseDown)         \
-    X(EventHandlerHandleMouseMove)         \
-    X(EventHandlerHandleMouseUp)           \
-    X(EventHandlerHandleMouseWheel)        \
-    X(HTMLElementGetTheTextSteps)          \
-    X(HTMLElementOffsetHeight)             \
-    X(HTMLElementOffsetLeft)               \
-    X(HTMLElementOffsetParent)             \
-    X(HTMLElementOffsetTop)                \
-    X(HTMLElementOffsetWidth)              \
-    X(HTMLElementScrollParent)             \
-    X(HTMLEventLoopRenderingUpdate)        \
-    X(HTMLImageElementHeight)              \
-    X(HTMLImageElementWidth)               \
-    X(HTMLInputElementHeight)              \
-    X(HTMLInputElementWidth)               \
-    X(InternalsHitTest)                    \
-    X(MediaQueryListMatches)               \
-    X(NodeNameOrDescription)               \
-    X(RangeGetClientRects)                 \
-    X(ResolvedCSSStyleDeclarationProperty) \
-    X(SVGDecodedImageDataRender)           \
-    X(SVGGraphicsElementGetBBox)           \
-    X(SourceSetNormalizeSourceDensities)   \
+#define ENUMERATE_UPDATE_LAYOUT_REASONS(X)    \
+    X(CanvasRenderingContext2DSetFilter)      \
+    X(CanvasRenderingContext2DSetFillStyle)   \
+    X(CanvasRenderingContext2DSetShadowColor) \
+    X(CanvasRenderingContext2DSetStrokeStyle) \
+    X(CanvasSetFillStyle)                     \
+    X(CursorBlinkTimer)                       \
+    X(Debugging)                              \
+    X(DocumentElementFromPoint)               \
+    X(DocumentElementsFromPoint)              \
+    X(DocumentFindMatchingText)               \
+    X(DocumentSetDesignMode)                  \
+    X(DumpDisplayList)                        \
+    X(ElementCheckVisibility)                 \
+    X(ElementClientHeight)                    \
+    X(ElementClientLeft)                      \
+    X(ElementClientTop)                       \
+    X(ElementClientWidth)                     \
+    X(ElementGetClientRects)                  \
+    X(ElementIsPotentiallyScrollable)         \
+    X(ElementScroll)                          \
+    X(ElementScrollHeight)                    \
+    X(ElementScrollIntoView)                  \
+    X(ElementScrollLeft)                      \
+    X(ElementScrollTop)                       \
+    X(ElementScrollWidth)                     \
+    X(ElementSetScrollLeft)                   \
+    X(ElementSetScrollTop)                    \
+    X(EventHandlerHandleDoubleClick)          \
+    X(EventHandlerHandleDragAndDrop)          \
+    X(EventHandlerHandleMouseDown)            \
+    X(EventHandlerHandleMouseMove)            \
+    X(EventHandlerHandleMouseUp)              \
+    X(EventHandlerHandleMouseWheel)           \
+    X(HTMLElementGetTheTextSteps)             \
+    X(HTMLElementOffsetHeight)                \
+    X(HTMLElementOffsetLeft)                  \
+    X(HTMLElementOffsetParent)                \
+    X(HTMLElementOffsetTop)                   \
+    X(HTMLElementOffsetWidth)                 \
+    X(HTMLElementScrollParent)                \
+    X(HTMLEventLoopRenderingUpdate)           \
+    X(HTMLImageElementHeight)                 \
+    X(HTMLImageElementWidth)                  \
+    X(HTMLInputElementHeight)                 \
+    X(HTMLInputElementWidth)                  \
+    X(InternalsHitTest)                       \
+    X(MediaQueryListMatches)                  \
+    X(NodeNameOrDescription)                  \
+    X(RangeGetClientRects)                    \
+    X(ResolvedCSSStyleDeclarationProperty)    \
+    X(SVGDecodedImageDataRender)              \
+    X(SVGGraphicsElementGetBBox)              \
+    X(SourceSetNormalizeSourceDensities)      \
     X(WindowScroll)
 
 enum class UpdateLayoutReason {
@@ -476,8 +480,8 @@ public:
 
     void set_window(HTML::Window&);
 
-    WebIDL::ExceptionOr<void> write(Vector<String> const& strings);
-    WebIDL::ExceptionOr<void> writeln(Vector<String> const& strings);
+    WebIDL::ExceptionOr<void> write(Vector<TrustedTypes::TrustedHTMLOrString> const& text);
+    WebIDL::ExceptionOr<void> writeln(Vector<TrustedTypes::TrustedHTMLOrString> const& text);
 
     WebIDL::ExceptionOr<Document*> open(Optional<String> const& = {}, Optional<String> const& = {});
     WebIDL::ExceptionOr<GC::Ptr<HTML::WindowProxy>> open(StringView url, StringView name, StringView features);
@@ -832,7 +836,7 @@ public:
     Vector<GC::Root<Range>> find_matching_text(String const&, CaseSensitivity);
 
     void parse_html_from_a_string(StringView);
-    static GC::Ref<Document> parse_html_unsafe(JS::VM&, StringView);
+    static WebIDL::ExceptionOr<GC::Root<DOM::Document>> parse_html_unsafe(JS::VM&, TrustedTypes::TrustedHTMLOrString const&);
 
     void set_console_client(GC::Ptr<JS::ConsoleClient> console_client) { m_console_client = console_client; }
     GC::Ptr<JS::ConsoleClient> console_client() const { return m_console_client; }
@@ -978,7 +982,7 @@ private:
         Yes,
         No,
     };
-    WebIDL::ExceptionOr<void> run_the_document_write_steps(Vector<String> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink);
+    WebIDL::ExceptionOr<void> run_the_document_write_steps(Vector<TrustedTypes::TrustedHTMLOrString> const& text, AddLineFeed line_feed, TrustedTypes::InjectionSink sink);
 
     void queue_intersection_observer_task();
     void queue_an_intersection_observer_entry(IntersectionObserver::IntersectionObserver&, HighResolutionTime::DOMHighResTimeStamp time, GC::Ref<Geometry::DOMRectReadOnly> root_bounds, GC::Ref<Geometry::DOMRectReadOnly> bounding_client_rect, GC::Ref<Geometry::DOMRectReadOnly> intersection_rect, bool is_intersecting, double intersection_ratio, GC::Ref<Element> target);

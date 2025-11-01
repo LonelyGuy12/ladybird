@@ -601,6 +601,13 @@ void abort_a_transaction(GC::Ref<IDBTransaction> transaction, GC::Ptr<WebIDL::DO
     // 5. Set transaction’s error to error.
     transaction->set_error(error);
 
+    // FIXME: https://github.com/w3c/IndexedDB/issues/473
+    // x. If transaction is an upgrade transaction:
+    if (transaction->is_upgrade_transaction()) {
+        // 1. Set transaction's associated request's error to a newly created "AbortError" DOMException.
+        transaction->associated_request()->set_error(WebIDL::AbortError::create(transaction->realm(), "Upgrade transaction was aborted"_utf16));
+    }
+
     // 6. For each request of transaction’s request list,
     for (auto const& request : transaction->request_list()) {
         // FIXME: abort the steps to asynchronously execute a request for request,
@@ -2259,8 +2266,13 @@ GC::Ref<JS::Array> retrieve_multiple_items_from_an_index(JS::Realm& target_realm
         // 3. Let i be 0.
         size_t i = 0;
 
+        // x. Append |range records[0]| to records.
+        // FIXME: https://github.com/w3c/IndexedDB/issues/480
+        if (range_records_length > 0)
+            records.append(range_records[0]);
+
         // 4. While i is less than range records length, then:
-        while (i < range_records_length) {
+        while (i < range_records_length - 1) {
             // 1. Increase i by 1.
             i++;
 
@@ -2295,8 +2307,13 @@ GC::Ref<JS::Array> retrieve_multiple_items_from_an_index(JS::Realm& target_realm
         // 3. Let i be 0.
         size_t i = 0;
 
+        // x. Append |range records[0]| to records.
+        // FIXME: https://github.com/w3c/IndexedDB/issues/480
+        if (range_records_length > 0)
+            records.append(range_records[0]);
+
         // 4. While i is less than range records length, then:
-        while (i < range_records_length) {
+        while (i < range_records_length - 1) {
             // 1. Increase i by 1.
             i++;
 
@@ -2305,7 +2322,7 @@ GC::Ref<JS::Array> retrieve_multiple_items_from_an_index(JS::Realm& target_realm
                 break;
 
             // 3. If the result of comparing two keys using the keys from |range records[i]| and |range records[i-1]| is equal, then continue.
-            if (i > 0 && Key::equals(range_records[i].key, range_records[i - 1].key))
+            if (Key::equals(range_records[i].key, range_records[i - 1].key))
                 continue;
 
             // 4. Else prepend |range records[i]| to records.
