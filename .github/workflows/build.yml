@@ -95,6 +95,8 @@ jobs:
         env:
           CMAKE_MAKE_PROGRAM: /opt/homebrew/bin/ninja
           CMAKE_GENERATOR: Ninja
+          CC: /usr/bin/clang
+          CXX: /usr/bin/clang++
         run: python3 Meta/ladybird.py build
 
       - name: Upload build logs on failure

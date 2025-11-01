@@ -126,13 +126,15 @@ runs:
 
         echo "${{ github.workspace }}/wabt-1.0.35/bin" >> $GITHUB_PATH
 
-    - name: 'Force Ninja for CMake on macOS'
+    - name: 'Force Ninja and Clang for CMake on macOS'
       if: ${{ inputs.os == 'macOS' }}
       shell: bash
       run: |
         set -e
         echo "CMAKE_MAKE_PROGRAM=$(which ninja)" >> "$GITHUB_ENV"
         echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
+        echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
         which ninja
 
     - name: 'Set required environment variables'
