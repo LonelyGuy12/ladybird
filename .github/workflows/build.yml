@@ -69,6 +69,19 @@ jobs:
             Build/release/**/*.log
             Build/release/**/*.txt
 
+      - name: Package Ladybird as .deb
+        if: success()
+        run: |
+          cd Build/release
+          cpack -G DEB
+
+      - name: Upload .deb package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-linux-deb
+          path: Build/release/*.deb
+
       - name: Upload binaries (optional)
         if: success()
         uses: actions/upload-artifact@v4
@@ -82,21 +95,55 @@ jobs:
   ladybird-build-macos:
     runs-on: macos-14
     timeout-minutes: 360
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
+      VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
+      CC: /usr/bin/clang
+      CXX: /usr/bin/clang++
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          verbose: 1
+          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            Build/vcpkg
+            Build/release/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
           brew update
           brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+
+      - name: Force clean CMake reconfigure with Clang
+        run: |
+          rm -rf Build/release/CMakeCache.txt Build/release/CMakeFiles
+          echo "Forcing Clang: CC=$CC CXX=$CXX"
 
       - name: Build Ladybird (macOS)
         env:
           CMAKE_MAKE_PROGRAM: /opt/homebrew/bin/ninja
           CMAKE_GENERATOR: Ninja
-          CC: /usr/bin/clang
-          CXX: /usr/bin/clang++
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
         run: python3 Meta/ladybird.py build
 
       - name: Upload build logs on failure
