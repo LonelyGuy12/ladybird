@@ -27,6 +27,7 @@ extern "C" {
     // Execution functions
     PyObject* PyRun_String(const char*, int, PyObject*, PyObject*);
     PyObject* PyRun_SimpleString(const char*);
+    PyObject* Py_CompileString(const char*, const char*, int);
 
     // Error handling
     void PyErr_Print();
@@ -40,14 +41,33 @@ extern "C" {
 
     // Module system
     PyObject* PyImport_ImportModule(const char*);
+    PyObject* PyModule_GetDict(PyObject*);
 
     // String operations
     const char* Py_GetVersion();
     const char* PyUnicode_AsUTF8(PyObject*);
 
+    // Type checking
+    int PyUnicode_Check(PyObject*);
+    int PyLong_Check(PyObject*);
+    int PyFloat_Check(PyObject*);
+    int PyBool_Check(PyObject*);
+    int PyDict_Check(PyObject*);
+    int PyList_Check(PyObject*);
+
+    // Type conversion
+    long PyLong_AsLong(PyObject*);
+    double PyFloat_AsDouble(PyObject*);
+
     // Memory management
     void Py_INCREF(PyObject*);
     void Py_DECREF(PyObject*);
+
+    // Dictionary operations
+    PyObject* PyDict_New();
+    int PyDict_Size(PyObject*);
+    int PyDict_SetItem(PyObject*, PyObject*, PyObject*);
+    PyObject* PyDict_GetItem(PyObject*, PyObject*);
 
     // Performance and profiling
     PyObject* PyEval_EvalCode(PyObject*, PyObject*, PyObject*);
@@ -62,11 +82,13 @@ extern "C" {
     // Async support
     PyObject* PyAsync_CreateTask(PyObject*, PyObject*, PyObject*);
 
-    // Custom extensions
-    PyObject* PyDict_GetItem(PyObject*, PyObject*);
-
     // High-performance execution
     PyObject* PyEval_EvalCodeEx(PyObject*, PyObject*, PyObject*, PyObject**, int, PyObject**);
+
+    // Constants
+    extern int Py_file_input;
+    extern int Py_eval_input;
+    extern PyObject* Py_True;
 }
 
 namespace Web::HTML {

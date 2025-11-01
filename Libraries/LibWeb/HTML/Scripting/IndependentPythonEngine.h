@@ -47,7 +47,7 @@ private:
     IndependentPythonEngine() = default;
 
     struct Impl;
-    NonnullOwnPtr<Impl> m_impl;
+    OwnPtr<Impl> m_impl;
     bool m_initialized { false };
     String m_version;
 
