@@ -107,4 +107,16 @@ set(CPACK_DEBIAN_PACKAGE_SECTION "web")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6")
 
+# macOS-specific settings for DMG
+if(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Ladybird")
+    set(CPACK_DMG_FORMAT "UDBZ") # Compressed DMG
+    set(CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_CURRENT_SOURCE_DIR}/Base/res/icons/128x128/app-ladybird.png")
+    set(CPACK_DMG_DS_STORE_SETUP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/dmg_ds_store.applescript")
+    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/Base/res/icons/ladybird.icns")
+    set(CPACK_BUNDLE_NAME "Ladybird")
+    set(CPACK_BUNDLE_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Meta/Lagom/Info.plist")
+endif()
+
 include(CPack)
