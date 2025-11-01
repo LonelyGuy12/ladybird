@@ -104,34 +104,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Clean old build artifacts
-        run: |
-          echo "Cleaning old build directory to force Clang rebuild..."
-          rm -rf Build/release
-
       - name: Cache ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           verbose: 1
-          key: ladybird-ccache-clang-v2-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          key: ladybird-ccache-clang-v3-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
 
-      - name: Cache vcpkg
+      - name: Cache vcpkg source
         uses: actions/cache@v4
         with:
-          path: |
-            Build/vcpkg
-            Build/release/vcpkg_installed
-          key: vcpkg-clang-v2-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          path: Build/vcpkg
+          key: vcpkg-src-v3-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
-            vcpkg-clang-v2-${{ runner.os }}-
+            vcpkg-src-v3-${{ runner.os }}-
 
       - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-clang-v2-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-bin-clang-v3-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
-            vcpkg-bin-clang-v2-${{ runner.os }}-
+            vcpkg-bin-clang-v3-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
@@ -139,15 +132,24 @@ jobs:
           brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
           mkdir -p ${{ github.workspace }}/.vcpkg_cache
           echo "Using Clang: CC=$CC CXX=$CXX"
+          which clang
           $CC --version
           $CXX --version
+
+      - name: Force CMake to use Clang
+        run: |
+          echo "Removing any cached CMake configuration..."
+          rm -rf Build/release/CMakeCache.txt Build/release/CMakeFiles
+          rm -rf Build/release/vcpkg_installed
+          echo "CMAKE_C_COMPILER=/usr/bin/clang" > $HOME/.cmake_config
+          echo "CMAKE_CXX_COMPILER=/usr/bin/clang++" >> $HOME/.cmake_config
 
       - name: Build Ladybird (macOS)
         env:
           CMAKE_MAKE_PROGRAM: /opt/homebrew/bin/ninja
           CMAKE_GENERATOR: Ninja
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
-        run: python3 Meta/ladybird.py build
+        run: python3 Meta/ladybird.py build --cc /usr/bin/clang --cxx /usr/bin/clang++
 
       - name: Upload build logs on failure
         if: failure()
