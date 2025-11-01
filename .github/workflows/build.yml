@@ -89,7 +89,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt
+          brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
 
       - name: Build Ladybird (macOS)
         env:
