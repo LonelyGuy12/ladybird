@@ -108,12 +108,11 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6")
 
 # macOS-specific settings for DMG
+# Note: DMG is now created manually in CI using hdiutil for better control
+# CPack DragNDrop generator includes too many files by default
 if(APPLE)
-    set(CPACK_GENERATOR "DragNDrop")
-    set(CPACK_DMG_VOLUME_NAME "Ladybird")
-    set(CPACK_DMG_FORMAT "UDBZ") # Compressed DMG
-    # Don't set CPACK_PACKAGE_ICON or CPACK_BUNDLE_PLIST if files don't exist
-    # The app bundle will have its own icon and plist already
+    # Keep CPack available but don't configure DMG generator
+    # Manual DMG creation in CI ensures only Ladybird.app is included
 endif()
 
 include(CPack)

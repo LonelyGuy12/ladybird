@@ -49,6 +49,13 @@ jobs:
             qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-wayland \
             qt6-multimedia-dev libpulse-dev
           mkdir -p ${{ github.workspace }}/.vcpkg_cache
+          
+          # Configure ccache for optimal performance
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=max_size=2G
+          ccache -z
+          echo "ccache configured"
 
       - name: Configure timezone (workaround for some toolchain date issues)
         run: |
@@ -58,7 +65,14 @@ jobs:
       - name: Build Ladybird
         env:
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
-        run: python3 Meta/ladybird.py build
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
+          MAKEFLAGS: "-j4"
+        run: |
+          echo "=== Starting Ladybird build ==="
+          ccache -s
+          python3 Meta/ladybird.py build
+          echo "=== ccache statistics after build ==="
+          ccache -s
 
       - name: Upload build logs on failure
         if: failure()
@@ -121,7 +135,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           verbose: 1
+          max-size: 2G
           key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            ladybird-ccache-clang20-v5-${{ runner.os }}-
 
       - name: Cache vcpkg source
         uses: actions/cache@v4
@@ -145,6 +162,13 @@ jobs:
           # Create vcpkg cache directory
           mkdir -p ${{ github.workspace }}/.vcpkg_cache
           echo "Created .vcpkg_cache directory"
+          
+          # Configure ccache for optimal performance
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=max_size=2G
+          ccache -z  # Zero statistics
+          echo "ccache configured"
           
           # Hide Homebrew GCC to prevent CMake from finding it
           if [ -f /opt/homebrew/bin/gcc ]; then
@@ -171,23 +195,62 @@ jobs:
           CMAKE_MAKE_PROGRAM: /opt/homebrew/bin/ninja
           CMAKE_GENERATOR: Ninja
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
+          # Enable parallel builds
+          CMAKE_BUILD_PARALLEL_LEVEL: 8
+          MAKEFLAGS: "-j8"
         run: |
           echo "=== Building Ladybird with Homebrew Clang 20 ==="
           echo "Available compilers:"
           which clang-20 || echo "clang-20 not found"
           which clang || echo "clang not found"
           /opt/homebrew/opt/llvm/bin/clang-20 --version || true
+          
+          # Show ccache stats before build
+          ccache -s
+          
           # Let find_compiler.py discover Homebrew Clang 20 automatically
           # GCC is hidden, so it will find Clang 20 and use it
           python3 Meta/ladybird.py build
+          
+          # Show ccache stats after build
+          echo "=== ccache statistics after build ==="
+          ccache -s
 
       - name: Create DMG package
         if: success()
         run: |
-          cd Build/release
-          cpack -G DragNDrop
-          echo "=== DMG created ==="
-          ls -lh *.dmg || echo "No DMG found"
+          echo "=== Creating clean DMG with only Ladybird.app ==="
+          
+          # Find the built app bundle
+          APP_BUNDLE=$(find Build/release -name "Ladybird.app" -type d | head -1)
+          
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "ERROR: Ladybird.app not found!"
+            find Build/release -name "*.app" -type d
+            exit 1
+          fi
+          
+          echo "Found app bundle: $APP_BUNDLE"
+          
+          # Create a temporary directory for DMG contents
+          DMG_DIR="Build/dmg_staging"
+          mkdir -p "$DMG_DIR"
+          
+          # Copy only the app bundle
+          cp -R "$APP_BUNDLE" "$DMG_DIR/"
+          
+          # Create Applications symlink for easy drag-and-drop
+          ln -s /Applications "$DMG_DIR/Applications"
+          
+          # Create DMG using hdiutil (native macOS tool)
+          DMG_NAME="Ladybird-0.1.0-macOS-arm64.dmg"
+          hdiutil create -volname "Ladybird" \
+            -srcfolder "$DMG_DIR" \
+            -ov -format UDZO \
+            "Build/release/$DMG_NAME"
+          
+          echo "=== DMG created successfully ==="
+          ls -lh "Build/release/$DMG_NAME"
 
       - name: Upload DMG artifact
         if: success()
