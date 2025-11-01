@@ -112,11 +112,8 @@ if(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "Ladybird")
     set(CPACK_DMG_FORMAT "UDBZ") # Compressed DMG
-    set(CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_CURRENT_SOURCE_DIR}/Base/res/icons/128x128/app-ladybird.png")
-    set(CPACK_DMG_DS_STORE_SETUP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/dmg_ds_store.applescript")
-    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/Base/res/icons/ladybird.icns")
-    set(CPACK_BUNDLE_NAME "Ladybird")
-    set(CPACK_BUNDLE_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Meta/Lagom/Info.plist")
+    # Don't set CPACK_PACKAGE_ICON or CPACK_BUNDLE_PLIST if files don't exist
+    # The app bundle will have its own icon and plist already
 endif()
 
 include(CPack)
