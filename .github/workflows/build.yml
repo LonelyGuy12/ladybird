@@ -58,7 +58,7 @@ jobs:
       - name: Build Ladybird
         env:
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
-        run: ./Meta/ladybird.py build
+        run: python3 Meta/ladybird.py build
 
       - name: Upload build logs on failure
         if: failure()
@@ -74,6 +74,40 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ladybird-build
+          path: |
+            Build/release/bin/**
+            Build/release/lib/**
+            Build/release/*.log
+
+  ladybird-build-macos:
+    runs-on: macos-14
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt
+
+      - name: Build Ladybird (macOS)
+        run: python3 Meta/ladybird.py build
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-macos
+          path: |
+            Build/release/**/*.log
+            Build/release/**/*.txt
+
+      - name: Upload binaries (optional)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-build-macos
           path: |
             Build/release/bin/**
             Build/release/lib/**
