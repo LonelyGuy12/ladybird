@@ -139,10 +139,14 @@ jobs:
           restore-keys: |
             vcpkg-bin-clang20-v5-${{ runner.os }}-
 
-      - name: Hide Homebrew GCC to prevent CMake from finding it
+      - name: Setup build environment
         run: |
-          echo "=== Hiding Homebrew GCC to prevent CMake from finding it ==="
-          # Temporarily rename GCC so CMake cannot find it
+          echo "=== Setting up build environment ==="
+          # Create vcpkg cache directory
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+          echo "Created .vcpkg_cache directory"
+          
+          # Hide Homebrew GCC to prevent CMake from finding it
           if [ -f /opt/homebrew/bin/gcc ]; then
             sudo mv /opt/homebrew/bin/gcc /opt/homebrew/bin/gcc.hidden || true
           fi
@@ -155,20 +159,12 @@ jobs:
           if [ -f /opt/homebrew/bin/g++-14 ]; then
             sudo mv /opt/homebrew/bin/g++-14 /opt/homebrew/bin/g++-14.hidden || true
           fi
-          echo "GCC hidden - only Clang available now"
+          echo "GCC hidden - only Clang available"
           
-      - name: Force PATH to prioritize Apple toolchain
-        run: |
-          echo "Original PATH: $PATH"
-          export PATH="/usr/bin:/usr/local/bin:$PATH"
-          echo "Modified PATH: $PATH"
-          echo "PATH=/usr/bin:/usr/local/bin:$PATH" >> $GITHUB_ENV
-          which clang
-          which clang++
-          which gcc || echo "GCC not in PATH (good!)"
-          which g++ || echo "G++ not in PATH (good!)"
-          /usr/bin/clang --version
-          /usr/bin/clang++ --version
+          # Verify tools
+          which ninja
+          which clang-20 || which clang
+          echo "Build environment ready"
 
       - name: Build Ladybird (macOS)
         env:
