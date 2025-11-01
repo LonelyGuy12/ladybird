@@ -118,31 +118,22 @@ jobs:
           restore-keys: |
             vcpkg-src-v3-${{ runner.os }}-
 
-      - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
-        with:
-          path: .vcpkg_cache
-          key: vcpkg-bin-clang-v3-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-bin-clang-v3-${{ runner.os }}-
-
       - name: Install dependencies
         run: |
           brew update
           brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
-          mkdir -p ${{ github.workspace }}/.vcpkg_cache
           echo "Using Clang: CC=$CC CXX=$CXX"
           which clang
           $CC --version
           $CXX --version
 
-      - name: Force CMake to use Clang
+      - name: Force complete clean rebuild with Clang
         run: |
-          echo "Removing any cached CMake configuration..."
-          rm -rf Build/release/CMakeCache.txt Build/release/CMakeFiles
-          rm -rf Build/release/vcpkg_installed
-          echo "CMAKE_C_COMPILER=/usr/bin/clang" > $HOME/.cmake_config
-          echo "CMAKE_CXX_COMPILER=/usr/bin/clang++" >> $HOME/.cmake_config
+          echo "=== Forcing complete clean rebuild with Clang ==="
+          rm -rf Build/release
+          rm -rf .vcpkg_cache
+          mkdir -p .vcpkg_cache
+          echo "Cleaned all build artifacts and vcpkg caches"
 
       - name: Build Ladybird (macOS)
         env:
