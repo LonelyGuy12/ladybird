@@ -280,7 +280,6 @@ set(SOURCES
     CSS/StyleValues/SuperellipseStyleValue.cpp
     CSS/StyleValues/TextUnderlinePositionStyleValue.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
-    CSS/StyleValues/TransitionStyleValue.cpp
     CSS/StyleValues/TreeCountingFunctionStyleValue.cpp
     CSS/StyleValues/UnicodeRangeStyleValue.cpp
     CSS/StyleValues/UnresolvedStyleValue.cpp
@@ -441,9 +440,11 @@ set(SOURCES
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextGroup.cpp
     HTML/Canvas/CanvasDrawImage.cpp
+    HTML/Canvas/CanvasFillStrokeStyles.cpp
     HTML/Canvas/CanvasPath.cpp
     HTML/Canvas/CanvasSettings.cpp
     HTML/Canvas/CanvasState.cpp
+    HTML/Canvas/CanvasTextDrawingStyles.cpp
     HTML/Canvas/SerializeBitmap.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasPattern.cpp
@@ -573,6 +574,7 @@ set(SOURCES
     HTML/ListOfAvailableImages.cpp
     HTML/Location.cpp
     HTML/MediaError.cpp
+    HTML/MediaTrackBase.cpp
     HTML/MessageChannel.cpp
     HTML/MessageEvent.cpp
     HTML/MessagePort.cpp
@@ -843,8 +845,6 @@ set(SOURCES
     PerformanceTimeline/PerformanceObserverEntryList.cpp
     PermissionsPolicy/AutoplayAllowlist.cpp
     PixelUnits.cpp
-    Platform/AudioCodecPlugin.cpp
-    Platform/AudioCodecPluginAgnostic.cpp
     Platform/EventLoopPlugin.cpp
     Platform/EventLoopPluginSerenity.cpp
     Platform/FontPlugin.cpp
@@ -922,6 +922,7 @@ set(SOURCES
     SVG/SVGElement.cpp
     SVG/SVGEllipseElement.cpp
     SVG/SVGFEBlendElement.cpp
+    SVG/SVGFEColorMatrixElement.cpp
     SVG/SVGFECompositeElement.cpp
     SVG/SVGFEFloodElement.cpp
     SVG/SVGFEGaussianBlurElement.cpp
@@ -930,6 +931,7 @@ set(SOURCES
     SVG/SVGFEMergeNodeElement.cpp
     SVG/SVGFEOffsetElement.cpp
     SVG/SVGFilterElement.cpp
+    SVG/SVGFilterPrimitiveStandardAttributes.cpp
     SVG/SVGFitToViewBox.cpp
     SVG/SVGForeignObjectElement.cpp
     SVG/SVGGElement.cpp
@@ -1089,6 +1091,7 @@ set(SOURCES
     XHR/XMLHttpRequestUpload.cpp
     XLink/AttributeNames.cpp
     XML/XMLDocumentBuilder.cpp
+    XML/XMLFragmentParser.cpp
     XPath/XPath.cpp
     XPath/XPathEvaluator.cpp
     XPath/XPathExpression.cpp
@@ -1156,18 +1159,23 @@ set(GENERATED_SOURCES
     HTML/Parser/NamedCharacterReferences.cpp
 )
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# Include platform-aware Python finder
+include(${CMAKE_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
 
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 
-# Enable Python support
-# target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON)
+# Enable Python support with platform-specific configuration
+if(Python3_FOUND)
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
+    target_link_libraries(LibWeb PRIVATE Python3::Python)
+    target_include_directories(LibWeb PRIVATE ${PYTHON_INCLUDE_DIRS})
+    
+    message(STATUS "Python support enabled for LibWeb")
+endif()
 
 find_package(LibXml2 REQUIRED)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2 Python3::Python)
-
-target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
+target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2)
 
 generate_js_bindings(LibWeb)
 

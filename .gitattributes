@@ -5,5 +5,3 @@
 *.gif binary
 *.jpg binary
 *.png binary
-downloaded-artifacts/**/*.so filter=lfs diff=lfs merge=lfs -text
-downloaded-artifacts/**/*.a filter=lfs diff=lfs merge=lfs -text

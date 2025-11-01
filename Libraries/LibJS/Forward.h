@@ -152,6 +152,11 @@
 
 namespace JS {
 
+enum class Strict : u8 {
+    No,
+    Yes,
+};
+
 class ASTNode;
 class Accessor;
 class Agent;
@@ -226,7 +231,7 @@ enum class DeclarationKind;
 struct AlreadyResolved;
 class JobCallback;
 struct ModuleRequest;
-struct ModuleWithSpecifier;
+struct LoadedModuleRequest;
 
 // Not included in JS_ENUMERATE_NATIVE_OBJECTS due to missing distinct prototype
 class ProxyObject;

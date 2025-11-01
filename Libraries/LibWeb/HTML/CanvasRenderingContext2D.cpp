@@ -18,11 +18,15 @@
 #include <LibUnicode/Segmenter.h>
 #include <LibWeb/Bindings/CanvasRenderingContext2DPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/HTML/CanvasRenderingContext2D.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
+#include <LibWeb/HTML/HTMLMediaElement.h>
+#include <LibWeb/HTML/HTMLVideoElement.h>
 #include <LibWeb/HTML/ImageBitmap.h>
 #include <LibWeb/HTML/ImageData.h>
+#include <LibWeb/HTML/ImageRequest.h>
 #include <LibWeb/HTML/Path2D.h>
 #include <LibWeb/HTML/TextMetrics.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
@@ -134,31 +138,7 @@ WebIDL::ExceptionOr<void> CanvasRenderingContext2D::draw_image_internal(CanvasIm
     if (usability == CanvasImageSourceUsability::Bad)
         return {};
 
-    auto bitmap = image.visit(
-        [](GC::Root<HTMLImageElement> const& source) -> RefPtr<Gfx::ImmutableBitmap> {
-            auto width = source->intrinsic_width().value_or({}).to_int();
-            auto height = source->intrinsic_height().value_or({}).to_int();
-            return source->default_image_bitmap_sized({ width, height });
-        },
-        [](GC::Root<SVG::SVGImageElement> const& source) -> RefPtr<Gfx::ImmutableBitmap> {
-            auto width = source->intrinsic_width().value_or({}).to_int();
-            auto height = source->intrinsic_height().value_or({}).to_int();
-            return source->default_image_bitmap_sized({ width, height });
-        },
-        [](GC::Root<OffscreenCanvas> const& source) -> RefPtr<Gfx::ImmutableBitmap> { return Gfx::ImmutableBitmap::create(*source->bitmap()); },
-        [](GC::Root<HTMLCanvasElement> const& source) -> RefPtr<Gfx::ImmutableBitmap> {
-            auto surface = source->surface();
-            if (!surface)
-                return {};
-            return Gfx::ImmutableBitmap::create_snapshot_from_painting_surface(*surface);
-        },
-        [](GC::Root<HTMLVideoElement> const& source) -> RefPtr<Gfx::ImmutableBitmap> { return Gfx::ImmutableBitmap::create(*source->bitmap()); },
-        [](GC::Root<ImageBitmap> const& source) -> RefPtr<Gfx::ImmutableBitmap> {
-            auto* bitmap = source->bitmap();
-            if (!bitmap)
-                return {};
-            return Gfx::ImmutableBitmap::create(*bitmap);
-        });
+    auto bitmap = canvas_image_source_bitmap(image);
     if (!bitmap)
         return {};
 
@@ -170,6 +150,22 @@ WebIDL::ExceptionOr<void> CanvasRenderingContext2D::draw_image_internal(CanvasIm
     //    The source rectangle is the rectangle whose corners are the four points (sx, sy), (sx+sw, sy), (sx+sw, sy+sh), (sx, sy+sh).
     //    The destination rectangle is the rectangle whose corners are the four points (dx, dy), (dx+dw, dy), (dx+dw, dy+dh), (dx, dy+dh).
     // NOTE: Implemented in drawImage() overloads
+    if (source_width < 0) {
+        source_x += source_width;
+        source_width = abs(source_width);
+    }
+    if (source_height < 0) {
+        source_y += source_height;
+        source_height = abs(source_height);
+    }
+    if (destination_width < 0) {
+        destination_x += destination_width;
+        destination_width = abs(destination_width);
+    }
+    if (destination_height < 0) {
+        destination_y += destination_height;
+        destination_height = abs(destination_height);
+    }
 
     //    The source rectangle is the rectangle whose corners are the four points (sx, sy), (sx+sw, sy), (sx+sw, sy+sh), (sx, sy+sh).
     auto source_rect = Gfx::FloatRect { source_x, source_y, source_width, source_height };
@@ -290,15 +286,39 @@ Gfx::Path CanvasRenderingContext2D::text_path(Utf16String const& text, float x, 
     }
 
     // Apply text align
-    // FIXME: CanvasTextAlign::Start and CanvasTextAlign::End currently do not nothing for right-to-left languages:
-    //        https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-textalign-start
-    // Default alignment of draw_text is left so do nothing by CanvasTextAlign::Start and CanvasTextAlign::Left
+    // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-textalign
+    // The direction property affects how "start" and "end" are interpreted:
+    // - "ltr" or "inherit" (default): start=left, end=right
+    // - "rtl": start=right, end=left
+
+    // Determine if we're in RTL mode
+    bool is_rtl = drawing_state.direction == Bindings::CanvasDirection::Rtl;
+
+    // Center alignment is the same regardless of direction
     if (drawing_state.text_align == Bindings::CanvasTextAlign::Center) {
         transform = Gfx::AffineTransform {}.set_translation({ -text_width / 2, 0 }).multiply(transform);
     }
-    if (drawing_state.text_align == Bindings::CanvasTextAlign::End || drawing_state.text_align == Bindings::CanvasTextAlign::Right) {
+    // Handle "start" alignment
+    else if (drawing_state.text_align == Bindings::CanvasTextAlign::Start) {
+        // In RTL, "start" means right-aligned (translate by full width)
+        if (is_rtl) {
+            transform = Gfx::AffineTransform {}.set_translation({ -text_width, 0 }).multiply(transform);
+        }
+        // In LTR, "start" means left-aligned (no translation needed - default)
+    }
+    // Handle "end" alignment
+    else if (drawing_state.text_align == Bindings::CanvasTextAlign::End) {
+        // In RTL, "end" means left-aligned (no translation needed)
+        if (!is_rtl) {
+            // In LTR, "end" means right-aligned (translate by full width)
+            transform = Gfx::AffineTransform {}.set_translation({ -text_width, 0 }).multiply(transform);
+        }
+    }
+    // Explicit "left" and "right" alignments ignore direction
+    else if (drawing_state.text_align == Bindings::CanvasTextAlign::Right) {
         transform = Gfx::AffineTransform {}.set_translation({ -text_width, 0 }).multiply(transform);
     }
+    // Left is the default - no translation needed
 
     // Apply text baseline
     // FIXME: Implement CanvasTextBaseline::Hanging, Bindings::CanvasTextAlign::Alphabetic and Bindings::CanvasTextAlign::Ideographic for real
@@ -378,6 +398,9 @@ void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
         return;
 
     auto& state = drawing_state();
+    auto paint_style = state.stroke_style.to_gfx_paint_style();
+    if (!paint_style->is_visible())
+        return;
 
     auto line_cap = to_gfx_cap(state.line_cap);
     auto line_join = to_gfx_join(state.line_join);
@@ -389,7 +412,7 @@ void CanvasRenderingContext2D::stroke_internal(Gfx::Path const& path)
         dash_array.append(static_cast<float>(dash));
     }
     paint_shadow_for_stroke_internal(path, line_cap, line_join, dash_array);
-    painter->stroke_path(path, state.stroke_style.to_gfx_paint_style(), state.filter, state.line_width, state.global_alpha, state.current_compositing_and_blending_operator, line_cap, line_join, state.miter_limit, dash_array, state.line_dash_offset);
+    painter->stroke_path(path, paint_style, state.filter, state.line_width, state.global_alpha, state.current_compositing_and_blending_operator, line_cap, line_join, state.miter_limit, dash_array, state.line_dash_offset);
 
     did_draw(path.bounding_box());
 }
@@ -420,10 +443,14 @@ void CanvasRenderingContext2D::fill_internal(Gfx::Path const& path, Gfx::Winding
     if (!painter)
         return;
 
+    auto& state = this->drawing_state();
+    auto paint_style = state.fill_style.to_gfx_paint_style();
+    if (!paint_style->is_visible())
+        return;
+
     paint_shadow_for_fill_internal(path, winding_rule);
 
-    auto& state = this->drawing_state();
-    painter->fill_path(path, state.fill_style.to_gfx_paint_style(), state.filter, state.global_alpha, state.current_compositing_and_blending_operator, winding_rule);
+    painter->fill_path(path, paint_style, state.filter, state.global_alpha, state.current_compositing_and_blending_operator, winding_rule);
 
     did_draw(path.bounding_box());
 }
@@ -639,8 +666,10 @@ void CanvasRenderingContext2D::reset_to_default_state()
     // 4. Reset everything that drawing state consists of to their initial values.
     reset_drawing_state();
 
-    if (surface)
+    if (surface) {
+        painter()->reset();
         did_draw(surface->rect().to_type<float>());
+    }
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-measuretext
@@ -802,7 +831,9 @@ WebIDL::ExceptionOr<CanvasImageSourceUsability> check_usability_of_image(CanvasI
     auto usability = TRY(image.visit(
         // HTMLOrSVGImageElement
         [](GC::Root<HTMLImageElement> const& image_element) -> WebIDL::ExceptionOr<Optional<CanvasImageSourceUsability>> {
-            // FIXME: If image's current request's state is broken, then throw an "InvalidStateError" DOMException.
+            // If image's current request's state is broken, then throw an "InvalidStateError" DOMException.
+            if (image_element->current_request().state() == HTML::ImageRequest::State::Broken)
+                return WebIDL::InvalidStateError::create(image_element->realm(), "Image element state is broken"_utf16);
 
             // If image is not fully decodable, then return bad.
             if (!image_element->immutable_bitmap())
@@ -1046,9 +1077,9 @@ void CanvasRenderingContext2D::set_shadow_color(String color)
     auto style_value = parse_css_value(CSS::Parser::ParsingParams(), color, CSS::PropertyID::Color);
     if (style_value && style_value->has_color()) {
         CSS::ColorResolutionContext color_resolution_context {};
-
+        context.document().update_layout(DOM::UpdateLayoutReason::CanvasRenderingContext2DSetShadowColor);
         if (auto node = context.layout_node()) {
-            color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*context.layout_node());
+            color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*node);
         }
 
         auto parsedValue = style_value->to_color(color_resolution_context).value_or(Color::Black);
@@ -1071,9 +1102,6 @@ void CanvasRenderingContext2D::paint_shadow_for_fill_internal(Gfx::Path const& p
         return;
 
     if (state.current_compositing_and_blending_operator == Gfx::CompositingAndBlendingOperator::Copy)
-        return;
-
-    if (!state.fill_style.to_gfx_paint_style()->is_visible())
         return;
 
     auto alpha = state.global_alpha * (state.shadow_color.alpha() / 255.0f);
@@ -1108,9 +1136,6 @@ void CanvasRenderingContext2D::paint_shadow_for_stroke_internal(Gfx::Path const&
         return;
 
     if (state.shadow_blur == 0.0f && state.shadow_offset_x == 0.0f && state.shadow_offset_y == 0.0f)
-        return;
-
-    if (!state.stroke_style.to_gfx_paint_style()->is_visible())
         return;
 
     auto alpha = state.global_alpha * (state.shadow_color.alpha() / 255.0f);

@@ -491,7 +491,7 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
     // 5. Fetch request with the following processResponseConsumeBody steps given response response and null,
     //    or a byte sequence bodyBytes:
     Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
-    fetch_algorithms_input.process_response_consume_body = [&settings_object, options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
+    fetch_algorithms_input.process_response_consume_body = [options = move(options), on_complete = move(on_complete)](auto response, auto body_bytes) {
         // 1. Set response to response's unsafe response.
         response = response->unsafe_response();
 

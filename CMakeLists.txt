@@ -91,3 +91,28 @@ if (Python3_FOUND)
         USES_TERMINAL
     )
 endif()
+
+# CPack configuration for packaging
+set(CPACK_PACKAGE_NAME "ladybird")
+set(CPACK_PACKAGE_VENDOR "Ladybird Browser Initiative")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Ladybird Web Browser - A truly independent web browser")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT "https://github.com/LadybirdBrowser/ladybird")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_DESCRIPTION "Ladybird is a truly independent web browser, using a novel engine based on web standards.")
+
+# Debian-specific settings
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ladybird Team <https://github.com/LadybirdBrowser/ladybird>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "web")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6")
+
+# macOS-specific settings for DMG
+# Note: DMG is now created manually in CI using hdiutil for better control
+# CPack DragNDrop generator includes too many files by default
+if(APPLE)
+    # Keep CPack available but don't configure DMG generator
+    # Manual DMG creation in CI ensures only Ladybird.app is included
+endif()
+
+include(CPack)

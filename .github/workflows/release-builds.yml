@@ -1,0 +1,153 @@
+name: Multi-Platform Release Builds
+
+on:
+  push:
+    branches: [testing, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: macOS Release Build (Apple Silicon)
+    runs-on: macos-14
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja ccache qt6 python@3.12
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: macos-ccache-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Build Ladybird
+        run: ./Meta/ladybird.py build
+
+      - name: Create .dmg
+        run: |
+          cd Build/release
+          mkdir -p Ladybird.app/Contents/MacOS
+          mkdir -p Ladybird.app/Contents/Resources
+          cp -r bin/* Ladybird.app/Contents/MacOS/
+          cp -r lib/* Ladybird.app/Contents/MacOS/
+          
+          # Create DMG
+          hdiutil create -volname "Ladybird Browser" \
+            -srcfolder Ladybird.app \
+            -ov -format UDZO \
+            Ladybird-macOS-arm64.dmg
+
+      - name: Upload macOS .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-macos-arm64
+          path: Build/release/Ladybird-macOS-arm64.dmg
+
+  build-linux:
+    name: Linux Release Build (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
+      VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: linux-ccache-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            Build/vcpkg
+            Build/release/vcpkg_installed
+          key: vcpkg-linux-${{ hashFiles('vcpkg.json') }}
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-linux-${{ hashFiles('vcpkg.json') }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf autoconf-archive automake ccache cmake curl \
+            libgl1-mesa-dev libdrm-dev libtool nasm ninja-build pkg-config \
+            mesa-common-dev python3-venv python3-dev unzip zip \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-wayland \
+            qt6-multimedia-dev libpulse-dev
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+
+      - name: Build Ladybird
+        env:
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
+        run: ./Meta/ladybird.py build
+
+      - name: Create tarball
+        run: |
+          cd Build/release
+          tar -czf ladybird-linux-x86_64.tar.gz bin/ lib/
+
+      - name: Upload Linux tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-linux-x86_64
+          path: Build/release/ladybird-linux-x86_64.tar.gz
+
+  build-windows:
+    # Windows builds are disabled for now
+    if: false
+    runs-on: windows-latest
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/testing' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.sha }}
+          name: Ladybird Browser - Build ${{ github.run_number }}
+          body: |
+            ## Ladybird Browser with Python Integration
+            
+            **Platforms:**
+            - 🍎 macOS (Apple Silicon): `Ladybird-macOS-arm64.dmg`
+            - 🐧 Linux (x86_64): `ladybird-linux-x86_64.tar.gz`
+            
+            
+            **Features:**
+            - Full Python integration with DOM bindings
+            - Python-JavaScript bridge
+            - 75 Python binding symbols
+            
+            **Build Information:**
+            - Commit: ${{ github.sha }}
+            - Build: #${{ github.run_number }}
+            - Date: ${{ github.event.head_commit.timestamp }}
+          files: |
+            ladybird-macos-arm64/Ladybird-macOS-arm64.dmg
+            ladybird-linux-x86_64/ladybird-linux-x86_64.tar.gz
+            
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2025, Andreas Kling <andreas@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -179,7 +179,7 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
     if (!function.is_strict_mode()) {
         bool can_elide_lexical_environment = !scope_body || !scope_body->has_non_local_lexical_declarations();
         if (!can_elide_lexical_environment) {
-            emit<Op::CreateLexicalEnvironment>(function.shared_data().m_lex_environment_bindings_count);
+            emit<Op::CreateLexicalEnvironment>(OptionalNone {}, function.shared_data().m_lex_environment_bindings_count);
         }
     }
 
@@ -218,6 +218,14 @@ CodeGenerationErrorOr<void> Generator::emit_function_declaration_instantiation(E
 CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode const& node, FunctionKind enclosing_function_kind, GC::Ptr<ECMAScriptFunctionObject const> function, MustPropagateCompletion must_propagate_completion, Vector<LocalVariable> local_variable_names)
 {
     Generator generator(vm, function, must_propagate_completion);
+
+    if (is<Program>(node))
+        generator.m_strict = static_cast<Program const&>(node).is_strict_mode() ? Strict::Yes : Strict::No;
+    else if (is<FunctionBody>(node))
+        generator.m_strict = static_cast<FunctionBody const&>(node).in_strict_mode() ? Strict::Yes : Strict::No;
+    else if (is<FunctionDeclaration>(node))
+        generator.m_strict = static_cast<FunctionDeclaration const&>(node).is_strict_mode() ? Strict::Yes : Strict::No;
+
     generator.m_local_variables = local_variable_names;
 
     generator.switch_to_basic_block(generator.make_block());
@@ -259,14 +267,6 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
             generator.emit_return<Bytecode::Op::Yield>(generator.add_constant(js_undefined()));
         }
     }
-
-    bool is_strict_mode = false;
-    if (is<Program>(node))
-        is_strict_mode = static_cast<Program const&>(node).is_strict_mode();
-    else if (is<FunctionBody>(node))
-        is_strict_mode = static_cast<FunctionBody const&>(node).in_strict_mode();
-    else if (is<FunctionDeclaration>(node))
-        is_strict_mode = static_cast<FunctionDeclaration const&>(node).is_strict_mode();
 
     size_t size_needed = 0;
     for (auto& block : generator.m_root_basic_blocks) {
@@ -453,7 +453,7 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
         generator.m_next_property_lookup_cache,
         generator.m_next_global_variable_cache,
         generator.m_next_register,
-        is_strict_mode);
+        generator.m_strict);
 
     Vector<Executable::ExceptionHandlers> linked_exception_handlers;
 
@@ -476,6 +476,8 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
     executable->local_index_base = number_of_registers + number_of_constants;
     executable->argument_index_base = number_of_registers + number_of_constants + number_of_locals;
     executable->length_identifier = generator.m_length_identifier;
+
+    executable->registers_and_constants_and_locals_count = executable->number_of_registers + executable->constants.size() + executable->local_variable_names.size();
 
     generator.m_finished = true;
 
@@ -570,10 +572,58 @@ bool Generator::emit_block_declaration_instantiation(ScopeNode const& scope_node
     if (!needs_block_declaration_instantiation)
         return false;
 
-    // FIXME: Generate the actual bytecode for block declaration instantiation
-    //        and get rid of the BlockDeclarationInstantiation instruction.
+    auto environment = allocate_register();
+    emit<Bytecode::Op::CreateLexicalEnvironment>(environment);
     start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-    emit<Bytecode::Op::BlockDeclarationInstantiation>(scope_node);
+
+    MUST(scope_node.for_each_lexically_scoped_declaration([&](Declaration const& declaration) {
+        auto is_constant_declaration = declaration.is_constant_declaration();
+        // NOTE: Due to the use of MUST with `create_immutable_binding` and `create_mutable_binding` below,
+        //       an exception should not result from `for_each_bound_name`.
+        // a. For each element dn of the BoundNames of d, do
+        MUST(declaration.for_each_bound_identifier([&](Identifier const& identifier) {
+            if (identifier.is_local()) {
+                // NOTE: No need to create bindings for local variables as their values are not stored in an environment.
+                return;
+            }
+
+            auto const& name = identifier.string();
+
+            // i. If IsConstantDeclaration of d is true, then
+            if (is_constant_declaration) {
+                // 1. Perform ! env.CreateImmutableBinding(dn, true).
+                emit<Bytecode::Op::CreateImmutableBinding>(environment, intern_identifier(name), true);
+            }
+            // ii. Else,
+            else {
+                // 1. Perform ! env.CreateMutableBinding(dn, false). NOTE: This step is replaced in section B.3.2.6.
+                emit<Bytecode::Op::CreateMutableBinding>(environment, intern_identifier(name), false);
+            }
+        }));
+
+        // b. If d is either a FunctionDeclaration, a GeneratorDeclaration, an AsyncFunctionDeclaration, or an AsyncGeneratorDeclaration, then
+        if (is<FunctionDeclaration>(declaration)) {
+            // i. Let fn be the sole element of the BoundNames of d.
+            auto& function_declaration = static_cast<FunctionDeclaration const&>(declaration);
+
+            // ii. Let fo be InstantiateFunctionObject of d with arguments env and privateEnv.
+            auto fo = allocate_register();
+            emit<Bytecode::Op::NewFunction>(fo, function_declaration, OptionalNone {});
+
+            // iii. Perform ! env.InitializeBinding(fn, fo). NOTE: This step is replaced in section B.3.2.6.
+            if (function_declaration.name_identifier()->is_local()) {
+                auto local_index = function_declaration.name_identifier()->local_index();
+                if (local_index.is_variable()) {
+                    emit<Bytecode::Op::Mov>(local(local_index), fo);
+                } else {
+                    VERIFY_NOT_REACHED();
+                }
+            } else {
+                emit<Bytecode::Op::InitializeLexicalBinding>(intern_identifier(function_declaration.name()), fo);
+            }
+        }
+    }));
+
     return true;
 }
 

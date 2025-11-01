@@ -6,6 +6,7 @@
 
 #include <LibWeb/Bindings/PythonDOMBindings.h>
 #include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibWeb/Bindings/TestPythonDOMModule.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -14,6 +15,7 @@
 #include <LibWeb/HTML/History.h>
 #include <LibWeb/HTML/Location.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/TrustedTypes/TrustedHTML.h>
 #include <LibGC/Heap.h>
 #include <AK/OwnPtr.h>
 
@@ -202,6 +204,9 @@ static PyTypeObject document_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
+    0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonDocument::setup_type()
@@ -402,7 +407,11 @@ static int python_element_set_text_content(PythonElementObject* self, PyObject* 
 
     auto text_view = StringView { text, strlen(text) };
     auto text_utf16 = Utf16String::from_utf8(text_view);
-    self->element->set_text_content(text_utf16);
+    auto result = self->element->set_text_content(text_utf16);
+    if (result.is_error()) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to set text content");
+        return -1;
+    }
     return 0;
 }
 
@@ -417,7 +426,15 @@ static PyObject* python_element_get_inner_html(PythonElementObject* self, void*)
     if (html_result.is_error())
         return PyUnicode_FromString("");
     auto html = html_result.release_value();
-    auto html_byte_str = html.to_byte_string();
+    // html is a Variant<TrustedHTML, Utf16String>
+    Utf16String html_utf16;
+    if (html.has<GC::Root<Web::TrustedTypes::TrustedHTML>>()) {
+        auto& trusted = html.get<GC::Root<Web::TrustedTypes::TrustedHTML>>();
+        html_utf16 = trusted->to_string();
+    } else {
+        html_utf16 = html.get<Utf16String>();
+    }
+    auto html_byte_str = html_utf16.to_byte_string();
     return PyUnicode_FromString(html_byte_str.characters());
 }
 
@@ -439,7 +456,10 @@ static int python_element_set_inner_html(PythonElementObject* self, PyObject* va
     }
 
     auto html_view = StringView { html, strlen(html) };
-    auto result = self->element->set_inner_html(html_view);
+    auto html_utf16 = Utf16String::from_utf8(html_view);
+    // Create TrustedHTMLOrString variant with Utf16String
+    TrustedTypes::TrustedHTMLOrString html_variant = html_utf16;
+    auto result = self->element->set_inner_html(html_variant);
     if (result.is_error()) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to set inner HTML");
         return -1;
@@ -512,6 +532,9 @@ static PyTypeObject element_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
+    0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonElement::setup_type()
@@ -566,10 +589,7 @@ static PyObject* python_window_get_document(PythonWindowObject* self, void*)
     }
 
     auto document_ref = self->window->document();
-    if (!document_ref) {
-        PyErr_SetString(PyExc_RuntimeError, "Window has no document");
-        return nullptr;
-    }
+    // GC::Ref is guaranteed non-null, no need to check
     return PythonDocument::create_from_cpp_document(const_cast<Web::DOM::Document&>(*document_ref));
 }
 
@@ -581,10 +601,7 @@ static PyObject* python_window_get_location(PythonWindowObject* self, void*)
     }
 
     auto location_ref = self->window->location();
-    if (!location_ref) {
-        PyErr_SetString(PyExc_RuntimeError, "Window has no location");
-        return nullptr;
-    }
+    // GC::Ref is guaranteed non-null, no need to check
     // For simplicity, return the href as a string
     auto href_result = location_ref->href();
     if (href_result.is_error())
@@ -651,6 +668,9 @@ static PyTypeObject window_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
+    0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonWindow::setup_type()
@@ -669,11 +689,10 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
     setup_type();
 
     auto document_ref = window.document();
-    if (!document_ref)
-        return nullptr;
     
-    // Cast away const to access mutable wrapper cache    
-    auto* document_mut = const_cast<Web::DOM::Document*>(document_ref.ptr());
+    // Cast away const to access mutable wrapper cache
+    // Dereference GC::Ref to get const Document&, then const_cast to mutable
+    auto* document_mut = const_cast<Web::DOM::Document*>(&*document_ref);
     if (!document_mut->m_python_dom_wrapper_cache)
         document_mut->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
     if (auto* wrapper = document_mut->m_python_dom_wrapper_cache->get_wrapper(&window))

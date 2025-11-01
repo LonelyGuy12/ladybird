@@ -6,10 +6,10 @@
 
 #pragma once
 
+#include <LibWeb/Bindings/PythonPlatform.h>
 #include <LibGC/Forward.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Forward.h>
-#include <Python.h>
 
 namespace Web::Bindings {
 

@@ -37,28 +37,15 @@ target_link_libraries(webcontentservice PUBLIC LibCore LibCrypto LibFileSystem L
 target_link_libraries(webcontentservice PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 target_link_libraries(webcontentservice PRIVATE SDL3::SDL3)
 
-if (ENABLE_QT AND NOT DEFINED LADYBIRD_AUDIO_BACKEND)
-    find_package(Qt6 REQUIRED COMPONENTS Multimedia)
-
-    qt_add_executable(WebContent main.cpp)
-    target_link_libraries(WebContent PRIVATE Qt::Core)
-    target_compile_definitions(WebContent PRIVATE HAVE_QT=1)
-
-    target_sources(WebContent PRIVATE
-        ${LADYBIRD_SOURCE_DIR}/UI/Qt/AudioCodecPluginQt.cpp
-        ${LADYBIRD_SOURCE_DIR}/UI/Qt/AudioThread.cpp
-    )
-    target_link_libraries(WebContent PRIVATE LibWebViewPlatform Qt::Multimedia)
-    target_compile_definitions(WebContent PRIVATE HAVE_QT_MULTIMEDIA=1)
-else()
-    add_executable(WebContent main.cpp)
-endif()
+add_executable(WebContent main.cpp)
 
 target_link_libraries(WebContent PRIVATE webcontentservice LibURL)
 
 if(WIN32)
     find_package(unofficial-angle REQUIRED CONFIG)
-    target_link_libraries(WebContent PRIVATE LibTextCodec unofficial::angle::libGLESv2)
+    find_package(SQLite3 REQUIRED)
+    target_link_libraries(WebContent PRIVATE LibMedia LibTextCodec SQLite::SQLite3 unofficial::angle::libGLESv2)
+    lagom_windows_bin(WebContent)
 endif()
 
 

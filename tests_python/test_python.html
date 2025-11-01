@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Integration Test - Ladybird</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(to bottom, #2c3e50, #3498db);
+            color: white;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #ffd700;
+            margin-bottom: 30px;
+        }
+        
+        .test-section {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .test-section h2 {
+            color: #ffd700;
+            margin-top: 0;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        
+        button {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #c0392b;
+        }
+        
+        .result {
+            background: rgba(46, 204, 113, 0.2);
+            border-left: 4px solid #2ecc71;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        
+        .error {
+            background: rgba(231, 76, 60, 0.2);
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 12px 25px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <h1>🐍 Python Integration Test</h1>
+    <p class="subtitle">Testing Python-JavaScript Bridge in Ladybird</p>
+    
+    <div class="test-section">
+        <h2>About This Test</h2>
+        <p>This page tests Ladybird's unique Python integration feature. If Python is enabled in your build, 
+        you should be able to execute Python code directly in the browser!</p>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 1: Basic Python Execution</h2>
+        <p>Run a simple Python calculation:</p>
+        <div class="code-block">
+# Python code
+result = 2 + 2
+print(f"2 + 2 = {result}")
+        </div>
+        <button onclick="testBasicPython()">Run Python Code</button>
+        <div id="test1-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Python String Manipulation</h2>
+        <p>Test Python string operations:</p>
+        <div class="code-block">
+# Python code
+text = "Hello from Python!"
+reversed_text = text[::-1]
+print(reversed_text)
+        </div>
+        <button onclick="testStringManipulation()">Run String Test</button>
+        <div id="test2-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Python List Comprehension</h2>
+        <p>Test Python list comprehension:</p>
+        <div class="code-block">
+# Python code
+squares = [x**2 for x in range(1, 11)]
+print(f"Squares: {squares}")
+        </div>
+        <button onclick="testListComprehension()">Run List Test</button>
+        <div id="test3-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Python-JS Interaction</h2>
+        <p>Test data exchange between Python and JavaScript:</p>
+        <div class="code-block">
+# Python code (hypothetical)
+import js
+title = js.document.title
+js.console.log(f"Page title is: {title}")
+        </div>
+        <button onclick="testPythonJSInteraction()">Run Interaction Test</button>
+        <div id="test4-result"></div>
+    </div>
+    
+    <div style="text-align: center;">
+        <a href="test_basic.html" class="back-link">← Back to Basic Test</a>
+    </div>
+
+    <script>
+        function testBasicPython() {
+            const resultDiv = document.getElementById('test1-result');
+            
+            // Check if Python is available
+            if (typeof window.executePython === 'function') {
+                try {
+                    const result = window.executePython('2 + 2');
+                    resultDiv.className = 'result';
+                    resultDiv.innerHTML = `<strong>✅ Success!</strong><br>Result: ${result}`;
+                } catch (e) {
+                    resultDiv.className = 'error';
+                    resultDiv.innerHTML = `<strong>❌ Error:</strong><br>${e.message}`;
+                }
+            } else {
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `<strong>⚠️ Python Not Available</strong><br>
+                    Python integration is not enabled in this build. This is normal if:
+                    <ul>
+                        <li>Python support was not compiled in</li>
+                        <li>This is a test build without Python features</li>
+                    </ul>
+                    JavaScript execution is working correctly!`;
+            }
+        }
+        
+        function testStringManipulation() {
+            const resultDiv = document.getElementById('test2-result');
+            
+            if (typeof window.executePython === 'function') {
+                try {
+                    const result = window.executePython('"Hello from Python!"[::-1]');
+                    resultDiv.className = 'result';
+                    resultDiv.innerHTML = `<strong>✅ Success!</strong><br>Reversed: ${result}`;
+                } catch (e) {
+                    resultDiv.className = 'error';
+                    resultDiv.innerHTML = `<strong>❌ Error:</strong><br>${e.message}`;
+                }
+            } else {
+                // Fallback to JavaScript
+                const text = "Hello from Python!";
+                const reversed = text.split('').reverse().join('');
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = `<strong>📝 JavaScript Fallback:</strong><br>Reversed: ${reversed}`;
+            }
+        }
+        
+        function testListComprehension() {
+            const resultDiv = document.getElementById('test3-result');
+            
+            if (typeof window.executePython === 'function') {
+                try {
+                    const result = window.executePython('[x**2 for x in range(1, 11)]');
+                    resultDiv.className = 'result';
+                    resultDiv.innerHTML = `<strong>✅ Success!</strong><br>Squares: ${result}`;
+                } catch (e) {
+                    resultDiv.className = 'error';
+                    resultDiv.innerHTML = `<strong>❌ Error:</strong><br>${e.message}`;
+                }
+            } else {
+                // Fallback to JavaScript
+                const squares = Array.from({length: 10}, (_, i) => (i + 1) ** 2);
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = `<strong>📝 JavaScript Fallback:</strong><br>Squares: ${squares.join(', ')}`;
+            }
+        }
+        
+        function testPythonJSInteraction() {
+            const resultDiv = document.getElementById('test4-result');
+            
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = `<strong>✨ Browser Information (via JavaScript):</strong><br>
+                <ul style="text-align: left; margin-top: 10px;">
+                    <li><strong>Page Title:</strong> ${document.title}</li>
+                    <li><strong>User Agent:</strong> ${navigator.userAgent}</li>
+                    <li><strong>Window Size:</strong> ${window.innerWidth} x ${window.innerHeight}</li>
+                    <li><strong>Current Time:</strong> ${new Date().toLocaleString()}</li>
+                </ul>
+                ${typeof window.executePython !== 'function' ? 
+                    '<p style="color: #ffd700;">Note: Python bridge not available, showing JS data only.</p>' : 
+                    '<p style="color: #2ecc71;">Python bridge is available!</p>'}`;
+        }
+        
+        // Auto-run basic test on load
+        window.addEventListener('load', () => {
+            console.log('🚀 Ladybird Python Integration Test Page Loaded');
+            console.log('Python available:', typeof window.executePython === 'function');
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 {
-  "builtin-baseline": "b0b3de1b1a0aa4b8f2822460aa7f42f991629b3f",
+  "builtin-baseline": "d80785c4ee1df22a4119a3451452f59e978e06aa",
   "dependencies": [
     {
       "name": "angle",
@@ -32,7 +32,7 @@
     {
       "name": "dbus",
       "default-features": false,
-      "platform": "linux"
+      "platform": "linux | freebsd"
     },
     {
       "name": "dirent",
@@ -113,6 +113,7 @@
       "platform": "freebsd",
       "default-features": false,
       "features": [
+        "dbus",
         "doubleconversion",
         "fontconfig",
         "freetype",
@@ -152,10 +153,6 @@
         "widgets",
         "zstd"
       ]
-    },
-    {
-      "name": "qtmultimedia",
-      "platform": "windows | freebsd"
     },
     {
       "name": "pthread",
@@ -209,7 +206,7 @@
   "overrides": [
     {
       "name": "angle",
-      "version": "chromium_7258#0"
+      "version": "chromium_7400#0"
     },
     {
       "name": "curl",
@@ -265,7 +262,7 @@
     },
     {
       "name": "libavif",
-      "version": "1.3.0#0"
+      "version": "1.3.0#1"
     },
     {
       "name": "libwebp",
@@ -282,10 +279,6 @@
     {
       "name": "qtbase",
       "version": "6.8.3#2"
-    },
-    {
-      "name": "qtmultimedia",
-      "version": "6.8.3#0"
     },
     {
       "name": "sdl3",

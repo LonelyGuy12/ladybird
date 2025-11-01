@@ -384,7 +384,6 @@ class TimePercentage;
 class TimeStyleValue;
 class Transformation;
 class TransformationStyleValue;
-class TransitionStyleValue;
 class TreeCountingFunctionStyleValue;
 class UnicodeRangeStyleValue;
 class UnresolvedStyleValue;
@@ -395,13 +394,18 @@ class VisualViewport;
 enum class Keyword : u16;
 enum class MediaFeatureID : u8;
 enum class PropertyID : u16;
+enum class PaintOrder : u8;
+enum class ValueType : u8;
 
 struct BackgroundLayerData;
 struct CalculationContext;
 struct CalculationResolutionContext;
 struct CSSStyleSheetInit;
 struct GridRepeatParams;
+struct LogicalAliasMappingContext;
 struct StyleSheetIdentifier;
+
+using PaintOrderList = Array<PaintOrder, 3>;
 
 }
 
@@ -984,7 +988,6 @@ class AutoplayAllowlist;
 
 namespace Web::Platform {
 
-class AudioCodecPlugin;
 class Timer;
 
 }
@@ -1099,6 +1102,7 @@ class SVGDescElement;
 class SVGElement;
 class SVGEllipseElement;
 class SVGFEBlendElement;
+class SVGFEColorMatrixElement;
 class SVGFECompositeElement;
 class SVGFEFloodElement;
 class SVGFEGaussianBlurElement;
