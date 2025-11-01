@@ -427,7 +427,7 @@ static PyObject* python_element_get_inner_html(PythonElementObject* self, void*)
     Utf16String html_utf16;
     if (html.has<GC::Root<Web::TrustedTypes::TrustedHTML>>()) {
         auto& trusted = html.get<GC::Root<Web::TrustedTypes::TrustedHTML>>();
-        html_utf16 = trusted->data();
+        html_utf16 = trusted->to_string();
     } else {
         html_utf16 = html.get<Utf16String>();
     }
