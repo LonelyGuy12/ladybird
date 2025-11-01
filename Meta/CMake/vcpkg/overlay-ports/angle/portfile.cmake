@@ -171,6 +171,15 @@ checkout_in_path(
     "${ANGLE_THIRDPARTY_ZLIB_COMMIT}"
 )
 
+# Force Clang on macOS (ANGLE requires Apple Clang for macOS-specific APIs)
+if(VCPKG_TARGET_IS_OSX)
+    set(CMAKE_C_COMPILER_OPTION "-DCMAKE_C_COMPILER=/usr/bin/clang")
+    set(CMAKE_CXX_COMPILER_OPTION "-DCMAKE_CXX_COMPILER=/usr/bin/clang++")
+else()
+    set(CMAKE_C_COMPILER_OPTION "")
+    set(CMAKE_CXX_COMPILER_OPTION "")
+endif()
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS_DEBUG -DDISABLE_INSTALL_HEADERS=1
@@ -180,6 +189,8 @@ vcpkg_cmake_configure(
         "-DANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW=${ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW}"
         "-DVCPKG_TARGET_IS_WINDOWS=${VCPKG_TARGET_IS_WINDOWS}"
         "-DUSE_METAL=${USE_METAL}"
+        ${CMAKE_C_COMPILER_OPTION}
+        ${CMAKE_CXX_COMPILER_OPTION}
 )
 
 vcpkg_cmake_install()
