@@ -119,6 +119,15 @@ runs:
         brew update
         brew install autoconf autoconf-archive automake bash ccache coreutils libtool llvm@20 nasm ninja pkg-config qt unzip wabt
 
+    - name: 'Force Ninja for CMake on macOS'
+      if: ${{ inputs.os == 'macOS' }}
+      shell: bash
+      run: |
+        set -e
+        echo "CMAKE_MAKE_PROGRAM=$(which ninja)" >> "$GITHUB_ENV"
+        echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        which ninja
+
     - name: 'Set required environment variables'
       if: ${{ inputs.os == 'Linux' && inputs.arch == 'arm64' }}
       uses: actions/github-script@v7

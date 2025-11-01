@@ -5,8 +5,3 @@
 *.gif binary
 *.jpg binary
 *.png binary
-downloaded-artifacts/**/*.so filter=lfs diff=lfs merge=lfs -text
-downloaded-artifacts/**/*.a filter=lfs diff=lfs merge=lfs -text
-ladybird-build/lib/*.so* filter=lfs diff=lfs merge=lfs -text
-ladybird-build/lib/*.a filter=lfs diff=lfs merge=lfs -text
-ladybird-build/bin/* filter=lfs diff=lfs merge=lfs -text
