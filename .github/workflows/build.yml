@@ -104,11 +104,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Clean old build artifacts
+        run: |
+          echo "Cleaning old build directory to force Clang rebuild..."
+          rm -rf Build/release
+
       - name: Cache ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           verbose: 1
-          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          key: ladybird-ccache-clang-v2-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -116,28 +121,26 @@ jobs:
           path: |
             Build/vcpkg
             Build/release/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-clang-v2-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-
+            vcpkg-clang-v2-${{ runner.os }}-
 
       - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-bin-clang-v2-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
           restore-keys: |
-            vcpkg-bin-${{ runner.os }}-
+            vcpkg-bin-clang-v2-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
           brew update
           brew install cmake ninja ccache qt llvm@20 python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
           mkdir -p ${{ github.workspace }}/.vcpkg_cache
-
-      - name: Force clean CMake reconfigure with Clang
-        run: |
-          rm -rf Build/release/CMakeCache.txt Build/release/CMakeFiles
-          echo "Forcing Clang: CC=$CC CXX=$CXX"
+          echo "Using Clang: CC=$CC CXX=$CXX"
+          $CC --version
+          $CXX --version
 
       - name: Build Ladybird (macOS)
         env:
