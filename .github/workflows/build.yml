@@ -219,47 +219,111 @@ jobs:
       - name: Create DMG package
         if: success()
         run: |
-          echo "=== Creating clean DMG with only Ladybird.app ==="
+          echo "=== Inspecting build output ==="
+          find Build/release -type f -name "Ladybird" -o -name "ladybird" | head -5
+          find Build/release -name "*.app" -type d
           
-          # Find the built app bundle
+          echo "=== Checking for main executable ==="
+          MAIN_EXECUTABLE=$(find Build/release -type f -name "Ladybird" -perm +111 | grep -v ".app" | head -1)
+          
+          if [ -z "$MAIN_EXECUTABLE" ]; then
+            echo "ERROR: Main Ladybird executable not found!"
+            echo "Searching for any executables:"
+            find Build/release/bin -type f -perm +111 | head -10
+            exit 1
+          fi
+          
+          echo "Found main executable: $MAIN_EXECUTABLE"
+          ls -lh "$MAIN_EXECUTABLE"
+          file "$MAIN_EXECUTABLE"
+          
+          # Check for Qt libraries
+          echo "=== Checking for Qt libraries ==="
+          find Build/release -name "*.dylib" | head -10
+          
+          # Look for app bundle or create one
           APP_BUNDLE=$(find Build/release -name "Ladybird.app" -type d | head -1)
           
           if [ -z "$APP_BUNDLE" ]; then
-            echo "ERROR: Ladybird.app not found!"
-            find Build/release -name "*.app" -type d
-            exit 1
+            echo "=== No app bundle found, checking bin directory ==="
+            if [ -d "Build/release/bin/Ladybird.app" ]; then
+              APP_BUNDLE="Build/release/bin/Ladybird.app"
+            else
+              echo "ERROR: Ladybird.app not found anywhere!"
+              echo "Directory structure:"
+              ls -la Build/release/bin/ || true
+              exit 1
+            fi
           fi
           
           echo "Found app bundle: $APP_BUNDLE"
           
-          # Ad-hoc code sign the app bundle to prevent "damaged app" error
+          # Verify app bundle structure and size
+          echo "=== Verifying app bundle contents ==="
+          ls -la "$APP_BUNDLE/Contents/"
+          ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "No MacOS directory!"
+          ls -la "$APP_BUNDLE/Contents/Frameworks/" || echo "No Frameworks directory!"
+          ls -la "$APP_BUNDLE/Contents/Resources/" || echo "No Resources directory!"
+          
+          # Check bundle size
+          BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "App bundle size: $BUNDLE_SIZE"
+          
+          # Check if main executable exists in bundle
+          if [ ! -f "$APP_BUNDLE/Contents/MacOS/Ladybird" ]; then
+            echo "ERROR: Main executable missing from app bundle!"
+            echo "Contents of MacOS directory:"
+            ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "Directory doesn't exist"
+            exit 1
+          fi
+          
+          EXEC_SIZE=$(ls -lh "$APP_BUNDLE/Contents/MacOS/Ladybird" | awk '{print $5}')
+          echo "Main executable size: $EXEC_SIZE"
+          
+          # Ad-hoc code sign the app bundle
           echo "=== Ad-hoc signing the app bundle ==="
           codesign --force --deep --sign - "$APP_BUNDLE"
-          
-          # Verify the signature
           codesign --verify --verbose "$APP_BUNDLE"
           
-          # Create a temporary directory for DMG contents
+          # Create DMG staging directory
           DMG_DIR="Build/dmg_staging"
+          rm -rf "$DMG_DIR"
           mkdir -p "$DMG_DIR"
           
-          # Copy the signed app bundle
+          # Copy the app bundle
+          echo "=== Copying app bundle to DMG staging ==="
           cp -R "$APP_BUNDLE" "$DMG_DIR/"
           
-          # Create Applications symlink for easy drag-and-drop
+          # Verify copied bundle
+          COPIED_SIZE=$(du -sh "$DMG_DIR/Ladybird.app" | cut -f1)
+          echo "Copied bundle size: $COPIED_SIZE"
+          
+          # Create Applications symlink
           ln -s /Applications "$DMG_DIR/Applications"
           
-          # Create DMG using hdiutil (native macOS tool)
+          # Create DMG
           DMG_NAME="Ladybird-0.1.0-macOS-arm64.dmg"
+          echo "=== Creating DMG ==="
           hdiutil create -volname "Ladybird" \
             -srcfolder "$DMG_DIR" \
             -ov -format UDZO \
             "Build/release/$DMG_NAME"
           
-          echo "=== DMG created successfully ==="
+          # Check DMG size
+          DMG_SIZE=$(ls -lh "Build/release/$DMG_NAME" | awk '{print $5}')
+          echo "=== DMG created ==="
+          echo "DMG size: $DMG_SIZE"
           ls -lh "Build/release/$DMG_NAME"
           
-          # Sign the DMG as well
+          # Warn if DMG is suspiciously small
+          DMG_SIZE_BYTES=$(stat -f%z "Build/release/$DMG_NAME")
+          if [ "$DMG_SIZE_BYTES" -lt 50000000 ]; then
+            echo "⚠️  WARNING: DMG is only $(echo $DMG_SIZE_BYTES | awk '{print $1/1024/1024}') MB!"
+            echo "⚠️  This is suspiciously small for a browser. Expected 200+ MB."
+            echo "⚠️  The app bundle may be incomplete!"
+          fi
+          
+          # Sign the DMG
           echo "=== Signing the DMG ==="
           codesign --force --sign - "Build/release/$DMG_NAME"
 
