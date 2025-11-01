@@ -232,11 +232,18 @@ jobs:
           
           echo "Found app bundle: $APP_BUNDLE"
           
+          # Ad-hoc code sign the app bundle to prevent "damaged app" error
+          echo "=== Ad-hoc signing the app bundle ==="
+          codesign --force --deep --sign - "$APP_BUNDLE"
+          
+          # Verify the signature
+          codesign --verify --verbose "$APP_BUNDLE"
+          
           # Create a temporary directory for DMG contents
           DMG_DIR="Build/dmg_staging"
           mkdir -p "$DMG_DIR"
           
-          # Copy only the app bundle
+          # Copy the signed app bundle
           cp -R "$APP_BUNDLE" "$DMG_DIR/"
           
           # Create Applications symlink for easy drag-and-drop
@@ -251,6 +258,10 @@ jobs:
           
           echo "=== DMG created successfully ==="
           ls -lh "Build/release/$DMG_NAME"
+          
+          # Sign the DMG as well
+          echo "=== Signing the DMG ==="
+          codesign --force --sign - "Build/release/$DMG_NAME"
 
       - name: Upload DMG artifact
         if: success()
