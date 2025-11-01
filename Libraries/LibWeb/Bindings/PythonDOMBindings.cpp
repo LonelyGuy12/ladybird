@@ -204,7 +204,9 @@ static PyTypeObject document_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
     0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonDocument::setup_type()
@@ -530,7 +532,9 @@ static PyTypeObject element_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
     0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonElement::setup_type()
@@ -664,7 +668,9 @@ static PyTypeObject window_type = {
     0,                           /* tp_finalize */
     0,                           /* tp_vectorcall */
     0,                           /* tp_watched */
+#if PY_VERSION_HEX >= 0x030E0000 // Python 3.14+
     0,                           /* tp_versions_used */
+#endif
 };
 
 void PythonWindow::setup_type()
@@ -684,8 +690,9 @@ PyObject* PythonWindow::create_from_cpp_window(Web::HTML::Window& window)
 
     auto document_ref = window.document();
     
-    // Cast away const to access mutable wrapper cache    
-    auto* document_mut = const_cast<Web::DOM::Document*>(document_ref);
+    // Cast away const to access mutable wrapper cache
+    // Dereference GC::Ref to get const Document&, then const_cast to mutable
+    auto* document_mut = const_cast<Web::DOM::Document*>(&*document_ref);
     if (!document_mut->m_python_dom_wrapper_cache)
         document_mut->m_python_dom_wrapper_cache = make<PythonDOMWrapperCache>();
     if (auto* wrapper = document_mut->m_python_dom_wrapper_cache->get_wrapper(&window))

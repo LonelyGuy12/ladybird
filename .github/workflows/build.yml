@@ -117,15 +117,27 @@ jobs:
           ls -la /opt/homebrew/opt/llvm/bin/ || true
           /opt/homebrew/opt/llvm@20/bin/clang --version
 
-      - name: Nuclear clean - remove ALL caches
-        run: |
-          echo "=== NUCLEAR CLEAN: Removing ALL cached artifacts ==="
-          rm -rf Build
-          rm -rf .vcpkg_cache
-          rm -rf ~/.ccache
-          ccache --clear
-          mkdir -p .vcpkg_cache
-          echo "All caches cleared - fresh Clang-only build guaranteed"
+      - name: Cache ccache (Clang 20)
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          verbose: 1
+          key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Cache vcpkg source
+        uses: actions/cache@v4
+        with:
+          path: Build/vcpkg
+          key: vcpkg-src-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-src-clang20-v5-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives (Clang 20)
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-clang20-v5-${{ runner.os }}-
 
       - name: Hide Homebrew GCC to prevent CMake from finding it
         run: |
