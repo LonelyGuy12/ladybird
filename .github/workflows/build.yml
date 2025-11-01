@@ -104,20 +104,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cache ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          verbose: 1
-          key: ladybird-ccache-clang-v3-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
-
-      - name: Cache vcpkg source
-        uses: actions/cache@v4
-        with:
-          path: Build/vcpkg
-          key: vcpkg-src-v3-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-src-v3-${{ runner.os }}-
-
       - name: Install dependencies
         run: |
           brew update
@@ -127,13 +113,15 @@ jobs:
           $CC --version
           $CXX --version
 
-      - name: Force complete clean rebuild with Clang
+      - name: Nuclear clean - remove ALL caches
         run: |
-          echo "=== Forcing complete clean rebuild with Clang ==="
-          rm -rf Build/release
+          echo "=== NUCLEAR CLEAN: Removing ALL cached artifacts ==="
+          rm -rf Build
           rm -rf .vcpkg_cache
+          rm -rf ~/.ccache
+          ccache --clear
           mkdir -p .vcpkg_cache
-          echo "Cleaned all build artifacts and vcpkg caches"
+          echo "All caches cleared - fresh Clang-only build guaranteed"
 
       - name: Build Ladybird (macOS)
         env:
