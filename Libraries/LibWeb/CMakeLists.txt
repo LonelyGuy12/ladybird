@@ -1171,8 +1171,9 @@ if(Python3_FOUND)
     target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
     
     # Link Python library explicitly (don't rely on Python3::Python target which may not exist)
+    # Use PUBLIC so that executables linking to LibWeb also get Python
     if(Python3_LIBRARIES)
-        target_link_libraries(LibWeb PRIVATE ${Python3_LIBRARIES})
+        target_link_libraries(LibWeb PUBLIC ${Python3_LIBRARIES})
         message(STATUS "Python support enabled for LibWeb")
         message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
         message(STATUS "Python libraries: ${Python3_LIBRARIES}")
