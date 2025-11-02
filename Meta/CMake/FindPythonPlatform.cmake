@@ -49,11 +49,29 @@ elseif(APPLE)
         if(EXISTS "${PYTHON_PATH}")
             message(STATUS "Found Homebrew Python at: ${PYTHON_PATH}")
             set(Python3_ROOT_DIR "${PYTHON_PATH}")
+            
+            # Check for framework structure
+            if(EXISTS "${PYTHON_PATH}/Frameworks/Python.framework")
+                message(STATUS "  Python framework exists at: ${PYTHON_PATH}/Frameworks/Python.framework")
+            endif()
+            
             break()
         endif()
     endforeach()
     
+    message(STATUS "Searching for Python with Python3_ROOT_DIR=${Python3_ROOT_DIR}")
     find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
+    
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "Python3 not found! Searched in: ${Python3_ROOT_DIR}")
+    endif()
+    
+    if(NOT Python3_Development_FOUND)
+        message(FATAL_ERROR "Python3 Development component not found!")
+        message(FATAL_ERROR "  Python3_EXECUTABLE: ${Python3_EXECUTABLE}")
+        message(FATAL_ERROR "  Python3_INCLUDE_DIRS: ${Python3_INCLUDE_DIRS}")
+        message(FATAL_ERROR "  Python3_LIBRARIES: ${Python3_LIBRARIES}")
+    endif()
     
     if(Python3_FOUND)
         message(STATUS "Python3 found: ${Python3_VERSION}")
