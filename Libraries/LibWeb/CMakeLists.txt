@@ -36,12 +36,6 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/PrincipalHostDefined.cpp
-    Bindings/PythonDOMBindings.cpp
-    Bindings/PythonJSBridge.cpp
-    Bindings/PythonJSObjectWrapper.cpp
-    Bindings/TestPythonDOMModule.cpp
-    # Bindings/PythonObjectBridge.cpp
-    # Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
     Clipboard/Clipboard.cpp
     Clipboard/ClipboardEvent.cpp
@@ -1165,11 +1159,23 @@ ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 
 # Enable Python support with platform-specific configuration
 if(Python3_FOUND)
+    # Add Python source files to the library
+    target_sources(LibWeb PRIVATE
+        Bindings/PythonDOMBindings.cpp
+        Bindings/PythonJSBridge.cpp
+        Bindings/PythonJSObjectWrapper.cpp
+        Bindings/TestPythonDOMModule.cpp
+    )
+    
     target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
     target_link_libraries(LibWeb PRIVATE Python3::Python)
     target_include_directories(LibWeb PRIVATE ${PYTHON_INCLUDE_DIRS})
     
     message(STATUS "Python support enabled for LibWeb")
+    message(STATUS "Python include dirs: ${PYTHON_INCLUDE_DIRS}")
+    message(STATUS "Python libraries: ${PYTHON_LIBRARIES}")
+else()
+    message(FATAL_ERROR "Python 3.8+ with development headers is REQUIRED but was not found")
 endif()
 
 find_package(LibXml2 REQUIRED)
