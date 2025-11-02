@@ -220,28 +220,9 @@ jobs:
         if: success()
         run: |
           echo "=== Inspecting build output ==="
-          find Build/release -type f -name "Ladybird" -o -name "ladybird" | head -5
           find Build/release -name "*.app" -type d
           
-          echo "=== Checking for main executable ==="
-          MAIN_EXECUTABLE=$(find Build/release -type f -name "Ladybird" -perm +111 | grep -v ".app" | head -1)
-          
-          if [ -z "$MAIN_EXECUTABLE" ]; then
-            echo "ERROR: Main Ladybird executable not found!"
-            echo "Searching for any executables:"
-            find Build/release/bin -type f -perm +111 | head -10
-            exit 1
-          fi
-          
-          echo "Found main executable: $MAIN_EXECUTABLE"
-          ls -lh "$MAIN_EXECUTABLE"
-          file "$MAIN_EXECUTABLE"
-          
-          # Check for Qt libraries
-          echo "=== Checking for Qt libraries ==="
-          find Build/release -name "*.dylib" | head -10
-          
-          # Look for app bundle or create one
+          # Find the app bundle (it should already be built)
           APP_BUNDLE=$(find Build/release -name "Ladybird.app" -type d | head -1)
           
           if [ -z "$APP_BUNDLE" ]; then
@@ -260,25 +241,58 @@ jobs:
           
           # Verify app bundle structure and size
           echo "=== Verifying app bundle contents ==="
-          ls -la "$APP_BUNDLE/Contents/"
-          ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "No MacOS directory!"
-          ls -la "$APP_BUNDLE/Contents/Frameworks/" || echo "No Frameworks directory!"
-          ls -la "$APP_BUNDLE/Contents/Resources/" || echo "No Resources directory!"
+          echo "Bundle directory: $APP_BUNDLE"
+          ls -la "$APP_BUNDLE/Contents/" || echo "No Contents directory!"
           
+          echo ""
+          echo "MacOS directory:"
+          ls -lh "$APP_BUNDLE/Contents/MacOS/" || echo "No MacOS directory!"
+          
+          echo ""
+          echo "Frameworks directory:"
+          if [ -d "$APP_BUNDLE/Contents/Frameworks/" ]; then
+            ls -lh "$APP_BUNDLE/Contents/Frameworks/" | head -20
+            echo "Framework count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.framework" | wc -l)"
+            echo "Dylib count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)"
+          else
+            echo "⚠️  WARNING: No Frameworks directory! Qt libraries are missing!"
+          fi
+          
+          echo ""
+          echo "Resources directory:"
+          ls -lh "$APP_BUNDLE/Contents/Resources/" || echo "No Resources directory!"
+          
+          echo ""
+          echo "=== Bundle size analysis ==="
           # Check bundle size
           BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
-          echo "App bundle size: $BUNDLE_SIZE"
+          echo "Total app bundle size: $BUNDLE_SIZE"
+          
+          # Size breakdown
+          echo ""
+          echo "Size by directory:"
+          du -sh "$APP_BUNDLE/Contents/MacOS" 2>/dev/null || echo "MacOS: N/A"
+          du -sh "$APP_BUNDLE/Contents/Frameworks" 2>/dev/null || echo "Frameworks: N/A (⚠️  PROBLEM!)"
+          du -sh "$APP_BUNDLE/Contents/Resources" 2>/dev/null || echo "Resources: N/A"
           
           # Check if main executable exists in bundle
           if [ ! -f "$APP_BUNDLE/Contents/MacOS/Ladybird" ]; then
+            echo ""
             echo "ERROR: Main executable missing from app bundle!"
             echo "Contents of MacOS directory:"
             ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "Directory doesn't exist"
             exit 1
           fi
           
+          echo ""
           EXEC_SIZE=$(ls -lh "$APP_BUNDLE/Contents/MacOS/Ladybird" | awk '{print $5}')
           echo "Main executable size: $EXEC_SIZE"
+          file "$APP_BUNDLE/Contents/MacOS/Ladybird"
+          
+          # Check for required dylibs
+          echo ""
+          echo "=== Checking dynamic library dependencies ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | head -20
           
           # Ad-hoc code sign the app bundle
           echo "=== Ad-hoc signing the app bundle ==="
@@ -317,10 +331,34 @@ jobs:
           
           # Warn if DMG is suspiciously small
           DMG_SIZE_BYTES=$(stat -f%z "Build/release/$DMG_NAME")
+          DMG_SIZE_MB=$(echo "scale=1; $DMG_SIZE_BYTES / 1024 / 1024" | bc)
+          
+          echo ""
+          echo "=== Final DMG Analysis ==="
+          echo "DMG size: ${DMG_SIZE_MB} MB"
+          
           if [ "$DMG_SIZE_BYTES" -lt 50000000 ]; then
-            echo "⚠️  WARNING: DMG is only $(echo $DMG_SIZE_BYTES | awk '{print $1/1024/1024}') MB!"
-            echo "⚠️  This is suspiciously small for a browser. Expected 200+ MB."
-            echo "⚠️  The app bundle may be incomplete!"
+            echo ""
+            echo "❌❌❌ CRITICAL ERROR ❌❌❌"
+            echo "DMG is only ${DMG_SIZE_MB} MB - this is NOT usable!"
+            echo "Expected size: 200-500 MB for a complete browser"
+            echo ""
+            echo "Most likely causes:"
+            echo "  1. Qt frameworks not bundled (missing macdeployqt step)"
+            echo "  2. vcpkg libraries not copied"
+            echo "  3. Resources not included"
+            echo ""
+            echo "The app will CRASH immediately on launch!"
+            echo "DO NOT distribute this DMG!"
+            exit 1
+          elif [ "$DMG_SIZE_BYTES" -lt 100000000 ]; then
+            echo ""
+            echo "⚠️  WARNING: DMG is only ${DMG_SIZE_MB} MB"
+            echo "This is smaller than expected. Expected 200-500 MB."
+            echo "The app may be missing dependencies."
+          else
+            echo ""
+            echo "✅ DMG size looks reasonable (${DMG_SIZE_MB} MB)"
           fi
           
           # Sign the DMG
