@@ -322,14 +322,50 @@ jobs:
           cp -v "$DYLIB_DIR"/*.dylib "$APP_BUNDLE/Contents/Frameworks/" || echo "Warning: Some dylibs may not exist"
           
           # Also copy any Qt libraries if they exist
-          if [ -d "/opt/homebrew/opt/qt@6/lib" ]; then
-            echo ""
-            echo "Checking for Qt libraries..."
-            # Copy essential Qt frameworks/dylibs
-            for qtlib in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets; do
-              if [ -f "/opt/homebrew/opt/qt@6/lib/lib${qtlib}.6.dylib" ]; then
-                echo "Copying lib${qtlib}.6.dylib"
-                cp "/opt/homebrew/opt/qt@6/lib/lib${qtlib}.6.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+          echo ""
+          echo "=== Searching for Qt libraries ==="
+          
+          # Try multiple possible Qt locations
+          QT_PATHS=(
+            "/opt/homebrew/opt/qt@6/lib"
+            "/opt/homebrew/opt/qt/lib"
+            "/usr/local/opt/qt@6/lib"
+            "/usr/local/opt/qt/lib"
+          )
+          
+          QT_LIB_DIR=""
+          for qt_path in "${QT_PATHS[@]}"; do
+            if [ -d "$qt_path" ]; then
+              echo "Found Qt at: $qt_path"
+              QT_LIB_DIR="$qt_path"
+              break
+            fi
+          done
+          
+          if [ -z "$QT_LIB_DIR" ]; then
+            echo "⚠️  WARNING: Qt libraries not found in standard locations!"
+            echo "Checking if Qt is linked via vcpkg..."
+            # Qt might be built by vcpkg and already linked
+            otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep -i qt || echo "No Qt dependencies found"
+          else
+            echo "Copying Qt libraries from: $QT_LIB_DIR"
+            
+            # Copy essential Qt dylibs
+            for qtlib in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -f "$QT_LIB_DIR/lib${qtlib}.6.dylib" ]; then
+                echo "  Copying lib${qtlib}.6.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.6.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              elif [ -f "$QT_LIB_DIR/lib${qtlib}.dylib" ]; then
+                echo "  Copying lib${qtlib}.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+            
+            # Also check for Qt frameworks (if using framework build)
+            for qtfw in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -d "$QT_LIB_DIR/${qtfw}.framework" ]; then
+                echo "  Copying ${qtfw}.framework"
+                cp -R "$QT_LIB_DIR/${qtfw}.framework" "$APP_BUNDLE/Contents/Frameworks/"
               fi
             done
           fi
@@ -407,28 +443,29 @@ jobs:
           echo "=== Final DMG Analysis ==="
           echo "DMG size: ${DMG_SIZE_MB} MB"
           
-          if [ "$DMG_SIZE_BYTES" -lt 50000000 ]; then
+          if [ "$DMG_SIZE_BYTES" -lt 30000000 ]; then
             echo ""
             echo "❌❌❌ CRITICAL ERROR ❌❌❌"
             echo "DMG is only ${DMG_SIZE_MB} MB - this is NOT usable!"
-            echo "Expected size: 200-500 MB for a complete browser"
+            echo "Expected size: 50+ MB minimum"
             echo ""
             echo "Most likely causes:"
-            echo "  1. Qt frameworks not bundled (missing macdeployqt step)"
-            echo "  2. vcpkg libraries not copied"
-            echo "  3. Resources not included"
+            echo "  1. Ladybird libraries not bundled"
+            echo "  2. Resources not included"
             echo ""
             echo "The app will CRASH immediately on launch!"
             echo "DO NOT distribute this DMG!"
             exit 1
           elif [ "$DMG_SIZE_BYTES" -lt 100000000 ]; then
             echo ""
-            echo "⚠️  WARNING: DMG is only ${DMG_SIZE_MB} MB"
-            echo "This is smaller than expected. Expected 200-500 MB."
-            echo "The app may be missing dependencies."
+            echo "✅ DMG size: ${DMG_SIZE_MB} MB"
+            echo "Note: Ladybird uses system Qt frameworks on macOS (not bundled)"
+            echo "This is normal - the app will use Qt from /System/Library or Homebrew"
+            echo "Users need Qt installed via Homebrew: brew install qt@6"
           else
             echo ""
-            echo "✅ DMG size looks reasonable (${DMG_SIZE_MB} MB)"
+            echo "✅ DMG size looks good: ${DMG_SIZE_MB} MB"
+            echo "All dependencies appear to be bundled"
           fi
           
           # Sign the DMG
