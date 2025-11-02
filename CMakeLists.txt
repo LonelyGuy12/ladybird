@@ -43,6 +43,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(LADYBIRD_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${LADYBIRD_SOURCE_DIR}/Meta/CMake")
 
+# Find Python FIRST before any other includes
+# CRITICAL: Must be before EnableLagom.cmake which includes code_generators.cmake
+# code_generators.cmake calls find_package(Python3) which would cache incomplete results
+include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+
 include(UI/cmake/EnableLagom.cmake)
 include(lagom_options NO_POLICY_SCOPE)
 include(lagom_compile_options)
@@ -74,10 +79,7 @@ find_package(OpenSSL REQUIRED)
 
 include(CTest) # for BUILD_TESTING option, default ON
 
-# Find Python for both scripting and runtime integration
-# CRITICAL: Must be included BEFORE add_subdirectory(Services) to avoid cache conflicts
-# Services/WebContent also calls find_package(Python3), so we must set hints first
-include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+# Python is already found above (before EnableLagom.cmake)
 
 if (ENABLE_GUI_TARGETS)
     add_subdirectory(Services)
