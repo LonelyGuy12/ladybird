@@ -186,6 +186,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     TRY(initialize_resource_loader(Web::Bindings::main_thread_vm().heap(), request_server_socket));
 
+    // Initialize Python engine for <script type="text/python"> support
+    Web::Bindings::initialize_python_engine();
+
     // Set up cleanup handler for Python engine
     auto cleanup_handler = []() {
         Web::Bindings::shutdown_python_engine();

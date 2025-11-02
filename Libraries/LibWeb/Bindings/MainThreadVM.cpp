@@ -715,10 +715,16 @@ JS::VM& main_thread_vm()
     return *s_main_thread_vm;
 }
 
+// Function to initialize the Python engine
+WEB_API void initialize_python_engine()
+{
+    HTML::PythonEngine::initialize();
+}
+
 // Function to properly shut down the Python engine when the application exits
 WEB_API void shutdown_python_engine()
 {
-    // HTML::PythonEngine::shutdown();
+    HTML::PythonEngine::shutdown();
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-observer-compound-microtask

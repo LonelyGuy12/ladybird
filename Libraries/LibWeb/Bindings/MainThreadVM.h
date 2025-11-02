@@ -37,7 +37,8 @@ HTML::Script* active_script();
 WEB_API void initialize_main_thread_vm(AgentType);
 WEB_API JS::VM& main_thread_vm();
 
-// Function to properly shut down the Python engine when the application exits
+// Functions to initialize and shut down the Python engine
+WEB_API void initialize_python_engine();
 WEB_API void shutdown_python_engine();
 
 void queue_mutation_observer_microtask(DOM::Document const&);
