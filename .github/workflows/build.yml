@@ -321,6 +321,25 @@ jobs:
           echo "Copying Ladybird libraries to Frameworks..."
           cp -v "$DYLIB_DIR"/*.dylib "$APP_BUNDLE/Contents/Frameworks/" || echo "Warning: Some dylibs may not exist"
           
+          # Copy vcpkg dependencies (like libsqlite3)
+          echo ""
+          echo "=== Copying vcpkg dependencies ==="
+          VCPKG_LIB_DIR="Build/release/vcpkg_installed/arm64-osx-dynamic/lib"
+          
+          if [ -d "$VCPKG_LIB_DIR" ]; then
+            echo "Found vcpkg libraries at: $VCPKG_LIB_DIR"
+            ls -lh "$VCPKG_LIB_DIR" | grep "\.dylib" | head -20
+            
+            # Copy all vcpkg dylibs
+            echo ""
+            echo "Copying vcpkg libraries..."
+            find "$VCPKG_LIB_DIR" -name "*.dylib" -exec cp -v {} "$APP_BUNDLE/Contents/Frameworks/" \;
+          else
+            echo "⚠️  WARNING: vcpkg lib directory not found at $VCPKG_LIB_DIR"
+            echo "Checking alternate locations..."
+            find Build/release -name "libsqlite3.dylib" | head -5
+          fi
+          
           # Also copy any Qt libraries if they exist
           echo ""
           echo "=== Searching for Qt libraries ==="
