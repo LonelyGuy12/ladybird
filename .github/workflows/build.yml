@@ -119,7 +119,7 @@ jobs:
       - name: Install dependencies including Clang 19+
         run: |
           brew update
-          brew install cmake ninja ccache qt python@3.12 pkg-config wabt autoconf autoconf-archive automake libtool
+          brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool
           # Install LLVM 20 which includes Clang 20
           brew install llvm@20
           # Create symlinks so find_compiler.py can discover Clang 20
