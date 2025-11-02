@@ -74,6 +74,11 @@ find_package(OpenSSL REQUIRED)
 
 include(CTest) # for BUILD_TESTING option, default ON
 
+# Find Python for both scripting and runtime integration
+# CRITICAL: Must be included BEFORE add_subdirectory(Services) to avoid cache conflicts
+# Services/WebContent also calls find_package(Python3), so we must set hints first
+include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+
 if (ENABLE_GUI_TARGETS)
     add_subdirectory(Services)
     add_subdirectory(UI)
@@ -83,10 +88,6 @@ add_custom_target(lint-shell-scripts
     COMMAND "${ladybird_SOURCE_DIR}/Meta/lint-shell-scripts.sh"
     USES_TERMINAL
 )
-
-# Find Python for both scripting and runtime integration
-# Include platform-specific Python finder first to set proper search hints
-include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
 
 if (Python3_FOUND)
     message(STATUS "Python support enabled for LibWeb")
