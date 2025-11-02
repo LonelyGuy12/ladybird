@@ -6,7 +6,16 @@ if(WIN32)
     message(STATUS "Finding Python for Windows...")
     
     # Prefer Python from PATH, then registry
-    find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
+    find_package(Python3 3.8 COMPONENTS Interpreter Development)
+    
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "Python3 not found on Windows!")
+    endif()
+    
+    if(NOT Python3_Development_FOUND)
+        message(FATAL_ERROR "Python3 Development component not found on Windows!")
+        message(FATAL_ERROR "Please install Python with development headers from python.org")
+    endif()
     
     # On Windows, ensure we have both .lib and .dll
     if(Python3_FOUND)
@@ -60,17 +69,26 @@ elseif(APPLE)
     endforeach()
     
     message(STATUS "Searching for Python with Python3_ROOT_DIR=${Python3_ROOT_DIR}")
-    find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
+    
+    # Find Python - REQUIRED means the package must exist, but components can still be optional
+    find_package(Python3 3.8 COMPONENTS Interpreter Development)
     
     if(NOT Python3_FOUND)
         message(FATAL_ERROR "Python3 not found! Searched in: ${Python3_ROOT_DIR}")
     endif()
     
+    # Explicitly check for Development component - this is REQUIRED for compilation
     if(NOT Python3_Development_FOUND)
-        message(FATAL_ERROR "Python3 Development component not found!")
+        message(FATAL_ERROR "Python3 Development component (headers/libraries) not found!")
+        message(FATAL_ERROR "  Searched in: ${Python3_ROOT_DIR}")
         message(FATAL_ERROR "  Python3_EXECUTABLE: ${Python3_EXECUTABLE}")
         message(FATAL_ERROR "  Python3_INCLUDE_DIRS: ${Python3_INCLUDE_DIRS}")
         message(FATAL_ERROR "  Python3_LIBRARIES: ${Python3_LIBRARIES}")
+        message(FATAL_ERROR "  Python3_LIBRARY_DIRS: ${Python3_LIBRARY_DIRS}")
+        message(FATAL_ERROR "")
+        message(FATAL_ERROR "Please install Python development headers:")
+        message(FATAL_ERROR "  brew install python@3.14")
+        message(FATAL_ERROR "  brew link --overwrite python@3.14")
     endif()
     
     if(Python3_FOUND)
@@ -91,7 +109,19 @@ else()
     # Linux and other Unix-like systems
     message(STATUS "Finding Python for Linux...")
     
-    find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
+    find_package(Python3 3.8 COMPONENTS Interpreter Development)
+    
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "Python3 not found on Linux!")
+    endif()
+    
+    if(NOT Python3_Development_FOUND)
+        message(FATAL_ERROR "Python3 Development component not found on Linux!")
+        message(FATAL_ERROR "Please install Python development headers:")
+        message(FATAL_ERROR "  Ubuntu/Debian: sudo apt install python3-dev")
+        message(FATAL_ERROR "  Fedora/RHEL: sudo dnf install python3-devel")
+        message(FATAL_ERROR "  Arch: sudo pacman -S python")
+    endif()
     
     if(Python3_FOUND)
         message(STATUS "Python3 found: ${Python3_VERSION}")
