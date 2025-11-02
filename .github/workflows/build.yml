@@ -225,7 +225,11 @@ jobs:
           # Verify Python was enabled in the build
           echo ""
           echo "=== Checking if Python was enabled ==="
-          grep -r "ENABLE_PYTHON" Build/release/CMakeCache.txt || echo "ENABLE_PYTHON not found in CMake cache"
+          echo "Searching CMake output for Python detection..."
+          grep -i "python" Build/release/CMakeCache.txt | head -20 || echo "No Python entries in CMake cache"
+          echo ""
+          echo "Checking for ENABLE_PYTHON define..."
+          grep -r "ENABLE_PYTHON" Build/release/ 2>/dev/null | head -5 || echo "ENABLE_PYTHON not found"
           
           # Show ccache stats after build
           echo "=== ccache statistics after build ==="

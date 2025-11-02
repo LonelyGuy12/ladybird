@@ -84,12 +84,19 @@ add_custom_target(lint-shell-scripts
     USES_TERMINAL
 )
 
+# Find Python for both scripting and runtime integration
 find_package(Python3 COMPONENTS Interpreter Development)
 if (Python3_FOUND)
+    message(STATUS "Python ${Python3_VERSION} found at ${Python3_EXECUTABLE}")
+    message(STATUS "Python libraries: ${Python3_LIBRARIES}")
+    message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+    
     add_custom_target(check-style
         COMMAND ${Python3_EXECUTABLE} "${ladybird_SOURCE_DIR}/Meta/check-style.py"
         USES_TERMINAL
     )
+else()
+    message(WARNING "Python 3 not found - Python integration will be disabled")
 endif()
 
 # CPack configuration for packaging
