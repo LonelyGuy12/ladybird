@@ -215,23 +215,27 @@ jobs:
           python3-config --includes || echo "python3-config not found"
           ls -la /opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/ || echo "Python framework not found"
           
-          # Set Python paths explicitly for CMake
-          export Python3_ROOT_DIR="/opt/homebrew/opt/python@3.14"
-          export Python3_EXECUTABLE="/opt/homebrew/bin/python3"
-          export Python3_INCLUDE_DIR="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/include/python3.14"
-          export Python3_LIBRARY="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
-          
-          echo "Python3_ROOT_DIR=$Python3_ROOT_DIR"
-          echo "Python3_EXECUTABLE=$Python3_EXECUTABLE"
-          echo "Python3_INCLUDE_DIR=$Python3_INCLUDE_DIR"
-          echo "Python3_LIBRARY=$Python3_LIBRARY"
-          
           # Show ccache stats before build
           ccache -s
           
-          # Let find_compiler.py discover Homebrew Clang 20 automatically
-          # GCC is hidden, so it will find Clang 20 and use it
-          python3 Meta/ladybird.py build
+          # Configure with explicit Python paths for CMake
+          # We need to run cmake manually first to pass Python hints
+          echo ""
+          echo "=== Configuring with Python support ==="
+          cmake --preset Release \
+            -S . \
+            -B Build/release \
+            -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang-20 \
+            -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++-20 \
+            -DPython3_ROOT_DIR=/opt/homebrew/opt/python@3.14 \
+            -DPython3_EXECUTABLE=/opt/homebrew/bin/python3 \
+            -DPython3_INCLUDE_DIR=/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/include/python3.14 \
+            -DPython3_LIBRARY=/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib
+          
+          # Now build
+          echo ""
+          echo "=== Building Ladybird ==="
+          cmake --build Build/release --parallel 8
           
           # Verify Python was enabled in the build
           echo ""
