@@ -530,7 +530,7 @@ void HTMLScriptElement::prepare_script()
         else if (m_script_type == ScriptType::Python) {
             // 1. Let script be the result of creating a python script using source text, settings object's realm, base URL, and options.
             // FIXME: Pass options.
-            auto script = PythonScript::create(m_document->url().to_byte_string(), source_text, settings_object.realm(), base_url);
+            auto script = PythonScript::create(m_document->url().to_byte_string(), source_text.to_byte_string(), settings_object.realm(), base_url);
 
             // 2. Mark as ready el given script.
             mark_as_ready(Result(move(script)));
