@@ -1159,8 +1159,7 @@ set(GENERATED_SOURCES
     HTML/Parser/NamedCharacterReferences.cpp
 )
 
-# Include platform-aware Python finder
-include(${CMAKE_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+# Python support is configured in main CMakeLists.txt via FindPythonPlatform.cmake
 
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 

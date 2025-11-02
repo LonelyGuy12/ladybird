@@ -85,11 +85,11 @@ add_custom_target(lint-shell-scripts
 )
 
 # Find Python for both scripting and runtime integration
-find_package(Python3 COMPONENTS Interpreter Development)
+# Include platform-specific Python finder first to set proper search hints
+include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+
 if (Python3_FOUND)
-    message(STATUS "Python ${Python3_VERSION} found at ${Python3_EXECUTABLE}")
-    message(STATUS "Python libraries: ${Python3_LIBRARIES}")
-    message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+    message(STATUS "Python support enabled for LibWeb")
     
     add_custom_target(check-style
         COMMAND ${Python3_EXECUTABLE} "${ladybird_SOURCE_DIR}/Meta/check-style.py"

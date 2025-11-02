@@ -30,10 +30,34 @@ elseif(APPLE)
     set(Python3_FIND_FRAMEWORK LAST)
     set(Python3_FIND_STRATEGY LOCATION)
     
+    # Check for Homebrew Python installations
+    set(HOMEBREW_PYTHON_PATHS
+        "/opt/homebrew/opt/python@3.14"
+        "/opt/homebrew/opt/python@3.13"
+        "/opt/homebrew/opt/python@3.12"
+        "/opt/homebrew/opt/python@3.11"
+        "/opt/homebrew/opt/python@3.10"
+        "/usr/local/opt/python@3.14"
+        "/usr/local/opt/python@3.13"
+        "/usr/local/opt/python@3.12"
+        "/usr/local/opt/python@3.11"
+        "/usr/local/opt/python@3.10"
+    )
+    
+    # Try to find Homebrew Python
+    foreach(PYTHON_PATH ${HOMEBREW_PYTHON_PATHS})
+        if(EXISTS "${PYTHON_PATH}")
+            message(STATUS "Found Homebrew Python at: ${PYTHON_PATH}")
+            set(Python3_ROOT_DIR "${PYTHON_PATH}")
+            break()
+        endif()
+    endforeach()
+    
     find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
     
     if(Python3_FOUND)
         message(STATUS "Python3 found: ${Python3_VERSION}")
+        message(STATUS "Python3 executable: ${Python3_EXECUTABLE}")
         message(STATUS "Python3 include: ${Python3_INCLUDE_DIRS}")
         message(STATUS "Python3 libraries: ${Python3_LIBRARIES}")
         
