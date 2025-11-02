@@ -10,7 +10,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/Vector.h>
 #include <AK/Time.h>
-#include <AK/RegexMatcher.h>
+#include <LibRegex/RegexMatcher.h>
 #include <LibURL/Origin.h>
 #include <LibURL/URL.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>

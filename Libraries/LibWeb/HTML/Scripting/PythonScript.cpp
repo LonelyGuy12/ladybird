@@ -98,7 +98,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
     }
     // 6. Otherwise, execute Python script
     else {
-        auto timer = Core::ElapsedTimer::start_new();
+        [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
 
         // Execute the Python code
         if (m_script_record) {
@@ -237,6 +237,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // FIXME: 10. If we've reached this point, evaluationStatus was left as null because the script was aborted prematurely during evaluation.
         //            Return ThrowCompletion(a new "QuotaExceededError" DOMException).
         return JS::throw_completion(WebIDL::QuotaExceededError::create(realm, "Script execution was aborted"_utf16));
+    }
     }
 }
 
