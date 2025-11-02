@@ -1167,7 +1167,8 @@ if(Python3_FOUND)
         Bindings/TestPythonDOMModule.cpp
     )
     
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
+    # Use PUBLIC so that executables linking to LibWeb also get ENABLE_PYTHON defined
+    target_compile_definitions(LibWeb PUBLIC ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
     target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
     
     # Link Python library explicitly (don't rely on Python3::Python target which may not exist)
