@@ -92,12 +92,12 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // 4. Let evaluationStatus be null.
         JS::Completion evaluation_status = JS::normal_completion(JS::js_undefined());
 
-    // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
-    if (!error_to_rethrow().is_null()) {
-        evaluation_status = JS::throw_completion(error_to_rethrow());
-    }
-    // 6. Otherwise, execute Python script
-    else {
+        // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
+        if (!error_to_rethrow().is_null()) {
+            evaluation_status = JS::throw_completion(error_to_rethrow());
+        }
+        // 6. Otherwise, execute Python script
+        else {
         [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
 
         // Execute the Python code
@@ -192,6 +192,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                 PyGILState_Release(gstate);
             }
         }
+        }
 
         // 7. If evaluationStatus is an abrupt completion, then:
         if (evaluation_status.is_abrupt()) {
@@ -237,7 +238,6 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // FIXME: 10. If we've reached this point, evaluationStatus was left as null because the script was aborted prematurely during evaluation.
         //            Return ThrowCompletion(a new "QuotaExceededError" DOMException).
         return JS::throw_completion(WebIDL::QuotaExceededError::create(realm, "Script execution was aborted"_utf16));
-    }
     }
 }
 
