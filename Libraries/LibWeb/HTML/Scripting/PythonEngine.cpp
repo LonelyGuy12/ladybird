@@ -30,7 +30,7 @@ void PythonEngine::initialize()
     Web::Bindings::PythonDOMAPI::initialize_module();
 
     // Initialize Python security model
-    Web::HTML::PythonSecurityModel::initialize_security();
+    (void)Web::HTML::PythonSecurityModel::initialize_security();
 
     s_initialized = true;
 }

@@ -114,7 +114,8 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             if (m_execution_context) {
                 // Set up security restrictions for this script execution
                 URL::URL origin = this->base_url().value_or(URL::URL {});
-                if (!PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin)) {
+                auto security_result = PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin);
+                if (security_result.is_error()) {
                     evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to set up secure execution environment"sv));
                     PyGILState_Release(gstate);
                     return evaluation_status;
@@ -190,6 +191,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
 
                 PyGILState_Release(gstate);
             }
+        }
 
         // 7. If evaluationStatus is an abrupt completion, then:
         if (evaluation_status.is_abrupt()) {
