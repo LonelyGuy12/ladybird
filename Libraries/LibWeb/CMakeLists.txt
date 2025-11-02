@@ -619,9 +619,9 @@ set(SOURCES
     HTML/Scripting/ImportMapParseResult.cpp
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
-    # HTML/Scripting/PythonEngine.cpp
-    # HTML/Scripting/PythonScript.cpp
-    # HTML/Scripting/PythonSecurityModel.cpp
+    HTML/Scripting/PythonEngine.cpp
+    HTML/Scripting/PythonScript.cpp
+    HTML/Scripting/PythonSecurityModel.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/Scripting/SimilarOriginWindowAgent.cpp
