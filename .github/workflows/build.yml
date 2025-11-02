@@ -219,47 +219,275 @@ jobs:
       - name: Create DMG package
         if: success()
         run: |
-          echo "=== Creating clean DMG with only Ladybird.app ==="
+          echo "=== Inspecting build output ==="
+          find Build/release -name "*.app" -type d
           
-          # Find the built app bundle
+          # Find the app bundle (it should already be built)
           APP_BUNDLE=$(find Build/release -name "Ladybird.app" -type d | head -1)
           
           if [ -z "$APP_BUNDLE" ]; then
-            echo "ERROR: Ladybird.app not found!"
-            find Build/release -name "*.app" -type d
-            exit 1
+            echo "=== No app bundle found, checking bin directory ==="
+            if [ -d "Build/release/bin/Ladybird.app" ]; then
+              APP_BUNDLE="Build/release/bin/Ladybird.app"
+            else
+              echo "ERROR: Ladybird.app not found anywhere!"
+              echo "Directory structure:"
+              ls -la Build/release/bin/ || true
+              exit 1
+            fi
           fi
           
           echo "Found app bundle: $APP_BUNDLE"
           
-          # Ad-hoc code sign the app bundle to prevent "damaged app" error
+          # Verify app bundle structure and size
+          echo "=== Verifying app bundle contents ==="
+          echo "Bundle directory: $APP_BUNDLE"
+          ls -la "$APP_BUNDLE/Contents/" || echo "No Contents directory!"
+          
+          echo ""
+          echo "MacOS directory:"
+          ls -lh "$APP_BUNDLE/Contents/MacOS/" || echo "No MacOS directory!"
+          
+          echo ""
+          echo "Frameworks directory:"
+          if [ -d "$APP_BUNDLE/Contents/Frameworks/" ]; then
+            ls -lh "$APP_BUNDLE/Contents/Frameworks/" | head -20
+            echo "Framework count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.framework" | wc -l)"
+            echo "Dylib count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)"
+          else
+            echo "⚠️  WARNING: No Frameworks directory! Qt libraries are missing!"
+          fi
+          
+          echo ""
+          echo "Resources directory:"
+          ls -lh "$APP_BUNDLE/Contents/Resources/" || echo "No Resources directory!"
+          
+          echo ""
+          echo "=== Bundle size analysis ==="
+          # Check bundle size
+          BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "Total app bundle size: $BUNDLE_SIZE"
+          
+          # Size breakdown
+          echo ""
+          echo "Size by directory:"
+          du -sh "$APP_BUNDLE/Contents/MacOS" 2>/dev/null || echo "MacOS: N/A"
+          du -sh "$APP_BUNDLE/Contents/Frameworks" 2>/dev/null || echo "Frameworks: N/A (⚠️  PROBLEM!)"
+          du -sh "$APP_BUNDLE/Contents/Resources" 2>/dev/null || echo "Resources: N/A"
+          
+          # Check if main executable exists in bundle
+          if [ ! -f "$APP_BUNDLE/Contents/MacOS/Ladybird" ]; then
+            echo ""
+            echo "ERROR: Main executable missing from app bundle!"
+            echo "Contents of MacOS directory:"
+            ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "Directory doesn't exist"
+            exit 1
+          fi
+          
+          echo ""
+          EXEC_SIZE=$(ls -lh "$APP_BUNDLE/Contents/MacOS/Ladybird" | awk '{print $5}')
+          echo "Main executable size: $EXEC_SIZE"
+          file "$APP_BUNDLE/Contents/MacOS/Ladybird"
+          
+          # Check for required dylibs
+          echo ""
+          echo "=== Checking dynamic library dependencies ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | head -20
+          
+          # Fix the broken symlink and copy actual libraries
+          echo ""
+          echo "=== Fixing library paths ==="
+          
+          # Remove the broken symlink
+          if [ -L "$APP_BUNDLE/Contents/lib" ]; then
+            echo "Removing broken symlink: $APP_BUNDLE/Contents/lib"
+            rm "$APP_BUNDLE/Contents/lib"
+          fi
+          
+          # Find all liblagom dylibs
+          echo "Searching for Ladybird libraries..."
+          DYLIB_DIR="Build/release/lib"
+          
+          if [ ! -d "$DYLIB_DIR" ]; then
+            echo "ERROR: Library directory not found: $DYLIB_DIR"
+            exit 1
+          fi
+          
+          echo "Found library directory: $DYLIB_DIR"
+          ls -lh "$DYLIB_DIR" | grep "\.dylib"
+          
+          # Copy all dylibs to Frameworks
+          echo ""
+          echo "Copying Ladybird libraries to Frameworks..."
+          cp -v "$DYLIB_DIR"/*.dylib "$APP_BUNDLE/Contents/Frameworks/" || echo "Warning: Some dylibs may not exist"
+          
+          # Copy vcpkg dependencies (like libsqlite3)
+          echo ""
+          echo "=== Copying vcpkg dependencies ==="
+          VCPKG_LIB_DIR="Build/release/vcpkg_installed/arm64-osx-dynamic/lib"
+          
+          if [ -d "$VCPKG_LIB_DIR" ]; then
+            echo "Found vcpkg libraries at: $VCPKG_LIB_DIR"
+            ls -lh "$VCPKG_LIB_DIR" | grep "\.dylib" | head -20
+            
+            # Copy all vcpkg dylibs
+            echo ""
+            echo "Copying vcpkg libraries..."
+            find "$VCPKG_LIB_DIR" -name "*.dylib" -exec cp -v {} "$APP_BUNDLE/Contents/Frameworks/" \;
+          else
+            echo "⚠️  WARNING: vcpkg lib directory not found at $VCPKG_LIB_DIR"
+            echo "Checking alternate locations..."
+            find Build/release -name "libsqlite3.dylib" | head -5
+          fi
+          
+          # Also copy any Qt libraries if they exist
+          echo ""
+          echo "=== Searching for Qt libraries ==="
+          
+          # Try multiple possible Qt locations
+          QT_PATHS=(
+            "/opt/homebrew/opt/qt@6/lib"
+            "/opt/homebrew/opt/qt/lib"
+            "/usr/local/opt/qt@6/lib"
+            "/usr/local/opt/qt/lib"
+          )
+          
+          QT_LIB_DIR=""
+          for qt_path in "${QT_PATHS[@]}"; do
+            if [ -d "$qt_path" ]; then
+              echo "Found Qt at: $qt_path"
+              QT_LIB_DIR="$qt_path"
+              break
+            fi
+          done
+          
+          if [ -z "$QT_LIB_DIR" ]; then
+            echo "⚠️  WARNING: Qt libraries not found in standard locations!"
+            echo "Checking if Qt is linked via vcpkg..."
+            # Qt might be built by vcpkg and already linked
+            otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep -i qt || echo "No Qt dependencies found"
+          else
+            echo "Copying Qt libraries from: $QT_LIB_DIR"
+            
+            # Copy essential Qt dylibs
+            for qtlib in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -f "$QT_LIB_DIR/lib${qtlib}.6.dylib" ]; then
+                echo "  Copying lib${qtlib}.6.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.6.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              elif [ -f "$QT_LIB_DIR/lib${qtlib}.dylib" ]; then
+                echo "  Copying lib${qtlib}.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+            
+            # Also check for Qt frameworks (if using framework build)
+            for qtfw in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -d "$QT_LIB_DIR/${qtfw}.framework" ]; then
+                echo "  Copying ${qtfw}.framework"
+                cp -R "$QT_LIB_DIR/${qtfw}.framework" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+          fi
+          
+          echo ""
+          echo "=== Frameworks directory after copying ==="
+          ls -lh "$APP_BUNDLE/Contents/Frameworks/"
+          DYLIB_COUNT=$(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)
+          echo "Total dylibs: $DYLIB_COUNT"
+          
+          # Fix rpaths in the executable
+          echo ""
+          echo "=== Fixing rpaths ==="
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/Ladybird" 2>/dev/null || echo "rpath already exists"
+          
+          # Fix rpaths in helper executables
+          for helper in WebContent WebWorker RequestServer ImageDecoder WebDriver; do
+            if [ -f "$APP_BUNDLE/Contents/MacOS/$helper" ]; then
+              echo "Fixing rpath for $helper"
+              install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$helper" 2>/dev/null || true
+            fi
+          done
+          
+          # Verify libraries can be found
+          echo ""
+          echo "=== Verifying library resolution ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep "@rpath" | head -5
+          
+          # Check new bundle size
+          echo ""
+          NEW_BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "Bundle size after adding libraries: $NEW_BUNDLE_SIZE"
+          
+          # Ad-hoc code sign the app bundle
+          echo ""
           echo "=== Ad-hoc signing the app bundle ==="
           codesign --force --deep --sign - "$APP_BUNDLE"
-          
-          # Verify the signature
           codesign --verify --verbose "$APP_BUNDLE"
           
-          # Create a temporary directory for DMG contents
+          # Create DMG staging directory
           DMG_DIR="Build/dmg_staging"
+          rm -rf "$DMG_DIR"
           mkdir -p "$DMG_DIR"
           
-          # Copy the signed app bundle
+          # Copy the app bundle
+          echo "=== Copying app bundle to DMG staging ==="
           cp -R "$APP_BUNDLE" "$DMG_DIR/"
           
-          # Create Applications symlink for easy drag-and-drop
+          # Verify copied bundle
+          COPIED_SIZE=$(du -sh "$DMG_DIR/Ladybird.app" | cut -f1)
+          echo "Copied bundle size: $COPIED_SIZE"
+          
+          # Create Applications symlink
           ln -s /Applications "$DMG_DIR/Applications"
           
-          # Create DMG using hdiutil (native macOS tool)
+          # Create DMG
           DMG_NAME="Ladybird-0.1.0-macOS-arm64.dmg"
+          echo "=== Creating DMG ==="
           hdiutil create -volname "Ladybird" \
             -srcfolder "$DMG_DIR" \
             -ov -format UDZO \
             "Build/release/$DMG_NAME"
           
-          echo "=== DMG created successfully ==="
+          # Check DMG size
+          DMG_SIZE=$(ls -lh "Build/release/$DMG_NAME" | awk '{print $5}')
+          echo "=== DMG created ==="
+          echo "DMG size: $DMG_SIZE"
           ls -lh "Build/release/$DMG_NAME"
           
-          # Sign the DMG as well
+          # Warn if DMG is suspiciously small
+          DMG_SIZE_BYTES=$(stat -f%z "Build/release/$DMG_NAME")
+          DMG_SIZE_MB=$(echo "scale=1; $DMG_SIZE_BYTES / 1024 / 1024" | bc)
+          
+          echo ""
+          echo "=== Final DMG Analysis ==="
+          echo "DMG size: ${DMG_SIZE_MB} MB"
+          
+          if [ "$DMG_SIZE_BYTES" -lt 30000000 ]; then
+            echo ""
+            echo "❌❌❌ CRITICAL ERROR ❌❌❌"
+            echo "DMG is only ${DMG_SIZE_MB} MB - this is NOT usable!"
+            echo "Expected size: 50+ MB minimum"
+            echo ""
+            echo "Most likely causes:"
+            echo "  1. Ladybird libraries not bundled"
+            echo "  2. Resources not included"
+            echo ""
+            echo "The app will CRASH immediately on launch!"
+            echo "DO NOT distribute this DMG!"
+            exit 1
+          elif [ "$DMG_SIZE_BYTES" -lt 100000000 ]; then
+            echo ""
+            echo "✅ DMG size: ${DMG_SIZE_MB} MB"
+            echo "Note: Ladybird uses system Qt frameworks on macOS (not bundled)"
+            echo "This is normal - the app will use Qt from /System/Library or Homebrew"
+            echo "Users need Qt installed via Homebrew: brew install qt@6"
+          else
+            echo ""
+            echo "✅ DMG size looks good: ${DMG_SIZE_MB} MB"
+            echo "All dependencies appear to be bundled"
+          fi
+          
+          # Sign the DMG
           echo "=== Signing the DMG ==="
           codesign --force --sign - "Build/release/$DMG_NAME"
 

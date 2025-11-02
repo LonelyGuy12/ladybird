@@ -87,7 +87,18 @@ rm -rf ~/Library/Caches/Ladybird
 
 - **Architecture:** Apple Silicon (M1, M2, M3, etc.)
 - **OS Version:** macOS 14.0 (Sonoma) or later
-- **Disk Space:** ~500 MB
+- **Disk Space:** ~60 MB for app
+- **Dependencies:** Qt 6 (install via Homebrew if not present)
+
+### Installing Qt (if needed)
+
+If Ladybird crashes on launch with library errors, install Qt:
+
+```bash
+brew install qt@6
+```
+
+Then try launching Ladybird again.
 
 ## Building from Source
 
