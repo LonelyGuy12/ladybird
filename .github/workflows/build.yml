@@ -294,7 +294,77 @@ jobs:
           echo "=== Checking dynamic library dependencies ==="
           otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | head -20
           
+          # Fix the broken symlink and copy actual libraries
+          echo ""
+          echo "=== Fixing library paths ==="
+          
+          # Remove the broken symlink
+          if [ -L "$APP_BUNDLE/Contents/lib" ]; then
+            echo "Removing broken symlink: $APP_BUNDLE/Contents/lib"
+            rm "$APP_BUNDLE/Contents/lib"
+          fi
+          
+          # Find all liblagom dylibs
+          echo "Searching for Ladybird libraries..."
+          DYLIB_DIR="Build/release/lib"
+          
+          if [ ! -d "$DYLIB_DIR" ]; then
+            echo "ERROR: Library directory not found: $DYLIB_DIR"
+            exit 1
+          fi
+          
+          echo "Found library directory: $DYLIB_DIR"
+          ls -lh "$DYLIB_DIR" | grep "\.dylib"
+          
+          # Copy all dylibs to Frameworks
+          echo ""
+          echo "Copying Ladybird libraries to Frameworks..."
+          cp -v "$DYLIB_DIR"/*.dylib "$APP_BUNDLE/Contents/Frameworks/" || echo "Warning: Some dylibs may not exist"
+          
+          # Also copy any Qt libraries if they exist
+          if [ -d "/opt/homebrew/opt/qt@6/lib" ]; then
+            echo ""
+            echo "Checking for Qt libraries..."
+            # Copy essential Qt frameworks/dylibs
+            for qtlib in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets; do
+              if [ -f "/opt/homebrew/opt/qt@6/lib/lib${qtlib}.6.dylib" ]; then
+                echo "Copying lib${qtlib}.6.dylib"
+                cp "/opt/homebrew/opt/qt@6/lib/lib${qtlib}.6.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+          fi
+          
+          echo ""
+          echo "=== Frameworks directory after copying ==="
+          ls -lh "$APP_BUNDLE/Contents/Frameworks/"
+          DYLIB_COUNT=$(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)
+          echo "Total dylibs: $DYLIB_COUNT"
+          
+          # Fix rpaths in the executable
+          echo ""
+          echo "=== Fixing rpaths ==="
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/Ladybird" 2>/dev/null || echo "rpath already exists"
+          
+          # Fix rpaths in helper executables
+          for helper in WebContent WebWorker RequestServer ImageDecoder WebDriver; do
+            if [ -f "$APP_BUNDLE/Contents/MacOS/$helper" ]; then
+              echo "Fixing rpath for $helper"
+              install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$helper" 2>/dev/null || true
+            fi
+          done
+          
+          # Verify libraries can be found
+          echo ""
+          echo "=== Verifying library resolution ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep "@rpath" | head -5
+          
+          # Check new bundle size
+          echo ""
+          NEW_BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "Bundle size after adding libraries: $NEW_BUNDLE_SIZE"
+          
           # Ad-hoc code sign the app bundle
+          echo ""
           echo "=== Ad-hoc signing the app bundle ==="
           codesign --force --deep --sign - "$APP_BUNDLE"
           codesign --verify --verbose "$APP_BUNDLE"
