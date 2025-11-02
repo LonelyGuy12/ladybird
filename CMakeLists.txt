@@ -43,6 +43,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(LADYBIRD_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${LADYBIRD_SOURCE_DIR}/Meta/CMake")
 
+# Find Python FIRST before any other includes
+# CRITICAL: Must be before EnableLagom.cmake which includes code_generators.cmake
+# code_generators.cmake calls find_package(Python3) which would cache incomplete results
+include(${CMAKE_CURRENT_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+
 include(UI/cmake/EnableLagom.cmake)
 include(lagom_options NO_POLICY_SCOPE)
 include(lagom_compile_options)
@@ -74,6 +79,8 @@ find_package(OpenSSL REQUIRED)
 
 include(CTest) # for BUILD_TESTING option, default ON
 
+# Python is already found above (before EnableLagom.cmake)
+
 if (ENABLE_GUI_TARGETS)
     add_subdirectory(Services)
     add_subdirectory(UI)
@@ -84,12 +91,15 @@ add_custom_target(lint-shell-scripts
     USES_TERMINAL
 )
 
-find_package(Python3 COMPONENTS Interpreter Development)
 if (Python3_FOUND)
+    message(STATUS "Python support enabled for LibWeb")
+    
     add_custom_target(check-style
         COMMAND ${Python3_EXECUTABLE} "${ladybird_SOURCE_DIR}/Meta/check-style.py"
         USES_TERMINAL
     )
+else()
+    message(WARNING "Python 3 not found - Python integration will be disabled")
 endif()
 
 # CPack configuration for packaging

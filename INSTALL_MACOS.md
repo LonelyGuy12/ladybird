@@ -90,15 +90,21 @@ rm -rf ~/Library/Caches/Ladybird
 - **Disk Space:** ~60 MB for app
 - **Dependencies:** Qt 6 (install via Homebrew if not present)
 
-### Installing Qt (if needed)
+### Installing Dependencies (if needed)
 
-If Ladybird crashes on launch with library errors, install Qt:
+If Ladybird crashes on launch or features are missing, install dependencies:
 
 ```bash
+# Install Qt (required for GUI)
 brew install qt@6
+
+# Install Python (required for Python integration features)
+brew install python@3.14
 ```
 
 Then try launching Ladybird again.
+
+**Note:** Python integration requires Python 3.14 to be installed via Homebrew. If you see "Python integration is not enabled in this build", make sure Python 3.14 is installed.
 
 ## Building from Source
 

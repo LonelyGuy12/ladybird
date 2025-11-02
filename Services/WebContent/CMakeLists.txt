@@ -26,7 +26,8 @@ else()
     set_target_properties(webcontentservice PROPERTIES AUTOMOC OFF AUTORCC OFF AUTOUIC OFF)
 endif()
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# Python3 is already found in main CMakeLists.txt via FindPythonPlatform.cmake
+# No need to call find_package again here - it would use cached result anyway
 
 target_include_directories(webcontentservice PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>)
 target_include_directories(webcontentservice PUBLIC $<BUILD_INTERFACE:${LADYBIRD_SOURCE_DIR}>)

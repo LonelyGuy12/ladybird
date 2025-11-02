@@ -36,12 +36,6 @@ set(SOURCES
     Bindings/OptionConstructor.cpp
     Bindings/PlatformObject.cpp
     Bindings/PrincipalHostDefined.cpp
-    Bindings/PythonDOMBindings.cpp
-    Bindings/PythonJSBridge.cpp
-    Bindings/PythonJSObjectWrapper.cpp
-    Bindings/TestPythonDOMModule.cpp
-    # Bindings/PythonObjectBridge.cpp
-    # Bindings/PythonWebModule.cpp
     Bindings/SyntheticHostDefined.cpp
     Clipboard/Clipboard.cpp
     Clipboard/ClipboardEvent.cpp
@@ -1159,18 +1153,35 @@ set(GENERATED_SOURCES
     HTML/Parser/NamedCharacterReferences.cpp
 )
 
-# Include platform-aware Python finder
-include(${CMAKE_SOURCE_DIR}/Meta/CMake/FindPythonPlatform.cmake)
+# Python support is configured in main CMakeLists.txt via FindPythonPlatform.cmake
 
 ladybird_lib(LibWeb web EXPLICIT_SYMBOL_EXPORT)
 
 # Enable Python support with platform-specific configuration
 if(Python3_FOUND)
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
-    target_link_libraries(LibWeb PRIVATE Python3::Python)
-    target_include_directories(LibWeb PRIVATE ${PYTHON_INCLUDE_DIRS})
+    # Add Python source files to the library
+    target_sources(LibWeb PRIVATE
+        Bindings/PythonDOMBindings.cpp
+        Bindings/PythonJSBridge.cpp
+        Bindings/PythonJSObjectWrapper.cpp
+        Bindings/TestPythonDOMModule.cpp
+    )
     
-    message(STATUS "Python support enabled for LibWeb")
+    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
+    target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
+    
+    # Link Python library explicitly (don't rely on Python3::Python target which may not exist)
+    # Use PUBLIC so that executables linking to LibWeb also get Python
+    if(Python3_LIBRARIES)
+        target_link_libraries(LibWeb PUBLIC ${Python3_LIBRARIES})
+        message(STATUS "Python support enabled for LibWeb")
+        message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+        message(STATUS "Python libraries: ${Python3_LIBRARIES}")
+    else()
+        message(FATAL_ERROR "Python3_LIBRARIES is empty! Cannot link Python")
+    endif()
+else()
+    message(FATAL_ERROR "Python 3.8+ with development headers is REQUIRED but was not found")
 endif()
 
 find_package(LibXml2 REQUIRED)
