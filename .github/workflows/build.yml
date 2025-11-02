@@ -215,6 +215,17 @@ jobs:
           python3-config --includes || echo "python3-config not found"
           ls -la /opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/ || echo "Python framework not found"
           
+          # Set Python paths explicitly for CMake
+          export Python3_ROOT_DIR="/opt/homebrew/opt/python@3.14"
+          export Python3_EXECUTABLE="/opt/homebrew/bin/python3"
+          export Python3_INCLUDE_DIR="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/include/python3.14"
+          export Python3_LIBRARY="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/lib/libpython3.14.dylib"
+          
+          echo "Python3_ROOT_DIR=$Python3_ROOT_DIR"
+          echo "Python3_EXECUTABLE=$Python3_EXECUTABLE"
+          echo "Python3_INCLUDE_DIR=$Python3_INCLUDE_DIR"
+          echo "Python3_LIBRARY=$Python3_LIBRARY"
+          
           # Show ccache stats before build
           ccache -s
           
