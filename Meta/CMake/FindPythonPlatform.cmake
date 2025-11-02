@@ -97,9 +97,17 @@ elseif(APPLE)
         message(STATUS "Python3 include: ${Python3_INCLUDE_DIRS}")
         message(STATUS "Python3 libraries: ${Python3_LIBRARIES}")
         
-        # Check if it's framework Python
+        # Check if it's framework Python and fix the library path
         if(Python3_LIBRARY MATCHES "Python\\.framework")
             message(STATUS "Using Python Framework")
+            # Extract framework path and use the framework binary instead of dylib
+            string(REGEX REPLACE "/lib/libpython.*\\.dylib$" "/Python" PYTHON_FRAMEWORK_BINARY "${Python3_LIBRARY}")
+            if(EXISTS "${PYTHON_FRAMEWORK_BINARY}")
+                set(Python3_LIBRARIES "${PYTHON_FRAMEWORK_BINARY}")
+                message(STATUS "  Using framework binary: ${Python3_LIBRARIES}")
+            else()
+                message(WARNING "Framework binary not found at: ${PYTHON_FRAMEWORK_BINARY}")
+            endif()
         else()
             message(STATUS "Using regular Python library")
         endif()
