@@ -12,7 +12,6 @@
 #include <AK/String.h>
 #include <LibWeb/Forward.h>
 #include <LibJS/Forward.h>
-#include <LibWeb/HTML/Scripting/PythonPerformanceMetrics.h>
 
 namespace Web::HTML {
 

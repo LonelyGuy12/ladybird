@@ -22,8 +22,6 @@ namespace Web::HTML {
 
 namespace {
 
-using namespace AK::StringViewLiterals;
-
 static String const& default_origin_key()
 {
     static String key = MUST(String::from_utf8("default"sv));
@@ -160,6 +158,7 @@ bool host_matches(StringView host, StringView pattern)
 }
 
 } // namespace
+
 bool PythonSecurityModel::s_security_initialized = false;
 HashMap<String, HashTable<String>> PythonSecurityModel::s_origin_allowed_modules;
 HashTable<String> PythonSecurityModel::s_safe_domains;
