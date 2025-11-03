@@ -36,7 +36,7 @@ public:
     
 private:
     static ExecutionStats s_current_stats;
-    static Optional<u64> s_start_time;
+    static Optional<MonotonicTime> s_start_time;
 };
 
 } // namespace Web::HTML

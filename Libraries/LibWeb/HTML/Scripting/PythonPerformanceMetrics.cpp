@@ -14,12 +14,12 @@ namespace Web::HTML {
 
 // Static member initialization
 PythonPerformanceMetrics::ExecutionStats PythonPerformanceMetrics::s_current_stats;
-Optional<u64> PythonPerformanceMetrics::s_start_time;
+Optional<MonotonicTime> PythonPerformanceMetrics::s_start_time;
 
 // Start timing a Python execution
 void PythonPerformanceMetrics::start_timing()
 {
-    s_start_time = AK::timestamp_now_us();
+    s_start_time = MonotonicTime::now();
     
     // Reset execution stats
     s_current_stats.function_calls = 0;
@@ -33,8 +33,9 @@ void PythonPerformanceMetrics::start_timing()
 PythonPerformanceMetrics::ExecutionStats PythonPerformanceMetrics::end_timing()
 {
     if (s_start_time.has_value()) {
-        u64 end_time = AK::timestamp_now_us();
-        s_current_stats.execution_time_ns = (end_time - s_start_time.value()) * 1000; // μs to ns
+        auto end_time = MonotonicTime::now();
+        auto duration = end_time - s_start_time.value();
+        s_current_stats.execution_time_ns = static_cast<u64>(duration.to_nanoseconds());
         s_start_time.clear();
         
         // Update final memory and CPU usage
@@ -87,8 +88,9 @@ void PythonPerformanceMetrics::update_cpu_usage()
         
         // Convert to percentage based on elapsed time
         if (s_start_time.has_value()) {
-            u64 end_time = AK::timestamp_now_us();
-            double elapsed = (end_time - s_start_time.value()) / 1000000.0; // μs to s
+            auto end_time = MonotonicTime::now();
+            auto duration = end_time - s_start_time.value();
+            double elapsed = duration.to_seconds_f64();
             if (elapsed > 0) {
                 s_current_stats.cpu_usage_percent = (total_time / elapsed) * 100.0;
             }
