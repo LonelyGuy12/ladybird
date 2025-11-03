@@ -39,9 +39,11 @@ public:
     // Check if the engine is initialized
     bool is_initialized() const { return m_initialized; }
 
+    // Convert Python object to JavaScript value
+    JS::Value convert_python_to_js(void* py_obj);
+
     // Get performance statistics
-    // TODO: Implement performance metrics
-    // PythonPerformanceMetrics::ExecutionStats get_performance_stats() const;
+    PythonPerformanceMetrics::ExecutionStats get_performance_stats() const;
 
 private:
     IndependentPythonEngine() = default;
@@ -50,9 +52,6 @@ private:
     OwnPtr<Impl> m_impl;
     bool m_initialized { false };
     String m_version;
-
-    // Convert Python object to JavaScript value
-    JS::Value convert_python_to_js(void* py_obj);
 };
 
 } // namespace Web::HTML

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Array.h>
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/Optional.h>
@@ -11,6 +12,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/StringUtils.h>
 #include <AK/StringView.h>
+#include <AK/Try.h>
 #include <AK/Vector.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
 #include <Python.h>
@@ -20,61 +22,69 @@ namespace Web::HTML {
 
 namespace {
 
+using namespace AK::Literals;
+
+static String const& default_origin_key()
+{
+    static String key = "default"_string;
+    return key;
+}
+
 Vector<String> default_safe_builtins()
 {
     Vector<String> builtins;
     builtins.ensure_capacity(48);
-    auto append = [&](StringView literal) {
+    auto append_literal = [&](StringView literal) {
         builtins.unchecked_append(MUST(String::from_utf8(literal)));
     };
-    append("abs"sv);
-    append("all"sv);
-    append("any"sv);
-    append("bin"sv);
-    append("bool"sv);
-    append("bytearray"sv);
-    append("bytes"sv);
-    append("callable"sv);
-    append("chr"sv);
-    append("complex"sv);
-    append("dict"sv);
-    append("dir"sv);
-    append("divmod"sv);
-    append("enumerate"sv);
-    append("filter"sv);
-    append("float"sv);
-    append("format"sv);
-    append("frozenset"sv);
-    append("hash"sv);
-    append("hex"sv);
-    append("id"sv);
-    append("int"sv);
-    append("isinstance"sv);
-    append("issubclass"sv);
-    append("iter"sv);
-    append("len"sv);
-    append("list"sv);
-    append("map"sv);
-    append("max"sv);
-    append("min"sv);
-    append("next"sv);
-    append("object"sv);
-    append("oct"sv);
-    append("ord"sv);
-    append("pow"sv);
-    append("range"sv);
-    append("repr"sv);
-    append("reversed"sv);
-    append("round"sv);
-    append("set"sv);
-    append("slice"sv);
-    append("sorted"sv);
-    append("str"sv);
-    append("sum"sv);
-    append("tuple"sv);
-    append("type"sv);
-    append("zip"sv);
-    append("print"sv);
+    append_literal("abs"sv);
+    append_literal("all"sv);
+    append_literal("any"sv);
+    append_literal("bin"sv);
+    append_literal("bool"sv);
+    append_literal("bytearray"sv);
+    append_literal("bytes"sv);
+    append_literal("callable"sv);
+    append_literal("chr"sv);
+    append_literal("complex"sv);
+    append_literal("dict"sv);
+    append_literal("dir"sv);
+    append_literal("divmod"sv);
+    append_literal("enumerate"sv);
+    append_literal("filter"sv);
+    append_literal("float"sv);
+    append_literal("format"sv);
+    append_literal("frozenset"sv);
+    append_literal("hash"sv);
+    append_literal("hex"sv);
+    append_literal("id"sv);
+    append_literal("int"sv);
+    append_literal("isinstance"sv);
+    append_literal("issubclass"sv);
+    append_literal("iter"sv);
+    append_literal("len"sv);
+    append_literal("list"sv);
+    append_literal("map"sv);
+    append_literal("max"sv);
+    append_literal("min"sv);
+    append_literal("next"sv);
+    append_literal("object"sv);
+    append_literal("oct"sv);
+    append_literal("ord"sv);
+    append_literal("pow"sv);
+    append_literal("range"sv);
+    append_literal("repr"sv);
+    append_literal("reversed"sv);
+    append_literal("round"sv);
+    append_literal("set"sv);
+    append_literal("slice"sv);
+    append_literal("sorted"sv);
+    append_literal("str"sv);
+    append_literal("sum"sv);
+    append_literal("tuple"sv);
+    append_literal("type"sv);
+    append_literal("zip"sv);
+    append_literal("print"sv);
     return builtins;
 }
 
@@ -82,29 +92,29 @@ Vector<String> dangerous_patterns()
 {
     Vector<String> patterns;
     patterns.ensure_capacity(20);
-    auto append = [&](StringView literal) {
+    auto append_literal = [&](StringView literal) {
         patterns.unchecked_append(MUST(String::from_utf8(literal)));
     };
-    append("__import__"sv);
-    append("eval("sv);
-    append("exec("sv);
-    append("globals("sv);
-    append("locals("sv);
-    append("getattr("sv);
-    append("setattr("sv);
-    append("delattr("sv);
-    append("open("sv);
-    append("compile("sv);
-    append("input("sv);
-    append("subprocess"sv);
-    append("ctypes"sv);
-    append("os.system"sv);
-    append("sys.modules"sv);
-    append("importlib"sv);
-    append("__class__"sv);
-    append("__bases__"sv);
-    append("__subclasses__"sv);
-    append("builtins.__dict__"sv);
+    append_literal("__import__"sv);
+    append_literal("eval("sv);
+    append_literal("exec("sv);
+    append_literal("globals("sv);
+    append_literal("locals("sv);
+    append_literal("getattr("sv);
+    append_literal("setattr("sv);
+    append_literal("delattr("sv);
+    append_literal("open("sv);
+    append_literal("compile("sv);
+    append_literal("input("sv);
+    append_literal("subprocess"sv);
+    append_literal("ctypes"sv);
+    append_literal("os.system"sv);
+    append_literal("sys.modules"sv);
+    append_literal("importlib"sv);
+    append_literal("__class__"sv);
+    append_literal("__bases__"sv);
+    append_literal("__subclasses__"sv);
+    append_literal("builtins.__dict__"sv);
     return patterns;
 }
 
@@ -112,24 +122,24 @@ Vector<String> default_allowed_modules()
 {
     Vector<String> modules;
     modules.ensure_capacity(15);
-    auto append = [&](StringView literal) {
+    auto append_literal = [&](StringView literal) {
         modules.unchecked_append(MUST(String::from_utf8(literal)));
     };
-    append("math"sv);
-    append("random"sv);
-    append("statistics"sv);
-    append("datetime"sv);
-    append("json"sv);
-    append("collections"sv);
-    append("functools"sv);
-    append("itertools"sv);
-    append("operator"sv);
-    append("string"sv);
-    append("re"sv);
-    append("time"sv);
-    append("asyncio"sv);
-    append("decimal"sv);
-    append("pathlib"sv);
+    append_literal("math"sv);
+    append_literal("random"sv);
+    append_literal("statistics"sv);
+    append_literal("datetime"sv);
+    append_literal("json"sv);
+    append_literal("collections"sv);
+    append_literal("functools"sv);
+    append_literal("itertools"sv);
+    append_literal("operator"sv);
+    append_literal("string"sv);
+    append_literal("re"sv);
+    append_literal("time"sv);
+    append_literal("asyncio"sv);
+    append_literal("decimal"sv);
+    append_literal("pathlib"sv);
     return modules;
 }
 
@@ -149,8 +159,6 @@ bool host_matches(StringView host, StringView pattern)
     return false;
 }
 
-}
-
 bool PythonSecurityModel::s_security_initialized = false;
 HashMap<String, HashTable<String>> PythonSecurityModel::s_origin_allowed_modules;
 HashTable<String> PythonSecurityModel::s_safe_domains;
@@ -162,18 +170,18 @@ ErrorOr<void> PythonSecurityModel::initialize_security()
         return {};
 
     s_safe_domains.ensure_capacity(8);
-    s_safe_domains.set("localhost"sv);
-    s_safe_domains.set("127.0.0.1"sv);
-    s_safe_domains.set("0.0.0.0"sv);
+    s_safe_domains.set("localhost"_string);
+    s_safe_domains.set("127.0.0.1"_string);
+    s_safe_domains.set("0.0.0.0"_string);
 
     auto default_modules = default_allowed_modules();
     HashTable<String> module_table;
     for (auto const& module : default_modules)
         module_table.set(module);
-    s_origin_allowed_modules.set(MUST(String::from_utf8("default"sv)), move(module_table));
+    s_origin_allowed_modules.set(default_origin_key(), move(module_table));
 
     ResourceLimits default_limits;
-    s_origin_resource_limits.set(MUST(String::from_utf8("default"sv)), default_limits);
+    s_origin_resource_limits.set(default_origin_key(), default_limits);
 
     s_security_initialized = true;
     return {};
@@ -184,9 +192,6 @@ ErrorOr<bool> PythonSecurityModel::should_allow_script_execution(String const& s
     TRY(initialize_security());
 
     if (!TRY(is_code_safe(script_content)))
-        return false;
-
-    if (!TRY(check_against_csp(script_content, origin)))
         return false;
 
     return true;
@@ -202,11 +207,15 @@ ErrorOr<void> PythonSecurityModel::setup_sandboxed_environment(void* globals_ptr
     auto* globals = static_cast<PyObject*>(globals_ptr);
     TRY(restrict_builtins(globals));
 
-    auto limits = s_origin_resource_limits.get(normalize_origin(origin)).value_or(s_origin_resource_limits.get(MUST(String::from_utf8("default"sv))).value());
-    TRY(set_resource_limits(globals_ptr, limits));
+    auto limits = s_origin_resource_limits.get(normalize_origin(origin));
+    if (!limits.has_value())
+        limits = s_origin_resource_limits.get(default_origin_key());
+    VERIFY(limits.has_value());
+    TRY(set_resource_limits(globals_ptr, *limits));
 
     return {};
 }
+
 ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
 {
     if (!globals_ptr)
@@ -219,11 +228,11 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
 
     PyObject* safe_builtins = PyDict_New();
     if (!safe_builtins)
-        return Error::from_string_literal("Failed to create safe builtins dictionary"sv);
+        return Error::from_string_literal("Failed to create safe builtins dictionary");
 
     auto safe_names = default_safe_builtins();
     for (auto const& name : safe_names) {
-        auto name_bytes = MUST(name.to_byte_string());
+        auto name_bytes = name.to_byte_string();
         PyObject* builtin = PyDict_GetItemString(builtins_module, name_bytes.characters());
         if (builtin)
             PyDict_SetItemString(safe_builtins, name_bytes.characters(), builtin);
@@ -242,7 +251,9 @@ ErrorOr<bool> PythonSecurityModel::should_allow_module_import(String const& modu
     for (auto const& allowed : modules) {
         if (module_name == allowed)
             return true;
-        if (module_name.starts_with(allowed.bytes_as_string_view()) && module_name[allowed.length()] == '.')
+        auto module_view = module_name.bytes_as_string_view();
+        auto allowed_view = allowed.bytes_as_string_view();
+        if (module_view.starts_with(allowed_view) && module_view.length() > allowed_view.length() && module_view[allowed_view.length()] == '.')
             return true;
     }
 
@@ -281,10 +292,10 @@ ErrorOr<void> PythonSecurityModel::setup_restricted_filesystem_access(void* inte
 ErrorOr<bool> PythonSecurityModel::should_allow_network_request(URL::URL const& target_url, URL::URL const& origin)
 {
     if (!TRY(check_if_same_origin(target_url, origin))) {
-        auto host_string = target_url.host().has_value() ? MUST(target_url.host()->serialize()).bytes_as_string_view() : StringView {};
+        auto host_string = target_url.host().has_value() ? target_url.host()->serialize() : String {};
         bool allowed = false;
         for (auto const& domain : s_safe_domains) {
-            if (host_matches(host_string, domain.bytes_as_string_view())) {
+            if (host_matches(host_string.bytes_as_string_view(), domain.bytes_as_string_view())) {
                 allowed = true;
                 break;
             }
@@ -305,9 +316,9 @@ ErrorOr<void> PythonSecurityModel::set_resource_limits(void* interpreter, Resour
     TRY(setup_cpu_limiter(interpreter, limits.max_cpu_time_ms));
 
     auto recursion_command = MUST(String::formatted("import sys; sys.setrecursionlimit({})", limits.max_recursion_depth));
-    auto recursion_c_string = MUST(recursion_command.to_byte_string());
+    auto recursion_c_string = recursion_command.to_byte_string();
     if (PyRun_SimpleString(recursion_c_string.characters()) != 0)
-        return Error::from_string_literal("Failed to set recursion limit"sv);
+        return Error::from_string_literal("Failed to set recursion limit");
 
     return {};
 }
@@ -327,7 +338,7 @@ ErrorOr<bool> PythonSecurityModel::is_code_safe(String const& code)
     return true;
 }
 
-ErrorOr<bool> PythonSecurityModel::check_against_csp(String const&, URL::URL const&)
+ErrorOr<bool> PythonSecurityModel::check_against_csp(String const& code, URL::URL const& origin)
 {
     return true;
 }
@@ -344,7 +355,7 @@ Vector<String> PythonSecurityModel::get_allowed_modules(URL::URL const& origin)
     }
 
     Vector<String> modules;
-    if (auto default_entry = s_origin_allowed_modules.get("default"_string); default_entry.has_value()) {
+    if (auto default_entry = s_origin_allowed_modules.get(default_origin_key()); default_entry.has_value()) {
         modules.ensure_capacity(default_entry->size());
         for (auto const& module : *default_entry)
             modules.append(module);
@@ -352,7 +363,7 @@ Vector<String> PythonSecurityModel::get_allowed_modules(URL::URL const& origin)
     return modules;
 }
 
-HashMap<String, double> PythonSecurityModel::get_resource_usage(void*)
+HashMap<String, double> PythonSecurityModel::get_resource_usage(void* interpreter)
 {
     HashMap<String, double> usage;
     usage.set("cpu_time_ms", 0.0);
@@ -361,6 +372,7 @@ HashMap<String, double> PythonSecurityModel::get_resource_usage(void*)
     return usage;
 }
 
+// Helper methods
 ErrorOr<bool> PythonSecurityModel::check_code_for_dangerous_patterns(String const& code)
 {
     return is_code_safe(code);
@@ -373,14 +385,14 @@ ErrorOr<bool> PythonSecurityModel::check_if_same_origin(URL::URL const& url1, UR
 
 ErrorOr<void> PythonSecurityModel::setup_memory_limiter(void* interpreter, u32 max_bytes)
 {
+    (void)interpreter;
 #if defined(AK_OS_UNIX)
     String command = MUST(String::formatted(
         "import resource; resource.setrlimit(resource.RLIMIT_AS, ({}, {}))", max_bytes, max_bytes));
-    auto command_c_str = MUST(command.to_byte_string());
+    auto command_c_str = command.to_byte_string();
     if (PyRun_SimpleString(command_c_str.characters()) != 0)
-        return Error::from_string_literal("Failed to set memory limit"sv);
+        return Error::from_string_literal("Failed to set memory limit");
 #else
-    (void)interpreter;
     (void)max_bytes;
 #endif
     return {};
@@ -396,9 +408,9 @@ ErrorOr<void> PythonSecurityModel::setup_cpu_limiter(void*, u32 max_ms)
         "resource.setrlimit(resource.RLIMIT_CPU, ({}, {})); "
         "signal.alarm({})",
         seconds, seconds, rounded));
-    auto command_c_str = MUST(command.to_byte_string());
+    auto command_c_str = command.to_byte_string();
     if (PyRun_SimpleString(command_c_str.characters()) != 0)
-        return Error::from_string_literal("Failed to configure CPU limiter"sv);
+        return Error::from_string_literal("Failed to configure CPU limiter");
 #else
     (void)max_ms;
 #endif

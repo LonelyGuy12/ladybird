@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ByteString.h>
 #include <AK/HashMap.h>
+#include <AK/NonnullOwnPtr.h>
 #include <AK/ScopeGuard.h>
-#include <AK/Try.h>
+#include <AK/String.h>
 #include <AK/StringView.h>
+#include <AK/Try.h>
 #include <AK/Vector.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/PrimitiveString.h>
@@ -31,10 +34,8 @@ inline ByteString sanitized_filename(StringView filename)
     return filename.to_byte_string();
 }
 
-JS::Value python_object_to_js(PyObject* object)
+JS::Value python_object_to_js(JS::VM& vm, PyObject* object)
 {
-    auto& vm = Bindings::main_thread_vm().vm();
-
     if (!object)
         return JS::js_undefined();
 
@@ -68,8 +69,10 @@ JS::Value python_object_to_js(PyObject* object)
             PyErr_Clear();
             return JS::js_undefined();
         }
-        auto string = MUST(String::from_utf8(StringView { utf8, strlen(utf8) }));
-        return JS::js_string(vm, move(string));
+        auto const* utf8_begin = utf8;
+        auto string_view = StringView { utf8_begin, strlen(utf8_begin) };
+        auto string = MUST(String::from_utf8(string_view));
+        return JS::PrimitiveString::create(vm, move(string));
     }
 
     if (PyList_Check(object)) {
@@ -79,7 +82,7 @@ JS::Value python_object_to_js(PyObject* object)
             PyObject* element = PyList_GetItem(object, index); // Borrowed reference
             if (!element)
                 continue;
-            array->indexed_properties().append(python_object_to_js(element));
+            array->indexed_properties().append(python_object_to_js(vm, element));
         }
         return JS::Value(array);
     }
@@ -126,7 +129,7 @@ struct IndependentPythonEngine::Impl {
 
 ErrorOr<NonnullOwnPtr<IndependentPythonEngine>> IndependentPythonEngine::create()
 {
-    auto engine = make<IndependentPythonEngine>();
+    auto engine = adopt_own(*new IndependentPythonEngine);
     TRY(engine->initialize());
     return engine;
 }
@@ -148,8 +151,6 @@ ErrorOr<void> IndependentPythonEngine::initialize()
 
     if (!Py_IsInitialized())
         Py_Initialize();
-
-    PyEval_InitThreads();
 
     PyGILState_STATE gstate = PyGILState_Ensure();
 
@@ -174,8 +175,9 @@ ErrorOr<void> IndependentPythonEngine::initialize()
         Py_DECREF(builtins);
     }
 
-    auto version_result = String::from_utf8(Py_GetVersion());
-    if (!version_result.is_error())
+    auto const* version_cstr = Py_GetVersion();
+    auto version_view = StringView { version_cstr, strlen(version_cstr) };
+    if (auto version_result = String::from_utf8(version_view); !version_result.is_error())
         m_version = version_result.release_value();
 
     m_initialized = true;
@@ -228,7 +230,8 @@ ErrorOr<JS::Value> IndependentPythonEngine::run(StringView source, StringView fi
     if (!result)
         return PythonError::from_python_exception();
 
-    auto js_result = python_object_to_js(result);
+    auto& vm = Bindings::main_thread_vm();
+    auto js_result = python_object_to_js(vm, result);
     Py_DECREF(result);
 
     return js_result;
@@ -254,7 +257,8 @@ ErrorOr<JS::Value> IndependentPythonEngine::run_module(StringView module_name)
     if (!module)
         return PythonError::from_python_exception();
 
-    auto js_result = python_object_to_js(module);
+    auto& vm = Bindings::main_thread_vm();
+    auto js_result = python_object_to_js(vm, module);
     Py_DECREF(module);
 
     return js_result;
@@ -262,7 +266,8 @@ ErrorOr<JS::Value> IndependentPythonEngine::run_module(StringView module_name)
 
 JS::Value IndependentPythonEngine::convert_python_to_js(void* py_obj)
 {
-    return python_object_to_js(static_cast<PyObject*>(py_obj));
+    auto& vm = Bindings::main_thread_vm();
+    return python_object_to_js(vm, static_cast<PyObject*>(py_obj));
 }
 
 PythonPerformanceMetrics::ExecutionStats IndependentPythonEngine::get_performance_stats() const
