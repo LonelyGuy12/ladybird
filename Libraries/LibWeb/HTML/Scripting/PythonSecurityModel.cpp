@@ -189,6 +189,7 @@ ErrorOr<void> PythonSecurityModel::initialize_security()
 
 ErrorOr<bool> PythonSecurityModel::should_allow_script_execution(String const& script_content, URL::URL const& origin)
 {
+    (void)origin;
     TRY(initialize_security());
 
     if (!TRY(is_code_safe(script_content)))
@@ -340,6 +341,8 @@ ErrorOr<bool> PythonSecurityModel::is_code_safe(String const& code)
 
 ErrorOr<bool> PythonSecurityModel::check_against_csp(String const& code, URL::URL const& origin)
 {
+    (void)code;
+    (void)origin;
     return true;
 }
 
@@ -365,10 +368,11 @@ Vector<String> PythonSecurityModel::get_allowed_modules(URL::URL const& origin)
 
 HashMap<String, double> PythonSecurityModel::get_resource_usage(void* interpreter)
 {
+    (void)interpreter;
     HashMap<String, double> usage;
-    usage.set("cpu_time_ms", 0.0);
-    usage.set("memory_bytes", 0.0);
-    usage.set("executions", 0.0);
+    usage.set(MUST(String::from_utf8("cpu_time_ms"sv)), 0.0);
+    usage.set(MUST(String::from_utf8("memory_bytes"sv)), 0.0);
+    usage.set(MUST(String::from_utf8("executions"sv)), 0.0);
     return usage;
 }
 
