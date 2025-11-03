@@ -1166,6 +1166,8 @@ if(Python3_FOUND)
         Bindings/PythonJSBridge.cpp
         Bindings/PythonJSObjectWrapper.cpp
         Bindings/TestPythonDOMModule.cpp
+        HTML/Scripting/PythonError.cpp
+        HTML/Scripting/PythonPerformanceMetrics.cpp
     )
     
     # Use PUBLIC so that executables linking to LibWeb also get ENABLE_PYTHON defined
