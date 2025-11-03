@@ -22,11 +22,11 @@ namespace Web::HTML {
 
 namespace {
 
-using namespace AK::Literals;
+using namespace AK::StringViewLiterals;
 
 static String const& default_origin_key()
 {
-    static String key = "default"_string;
+    static String key = MUST(String::from_utf8("default"sv));
     return key;
 }
 
@@ -159,6 +159,7 @@ bool host_matches(StringView host, StringView pattern)
     return false;
 }
 
+} // namespace
 bool PythonSecurityModel::s_security_initialized = false;
 HashMap<String, HashTable<String>> PythonSecurityModel::s_origin_allowed_modules;
 HashTable<String> PythonSecurityModel::s_safe_domains;
@@ -170,9 +171,9 @@ ErrorOr<void> PythonSecurityModel::initialize_security()
         return {};
 
     s_safe_domains.ensure_capacity(8);
-    s_safe_domains.set("localhost"_string);
-    s_safe_domains.set("127.0.0.1"_string);
-    s_safe_domains.set("0.0.0.0"_string);
+    s_safe_domains.set(MUST(String::from_utf8("localhost"sv)));
+    s_safe_domains.set(MUST(String::from_utf8("127.0.0.1"sv)));
+    s_safe_domains.set(MUST(String::from_utf8("0.0.0.0"sv)));
 
     auto default_modules = default_allowed_modules();
     HashTable<String> module_table;

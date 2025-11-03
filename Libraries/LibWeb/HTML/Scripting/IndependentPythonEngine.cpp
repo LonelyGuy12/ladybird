@@ -34,7 +34,7 @@ inline ByteString sanitized_filename(StringView filename)
     return filename.to_byte_string();
 }
 
-JS::Value python_object_to_js(JS::VM& vm, PyObject* object)
+JS::Value python_object_to_js(JS::Realm& realm, PyObject* object)
 {
     if (!object)
         return JS::js_undefined();
@@ -72,29 +72,29 @@ JS::Value python_object_to_js(JS::VM& vm, PyObject* object)
         auto const* utf8_begin = utf8;
         auto string_view = StringView { utf8_begin, strlen(utf8_begin) };
         auto string = MUST(String::from_utf8(string_view));
-        return JS::PrimitiveString::create(vm, move(string));
+        return JS::PrimitiveString::create(realm.vm(), move(string));
     }
 
     if (PyList_Check(object)) {
-        auto* array = JS::Array::create(vm, 0);
+        auto array = MUST(JS::Array::create(realm, 0)).ptr();
         auto size = PyList_Size(object);
         for (Py_ssize_t index = 0; index < size; ++index) {
             PyObject* element = PyList_GetItem(object, index); // Borrowed reference
             if (!element)
                 continue;
-            array->indexed_properties().append(python_object_to_js(vm, element));
+            array->indexed_properties().append(python_object_to_js(realm, element));
         }
         return JS::Value(array);
     }
 
     if (PyTuple_Check(object)) {
-        auto* array = JS::Array::create(vm, 0);
+        auto array = MUST(JS::Array::create(realm, 0)).ptr();
         auto size = PyTuple_Size(object);
         for (Py_ssize_t index = 0; index < size; ++index) {
             PyObject* element = PyTuple_GetItem(object, index); // Borrowed reference
             if (!element)
                 continue;
-            array->indexed_properties().append(python_object_to_js(element));
+            array->indexed_properties().append(python_object_to_js(realm, element));
         }
         return JS::Value(array);
     }
@@ -231,7 +231,10 @@ ErrorOr<JS::Value> IndependentPythonEngine::run(StringView source, StringView fi
         return PythonError::from_python_exception();
 
     auto& vm = Bindings::main_thread_vm();
-    auto js_result = python_object_to_js(vm, result);
+    auto* realm = vm.current_realm();
+    if (!realm)
+        return Error::from_string_literal("No active JavaScript realm");
+    auto js_result = python_object_to_js(*realm, result);
     Py_DECREF(result);
 
     return js_result;
@@ -258,7 +261,10 @@ ErrorOr<JS::Value> IndependentPythonEngine::run_module(StringView module_name)
         return PythonError::from_python_exception();
 
     auto& vm = Bindings::main_thread_vm();
-    auto js_result = python_object_to_js(vm, module);
+    auto* realm = vm.current_realm();
+    if (!realm)
+        return Error::from_string_literal("No active JavaScript realm");
+    auto js_result = python_object_to_js(*realm, module);
     Py_DECREF(module);
 
     return js_result;
@@ -267,7 +273,10 @@ ErrorOr<JS::Value> IndependentPythonEngine::run_module(StringView module_name)
 JS::Value IndependentPythonEngine::convert_python_to_js(void* py_obj)
 {
     auto& vm = Bindings::main_thread_vm();
-    return python_object_to_js(vm, static_cast<PyObject*>(py_obj));
+    auto* realm = vm.current_realm();
+    if (!realm)
+        return JS::js_undefined();
+    return python_object_to_js(*realm, static_cast<PyObject*>(py_obj));
 }
 
 PythonPerformanceMetrics::ExecutionStats IndependentPythonEngine::get_performance_stats() const
