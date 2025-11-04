@@ -688,7 +688,7 @@ void HTMLScriptElement::post_connection()
 void HTMLScriptElement::mark_as_ready(Result result)
 {
     if (m_script_type == ScriptType::Python)
-        dbgln("🐍 HTMLScriptElement::mark_as_ready() - Python script marked as ready, has_callback={}", m_steps_to_run_when_the_result_is_ready != nullptr);
+        dbgln("🐍 HTMLScriptElement::mark_as_ready() - Python script marked as ready, has_callback={}", static_cast<bool>(m_steps_to_run_when_the_result_is_ready));
     
     // 1. Set el's result to result.
     m_result = move(result);
