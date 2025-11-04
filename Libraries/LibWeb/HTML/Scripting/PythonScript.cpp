@@ -8,7 +8,6 @@
 #include <LibCore/ElapsedTimer.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/PythonDOMBindings.h>
-#include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
@@ -154,11 +153,6 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                             Py_DECREF(win_class);
                         }
                     }
-                }
-                
-                // Setup cross-language bridge to enable access to JavaScript objects
-                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_execution_context, this->realm())) {
-                    dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
                 // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
