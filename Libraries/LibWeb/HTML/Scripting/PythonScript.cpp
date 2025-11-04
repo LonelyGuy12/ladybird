@@ -14,7 +14,9 @@
 #include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
 #include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/WebIDL/DOMException.h>
+#include <AK/TypeCasts.h>
 #include <Python.h>
 #include <cstring>
 
@@ -161,7 +163,8 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                         }
 
                         // Expose current window and document instances to Python (no JS bridge)
-                        auto& win = static_cast<Window&>(relevant_global_object(*this));
+                        auto& window_object = relevant_global_object(realm.global_object());
+                        auto& win = verify_cast<Window>(window_object);
                         PyObject* py_window = Bindings::PythonWindow::create_from_cpp_window(win);
                         if (py_window) {
                             PyDict_SetItemString(m_execution_context, "window", py_window);
