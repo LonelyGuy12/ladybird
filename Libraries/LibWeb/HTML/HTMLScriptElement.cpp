@@ -160,6 +160,8 @@ void HTMLScriptElement::execute_script()
     }
     // -> "python"
     else if (m_script_type == ScriptType::Python) {
+        dbgln("🐍 HTMLScriptElement::execute_script() - Python script type detected!");
+        
         // 1. Let oldCurrentScript be the value to which document's currentScript object was most recently set.
         auto old_current_script = document->current_script();
         // 2. If el's root is not a shadow root, then set document's currentScript attribute to el. Otherwise, set it to null.
@@ -169,12 +171,14 @@ void HTMLScriptElement::execute_script()
             document->set_current_script({}, nullptr);
 
         if (m_from_an_external_file)
-            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running Python script {}", attribute(HTML::AttributeNames::src).value_or(String {}));
+            dbgln("🐍 HTMLScriptElement: Running external Python script {}", attribute(HTML::AttributeNames::src).value_or(String {}));
         else
-            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running inline Python script");
+            dbgln("🐍 HTMLScriptElement: Running inline Python script");
 
         // 3. Run the Python script given by el's result.
+        dbgln("🐍 HTMLScriptElement: About to call PythonScript::run()");
         (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
+        dbgln("🐍 HTMLScriptElement: PythonScript::run() completed");
 
         // 4. Set document's currentScript attribute to oldCurrentScript.
         document->set_current_script({}, old_current_script);
@@ -267,6 +271,7 @@ void HTMLScriptElement::prepare_script()
     // 11.5. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "python" or "text/python",
     else if (script_block_type.equals_ignoring_ascii_case("python"sv) || script_block_type.equals_ignoring_ascii_case("text/python"sv)) {
         // then set el's type to "python".
+        dbgln("🐍 HTMLScriptElement: Detected Python script type: '{}'", script_block_type);
         m_script_type = ScriptType::Python;
     }
     // FIXME: 12. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "speculationrules", then set el's type to "speculationrules".
