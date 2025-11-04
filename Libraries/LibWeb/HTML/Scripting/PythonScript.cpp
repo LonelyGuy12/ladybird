@@ -172,14 +172,11 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                             PyDict_SetItemString(m_execution_context, "window", py_window);
                             Py_DECREF(py_window);
                         }
-                        auto doc_ref = win.document();
-                        if (doc_ref) {
-                            auto* cpp_doc = const_cast<DOM::Document*>(&*doc_ref);
-                            PyObject* py_document = Bindings::PythonDocument::create_from_cpp_document(*cpp_doc);
-                            if (py_document) {
-                                PyDict_SetItemString(m_execution_context, "document", py_document);
-                                Py_DECREF(py_document);
-                            }
+                        auto& doc = const_cast<DOM::Document&>(*win.document());
+                        PyObject* py_document = Bindings::PythonDocument::create_from_cpp_document(doc);
+                        if (py_document) {
+                            PyDict_SetItemString(m_execution_context, "document", py_document);
+                            Py_DECREF(py_document);
                         }
                     }
                 }
