@@ -543,8 +543,8 @@ void HTMLScriptElement::prepare_script()
         // FIXME: -> "speculationrules"
     }
 
-    // 35. If el's type is "classic" and el has a src attribute, or el's type is "module", or el's type is "python":
-    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module || m_script_type == ScriptType::Python) {
+    // 35. If el's type is "classic" and el has a src attribute, or el's type is "module", or el's type is "python" and el has a src attribute:
+    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module || (m_script_type == ScriptType::Python && has_attribute(HTML::AttributeNames::src))) {
         // 1. Assert: el's result is "uninitialized".
         // FIXME: I believe this step to be a spec bug, and it should be removed: https://github.com/whatwg/html/issues/8534
 
