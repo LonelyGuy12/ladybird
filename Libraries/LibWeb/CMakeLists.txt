@@ -619,9 +619,10 @@ set(SOURCES
     HTML/Scripting/ImportMapParseResult.cpp
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
-    # HTML/Scripting/PythonEngine.cpp
-    # HTML/Scripting/PythonScript.cpp
-    # HTML/Scripting/PythonSecurityModel.cpp
+    HTML/Scripting/IndependentPythonEngine.cpp
+    HTML/Scripting/PythonEngine.cpp
+    HTML/Scripting/PythonScript.cpp
+    HTML/Scripting/PythonSecurityModel.cpp
     HTML/Scripting/Script.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/Scripting/SimilarOriginWindowAgent.cpp
@@ -1165,9 +1166,12 @@ if(Python3_FOUND)
         Bindings/PythonJSBridge.cpp
         Bindings/PythonJSObjectWrapper.cpp
         Bindings/TestPythonDOMModule.cpp
+        HTML/Scripting/PythonError.cpp
+        HTML/Scripting/PythonPerformanceMetrics.cpp
     )
     
-    target_compile_definitions(LibWeb PRIVATE ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
+    # Use PUBLIC so that executables linking to LibWeb also get ENABLE_PYTHON defined
+    target_compile_definitions(LibWeb PUBLIC ENABLE_PYTHON ${PYTHON_PLATFORM_DEFINES})
     target_include_directories(LibWeb PRIVATE ${Python3_INCLUDE_DIRS})
     
     # Link Python library explicitly (don't rely on Python3::Python target which may not exist)

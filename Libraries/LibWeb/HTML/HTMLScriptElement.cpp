@@ -174,8 +174,7 @@ void HTMLScriptElement::execute_script()
             dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running inline Python script");
 
         // 3. Run the Python script given by el's result.
-        // (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
-        // Disabled Python support
+        (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
 
         // 4. Set document's currentScript attribute to oldCurrentScript.
         document->set_current_script({}, old_current_script);
@@ -531,11 +530,10 @@ void HTMLScriptElement::prepare_script()
         else if (m_script_type == ScriptType::Python) {
             // 1. Let script be the result of creating a python script using source text, settings object's realm, base URL, and options.
             // FIXME: Pass options.
-            // auto script = PythonScript::create(m_document->url().to_byte_string(), source_text, settings_object.realm(), base_url);
+            auto script = PythonScript::create(m_document->url().to_byte_string(), source_text.to_byte_string(), settings_object.realm(), base_url);
 
             // 2. Mark as ready el given script.
-            // mark_as_ready(Result(move(script)));
-            mark_as_ready(Result(ResultState::Null {}));
+            mark_as_ready(Result(move(script)));
         }
         // FIXME: -> "speculationrules"
     }

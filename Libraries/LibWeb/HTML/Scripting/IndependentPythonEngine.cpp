@@ -4,168 +4,144 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ByteString.h>
+#include <AK/HashMap.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/ScopeGuard.h>
+#include <AK/String.h>
+#include <AK/StringView.h>
+#include <AK/Try.h>
+#include <AK/Vector.h>
+#include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/HTML/Scripting/IndependentPythonEngine.h>
 #include <LibWeb/HTML/Scripting/PythonError.h>
 #include <LibWeb/HTML/Scripting/PythonPerformanceMetrics.h>
-#include <LibJS/Runtime/VM.h>
-#include <LibJS/Runtime/Value.h>
 
-// Forward declare Python C API functions
-typedef struct _object PyObject;
-typedef struct _ts PyThreadState;
-typedef struct _is PyInterpreterState;
-
-extern "C" {
-    // Python C API functions
-    void Py_Initialize();
-    void Py_Finalize();
-    int Py_IsInitialized();
-    void PyEval_InitThreads();
-    PyThreadState* PyEval_SaveThread();
-    void PyEval_RestoreThread(PyThreadState*);
-
-    // Execution functions
-    PyObject* PyRun_String(const char*, int, PyObject*, PyObject*);
-    PyObject* PyRun_SimpleString(const char*);
-    PyObject* Py_CompileString(const char*, const char*, int);
-
-    // Error handling
-    void PyErr_Print();
-    PyObject* PyErr_Occurred();
-    void PyErr_Clear();
-    const char* PyErr_GetExcTypeName(PyObject*);
-
-    // Object management
-    PyObject* PyUnicode_FromString(const char*);
-    PyObject* PyUnicode_AsUTF8String(PyObject*);
-
-    // Module system
-    PyObject* PyImport_ImportModule(const char*);
-    PyObject* PyModule_GetDict(PyObject*);
-
-    // String operations
-    const char* Py_GetVersion();
-    const char* PyUnicode_AsUTF8(PyObject*);
-
-    // Type checking
-    int PyUnicode_Check(PyObject*);
-    int PyLong_Check(PyObject*);
-    int PyFloat_Check(PyObject*);
-    int PyBool_Check(PyObject*);
-    int PyDict_Check(PyObject*);
-    int PyList_Check(PyObject*);
-
-    // Type conversion
-    long PyLong_AsLong(PyObject*);
-    double PyFloat_AsDouble(PyObject*);
-
-    // Memory management
-    void Py_INCREF(PyObject*);
-    void Py_DECREF(PyObject*);
-
-    // Dictionary operations
-    PyObject* PyDict_New();
-    int PyDict_Size(PyObject*);
-    int PyDict_SetItem(PyObject*, PyObject*, PyObject*);
-    PyObject* PyDict_GetItem(PyObject*, PyObject*);
-
-    // Performance and profiling
-    PyObject* PyEval_EvalCode(PyObject*, PyObject*, PyObject*);
-
-    // Threading
-    PyThreadState* Py_NewInterpreter();
-    void Py_EndInterpreter(PyThreadState*);
-
-    // Caching and optimization
-    PyObject* PyCode_Optimize(PyObject*, PyObject*, PyObject*, PyObject*);
-
-    // Async support
-    PyObject* PyAsync_CreateTask(PyObject*, PyObject*, PyObject*);
-
-    // High-performance execution
-    PyObject* PyEval_EvalCodeEx(PyObject*, PyObject*, PyObject*, PyObject**, int, PyObject**);
-
-    // Constants
-    extern int Py_file_input;
-    extern int Py_eval_input;
-    extern PyObject* Py_True;
-}
+#include <Python.h>
+#include <cstring>
 
 namespace Web::HTML {
 
-// Performance metrics implementation
-PythonPerformanceMetrics::ExecutionStats PythonPerformanceMetrics::s_current_stats;
-Optional<u64> PythonPerformanceMetrics::s_start_time;
+namespace {
 
-void PythonPerformanceMetrics::start_timing()
+inline ByteString sanitized_filename(StringView filename)
 {
-    s_start_time = AK::high_resolution_time().nanoseconds();
+    if (filename.is_empty())
+        return "<string>"sv;
+    return filename.to_byte_string();
 }
 
-PythonPerformanceMetrics::ExecutionStats PythonPerformanceMetrics::end_timing()
+JS::Value python_object_to_js(JS::Realm& realm, PyObject* object)
 {
-    if (s_start_time.has_value()) {
-        s_current_stats.execution_time_ns = AK::high_resolution_time().nanoseconds() - s_start_time.value();
-        s_start_time.clear();
+    if (!object)
+        return JS::js_undefined();
+
+    if (object == Py_None)
+        return JS::js_undefined();
+
+    if (PyBool_Check(object))
+        return JS::Value(object == Py_True);
+
+    if (PyLong_Check(object)) {
+        auto value = PyLong_AsLongLong(object);
+        if (PyErr_Occurred()) {
+            PyErr_Clear();
+            return JS::js_undefined();
+        }
+        return JS::Value(static_cast<double>(value));
     }
-    return s_current_stats;
+
+    if (PyFloat_Check(object)) {
+        auto value = PyFloat_AsDouble(object);
+        if (PyErr_Occurred()) {
+            PyErr_Clear();
+            return JS::js_undefined();
+        }
+        return JS::Value(value);
+    }
+
+    if (PyUnicode_Check(object)) {
+        auto const* utf8 = PyUnicode_AsUTF8(object);
+        if (!utf8) {
+            PyErr_Clear();
+            return JS::js_undefined();
+        }
+        auto const* utf8_begin = utf8;
+        auto string_view = StringView { utf8_begin, strlen(utf8_begin) };
+        auto string = MUST(String::from_utf8(string_view));
+        return JS::PrimitiveString::create(realm.vm(), move(string));
+    }
+
+    if (PyList_Check(object)) {
+        auto array = MUST(JS::Array::create(realm, 0)).ptr();
+        auto size = PyList_Size(object);
+        for (Py_ssize_t index = 0; index < size; ++index) {
+            PyObject* element = PyList_GetItem(object, index); // Borrowed reference
+            if (!element)
+                continue;
+            array->indexed_properties().append(python_object_to_js(realm, element));
+        }
+        return JS::Value(array);
+    }
+
+    if (PyTuple_Check(object)) {
+        auto array = MUST(JS::Array::create(realm, 0)).ptr();
+        auto size = PyTuple_Size(object);
+        for (Py_ssize_t index = 0; index < size; ++index) {
+            PyObject* element = PyTuple_GetItem(object, index); // Borrowed reference
+            if (!element)
+                continue;
+            array->indexed_properties().append(python_object_to_js(realm, element));
+        }
+        return JS::Value(array);
+    }
+
+    return JS::js_undefined();
 }
 
-void PythonPerformanceMetrics::record_function_call()
-{
-    s_current_stats.function_calls++;
-}
-
-void PythonPerformanceMetrics::record_gc_collection()
-{
-    s_current_stats.gc_collections++;
-}
-
-void PythonPerformanceMetrics::update_memory_usage()
-{
-    // TODO: Implement actual memory usage tracking
-    s_current_stats.memory_usage_bytes += 1024; // Placeholder
-}
-
-void PythonPerformanceMetrics::update_cpu_usage()
-{
-    // TODO: Implement actual CPU usage tracking
-    s_current_stats.cpu_usage_percent = 0.0;
-}
-
-PythonPerformanceMetrics::ExecutionStats PythonPerformanceMetrics::get_current_stats()
-{
-    return s_current_stats;
-}
+} // namespace
 
 struct IndependentPythonEngine::Impl {
-    PyThreadState* m_thread_state { nullptr };
-    PyObject* m_main_module { nullptr };
-    PyObject* m_globals { nullptr };
-    PyObject* m_locals { nullptr };
-    PythonPerformanceMetrics::ExecutionStats m_stats;
+    ~Impl()
+    {
+        if (globals) {
+            Py_DECREF(globals);
+            globals = nullptr;
+        }
+        if (locals) {
+            Py_DECREF(locals);
+            locals = nullptr;
+        }
+        for (auto& entry : compiled_cache) {
+            Py_DECREF(entry.value);
+        }
+        compiled_cache.clear();
+    }
 
-    // Performance optimizations
-    PyObject* m_compiled_cache { nullptr };
-    bool m_optimization_enabled { true };
-    u32 m_max_cache_size { 1024 };
+    PyObject* globals { nullptr };
+    PyObject* locals { nullptr };
+    HashMap<ByteString, PyObject*> compiled_cache;
+    PythonPerformanceMetrics::ExecutionStats stats;
 };
 
 ErrorOr<NonnullOwnPtr<IndependentPythonEngine>> IndependentPythonEngine::create()
 {
-    auto engine = make<IndependentPythonEngine>();
+    auto engine = adopt_own(*new IndependentPythonEngine);
     TRY(engine->initialize());
     return engine;
 }
 
 IndependentPythonEngine::~IndependentPythonEngine()
 {
-    if (m_impl) {
-        if (m_initialized) {
-            PyEval_RestoreThread(m_impl->m_thread_state);
-            Py_Finalize();
-        }
-    }
+    if (!m_impl)
+        return;
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    m_impl = nullptr;
+    PyGILState_Release(gstate);
 }
 
 ErrorOr<void> IndependentPythonEngine::initialize()
@@ -173,41 +149,43 @@ ErrorOr<void> IndependentPythonEngine::initialize()
     if (m_initialized)
         return {};
 
+    if (!Py_IsInitialized())
+        Py_Initialize();
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
     m_impl = make<Impl>();
 
-    // Start performance timing
-    PythonPerformanceMetrics::start_timing();
-
-    // Initialize Python with optimizations
-    Py_Initialize();
-    if (!Py_IsInitialized())
-        return Error::from_string_literal("Failed to initialize Python interpreter");
-
-    // Initialize threads for performance
-    PyEval_InitThreads();
-
-    // Enable optimizations
-    if (m_impl->m_optimization_enabled) {
-        // Enable Python optimizations
-        PyRun_SimpleString("import sys; sys.flags.optimize = 2");
+    m_impl->globals = PyDict_New();
+    if (!m_impl->globals) {
+        PyGILState_Release(gstate);
+        return Error::from_string_literal("Failed to allocate Python globals dictionary");
     }
 
-    // Save the main thread state
-    m_impl->m_thread_state = PyEval_SaveThread();
+    m_impl->locals = PyDict_New();
+    if (!m_impl->locals) {
+        PyGILState_Release(gstate);
+        return Error::from_string_literal("Failed to allocate Python locals dictionary");
+    }
 
-    // Get Python version
-    m_version = Py_GetVersion();
+    PyObject* builtins = PyEval_GetBuiltins();
+    if (builtins) {
+        Py_INCREF(builtins);
+        PyDict_SetItemString(m_impl->globals, "__builtins__", builtins);
+        Py_DECREF(builtins);
+    }
 
-    // Initialize module cache
-    m_impl->m_compiled_cache = PyDict_New();
-    if (!m_impl->m_compiled_cache)
-        return Error::from_string_literal("Failed to create compilation cache");
+    auto const* version_cstr = Py_GetVersion();
+    auto version_view = StringView { version_cstr, strlen(version_cstr) };
+    if (auto version_result = String::from_utf8(version_view); !version_result.is_error())
+        m_version = version_result.release_value();
 
     m_initialized = true;
 
-    // Record initialization metrics
+    PyGILState_Release(gstate);
+
     PythonPerformanceMetrics::end_timing();
-    m_impl->m_stats = PythonPerformanceMetrics::get_current_stats();
+    m_impl->stats = PythonPerformanceMetrics::get_current_stats();
 
     return {};
 }
@@ -215,167 +193,97 @@ ErrorOr<void> IndependentPythonEngine::initialize()
 ErrorOr<JS::Value> IndependentPythonEngine::run(StringView source, StringView filename)
 {
     if (!m_initialized)
-        return Error::from_string_literal("Python engine not initialized");
+        TRY(initialize());
 
-    // Start timing
     PythonPerformanceMetrics::start_timing();
     PythonPerformanceMetrics::record_function_call();
 
-    // Restore Python thread state
-    PyEval_RestoreThread(m_impl->m_thread_state);
+    PyGILState_STATE gstate = PyGILState_Ensure();
 
-    // Check compilation cache first
-    PyObject* cached_code = PyDict_GetItem(m_impl->m_compiled_cache, PyUnicode_FromString(filename.to_string().characters()));
-    if (cached_code) {
-        Py_INCREF(cached_code);
-        PyObject* result = PyEval_EvalCode(cached_code, m_impl->m_globals, m_impl->m_locals);
-        Py_DECREF(cached_code);
+    auto guard = ScopeGuard([&]() {
+        PyGILState_Release(gstate);
+        m_impl->stats = PythonPerformanceMetrics::end_timing();
+    });
 
-        if (!result) {
-            // Handle error
-            PyErr_Print();
-            PyEval_SaveThread();
-            return Error::from_string_literal("Python execution failed");
+    auto cache_key = sanitized_filename(filename);
+
+    PyObject* compiled_code = nullptr;
+    if (auto cached = m_impl->compiled_cache.get(cache_key); cached.has_value()) {
+        compiled_code = cached.value();
+        Py_INCREF(compiled_code);
+    } else {
+        auto source_bytes = source.to_byte_string();
+        compiled_code = Py_CompileString(source_bytes.characters(), cache_key.characters(), Py_file_input);
+        if (!compiled_code)
+            return PythonError::from_python_exception();
+
+        if (auto insert_result = m_impl->compiled_cache.try_set(cache_key, compiled_code); insert_result.is_error()) {
+            Py_DECREF(compiled_code);
+            return insert_result.release_error();
         }
-
-        // Convert result to JS value
-        auto js_result = convert_python_to_js(result);
-        Py_DECREF(result);
-
-        // Update metrics
-        PythonPerformanceMetrics::end_timing();
-        m_impl->m_stats = PythonPerformanceMetrics::get_current_stats();
-
-        PyEval_SaveThread();
-        return js_result;
+        Py_INCREF(compiled_code);
     }
 
-    // Compile and execute
-    PyObject* result = PyRun_String(
-        source.to_string().characters(),
-        Py_file_input,
-        m_impl->m_globals,
-        m_impl->m_locals
-    );
+    auto* result = PyEval_EvalCode(compiled_code, m_impl->globals, m_impl->locals);
+    Py_DECREF(compiled_code);
 
-    if (!result) {
-        // Handle error
-        PyErr_Print();
-        PyEval_SaveThread();
-        return Error::from_string_literal("Python execution failed");
-    }
+    if (!result)
+        return PythonError::from_python_exception();
 
-    // Cache compiled code for better performance
-    if (m_impl->m_compiled_cache && PyDict_Size(m_impl->m_compiled_cache) < m_impl->m_max_cache_size) {
-        PyObject* code_obj = Py_CompileString(source.to_string().characters(), filename.to_string().characters(), Py_file_input);
-        if (code_obj) {
-            PyDict_SetItem(m_impl->m_compiled_cache, PyUnicode_FromString(filename.to_string().characters()), code_obj);
-            Py_DECREF(code_obj);
-        }
-    }
-
-    // Convert result to JS value
-    auto js_result = convert_python_to_js(result);
+    auto& vm = Bindings::main_thread_vm();
+    auto* realm = vm.current_realm();
+    if (!realm)
+        return Error::from_string_literal("No active JavaScript realm");
+    auto js_result = python_object_to_js(*realm, result);
     Py_DECREF(result);
 
-    // Update metrics
-    PythonPerformanceMetrics::end_timing();
-    m_impl->m_stats = PythonPerformanceMetrics::get_current_stats();
-
-    PyEval_SaveThread();
     return js_result;
 }
 
 ErrorOr<JS::Value> IndependentPythonEngine::run_module(StringView module_name)
 {
     if (!m_initialized)
-        return Error::from_string_literal("Python engine not initialized");
+        TRY(initialize());
 
-    // Start timing
     PythonPerformanceMetrics::start_timing();
     PythonPerformanceMetrics::record_function_call();
 
-    // Restore Python thread state
-    PyEval_RestoreThread(m_impl->m_thread_state);
+    PyGILState_STATE gstate = PyGILState_Ensure();
 
-    // Import module
-    PyObject* module = PyImport_ImportModule(module_name.to_string().characters());
-    if (!module) {
-        PyErr_Print();
-        PyEval_SaveThread();
-        return Error::from_string_literal("Failed to import Python module");
-    }
+    auto guard = ScopeGuard([&]() {
+        PyGILState_Release(gstate);
+        m_impl->stats = PythonPerformanceMetrics::end_timing();
+    });
 
-    // Execute module
-    PyObject* result = PyRun_String(
-        "",
-        Py_eval_input,
-        PyModule_GetDict(module),
-        PyModule_GetDict(module)
-    );
+    auto module_name_bytes = module_name.to_byte_string();
+    auto* module = PyImport_ImportModule(module_name_bytes.characters());
+    if (!module)
+        return PythonError::from_python_exception();
 
+    auto& vm = Bindings::main_thread_vm();
+    auto* realm = vm.current_realm();
+    if (!realm)
+        return Error::from_string_literal("No active JavaScript realm");
+    auto js_result = python_object_to_js(*realm, module);
     Py_DECREF(module);
 
-    if (!result) {
-        PyErr_Print();
-        PyEval_SaveThread();
-        return Error::from_string_literal("Module execution failed");
-    }
-
-    // Convert result to JS value
-    auto js_result = convert_python_to_js(result);
-    Py_DECREF(result);
-
-    // Update metrics
-    PythonPerformanceMetrics::end_timing();
-    m_impl->m_stats = PythonPerformanceMetrics::get_current_stats();
-
-    PyEval_SaveThread();
     return js_result;
 }
 
-// Convert Python object to JavaScript value (simplified)
-JS::Value IndependentPythonEngine::convert_python_to_js(PyObject* py_obj)
+JS::Value IndependentPythonEngine::convert_python_to_js(void* py_obj)
 {
-    if (!py_obj)
+    auto& vm = Bindings::main_thread_vm();
+    auto* realm = vm.current_realm();
+    if (!realm)
         return JS::js_undefined();
-
-    // Handle different Python types
-    if (PyUnicode_Check(py_obj)) {
-        const char* str = PyUnicode_AsUTF8(py_obj);
-        if (str)
-            return JS::PrimitiveString::create(JS::VM::the(), str);
-    }
-    else if (PyLong_Check(py_obj)) {
-        long value = PyLong_AsLong(py_obj);
-        return JS::Value(static_cast<double>(value));
-    }
-    else if (PyFloat_Check(py_obj)) {
-        double value = PyFloat_AsDouble(py_obj);
-        return JS::Value(value);
-    }
-    else if (PyBool_Check(py_obj)) {
-        return JS::Value(py_obj == Py_True);
-    }
-    else if (PyDict_Check(py_obj)) {
-        // TODO: Convert Python dict to JS object
-        return JS::js_undefined();
-    }
-    else if (PyList_Check(py_obj)) {
-        // TODO: Convert Python list to JS array
-        return JS::js_undefined();
-    }
-
-    // Default: return undefined
-    return JS::js_undefined();
+    return python_object_to_js(*realm, static_cast<PyObject*>(py_obj));
 }
 
-// Get performance statistics
 PythonPerformanceMetrics::ExecutionStats IndependentPythonEngine::get_performance_stats() const
 {
-    if (m_impl)
-        return m_impl->m_stats;
-    return {};
+    if (!m_impl)
+        return {};
+    return m_impl->stats;
 }
 
 } // namespace Web::HTML

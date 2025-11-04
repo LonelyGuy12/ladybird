@@ -92,13 +92,13 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // 4. Let evaluationStatus be null.
         JS::Completion evaluation_status = JS::normal_completion(JS::js_undefined());
 
-    // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
-    if (!error_to_rethrow().is_null()) {
-        evaluation_status = JS::throw_completion(error_to_rethrow());
-    }
-    // 6. Otherwise, execute Python script
-    else {
-        auto timer = Core::ElapsedTimer::start_new();
+        // 5. If script's error to rethrow is not null, then set evaluationStatus to ThrowCompletion(script's error to rethrow).
+        if (!error_to_rethrow().is_null()) {
+            evaluation_status = JS::throw_completion(error_to_rethrow());
+        }
+        // 6. Otherwise, execute Python script
+        else {
+        [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
 
         // Execute the Python code
         if (m_script_record) {
@@ -114,7 +114,8 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             if (m_execution_context) {
                 // Set up security restrictions for this script execution
                 URL::URL origin = this->base_url().value_or(URL::URL {});
-                if (!PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin)) {
+                auto security_result = PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin);
+                if (security_result.is_error()) {
                     evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to set up secure execution environment"sv));
                     PyGILState_Release(gstate);
                     return evaluation_status;
@@ -190,6 +191,8 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
 
                 PyGILState_Release(gstate);
             }
+        }
+        }
 
         // 7. If evaluationStatus is an abrupt completion, then:
         if (evaluation_status.is_abrupt()) {
