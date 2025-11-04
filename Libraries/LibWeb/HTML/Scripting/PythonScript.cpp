@@ -161,9 +161,40 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                     dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
+                // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
+                PyObject* sys_module = PyImport_ImportModule("sys");
+                if (sys_module) {
+                    // Flush stdout before execution
+                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                    if (stdout_obj && stdout_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stdout_obj);
+                    }
+                    Py_DECREF(sys_module);
+                }
+                
                 dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
                 PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
                 dbgln("🐍 PythonScript::run() - PyEval_EvalCode returned");
+                
+                // Flush stdout/stderr after execution to ensure output appears immediately
+                sys_module = PyImport_ImportModule("sys");
+                if (sys_module) {
+                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                    if (stdout_obj && stdout_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stdout_obj);
+                    }
+                    PyObject* stderr_obj = PyObject_GetAttrString(sys_module, "stderr");
+                    if (stderr_obj && stderr_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stderr_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stderr_obj);
+                    }
+                    Py_DECREF(sys_module);
+                }
                 
                 if (!result) {
                     dbgln("🐍 PythonScript::run() - ❌ Execution failed with Python error");
