@@ -8,7 +8,6 @@
 #include <LibCore/ElapsedTimer.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/PythonDOMBindings.h>
-#include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
@@ -115,8 +114,17 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             
             if (!m_execution_context) {
                 m_execution_context = PyDict_New();
+                // Provide minimal module-like globals
                 PyObject* builtins = PyEval_GetBuiltins();
-                PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                if (builtins)
+                    PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__package__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__doc__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__spec__", Py_None);
             }
 
             if (m_execution_context) {
@@ -154,11 +162,6 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                             Py_DECREF(win_class);
                         }
                     }
-                }
-                
-                // Setup cross-language bridge to enable access to JavaScript objects
-                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_execution_context, this->realm())) {
-                    dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
                 // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode

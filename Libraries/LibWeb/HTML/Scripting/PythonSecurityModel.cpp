@@ -31,10 +31,25 @@ static String const& default_origin_key()
 Vector<String> default_safe_builtins()
 {
     Vector<String> builtins;
-    builtins.ensure_capacity(48);
+    builtins.ensure_capacity(80);
     auto append_literal = [&](StringView literal) {
         builtins.unchecked_append(MUST(String::from_utf8(literal)));
     };
+
+    // Core language/runtime support
+    append_literal("__build_class__"sv); // required for class statements
+    append_literal("object"sv);
+    append_literal("type"sv);
+    append_literal("super"sv);
+
+    // Common exceptions needed for try/except
+    append_literal("BaseException"sv);
+    append_literal("Exception"sv);
+    append_literal("TypeError"sv);
+    append_literal("ValueError"sv);
+    append_literal("ZeroDivisionError"sv);
+
+    // Introspection and data model helpers (safe subset)
     append_literal("abs"sv);
     append_literal("all"sv);
     append_literal("any"sv);
@@ -66,7 +81,6 @@ Vector<String> default_safe_builtins()
     append_literal("max"sv);
     append_literal("min"sv);
     append_literal("next"sv);
-    append_literal("object"sv);
     append_literal("oct"sv);
     append_literal("ord"sv);
     append_literal("pow"sv);
@@ -80,9 +94,14 @@ Vector<String> default_safe_builtins()
     append_literal("str"sv);
     append_literal("sum"sv);
     append_literal("tuple"sv);
-    append_literal("type"sv);
     append_literal("zip"sv);
     append_literal("print"sv);
+
+    // OOP conveniences (decorators)
+    append_literal("property"sv);
+    append_literal("classmethod"sv);
+    append_literal("staticmethod"sv);
+
     return builtins;
 }
 
