@@ -163,8 +163,8 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                         }
 
                         // Expose current window and document instances to Python (no JS bridge)
-                        auto& window_object = relevant_global_object(realm.global_object());
-                        auto& win = verify_cast<Window>(window_object);
+                        auto& window_object = HTML::relevant_global_object(realm.global_object());
+                        auto& win = verify_cast<HTML::Window>(window_object);
                         PyObject* py_window = Bindings::PythonWindow::create_from_cpp_window(win);
                         if (py_window) {
                             PyDict_SetItemString(m_execution_context, "window", py_window);
