@@ -8,7 +8,6 @@
 #include <LibCore/ElapsedTimer.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/PythonDOMBindings.h>
-#include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
@@ -51,19 +50,24 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
     // 8. Parse Python source code
     auto parse_timer = Core::ElapsedTimer::start_new();
 
+    dbgln("🐍 PythonScript: Compiling Python code ({} bytes)", source.length());
+    
     // Convert StringView to Python-compatible string
     auto source_bytes = source.to_byte_string();
     PyObject* compiled_code = Py_CompileString(source_bytes.characters(), filename.characters(), Py_file_input);
 
     if (!compiled_code) {
         // Handle compilation error
-        dbgln("PythonScript: Failed to compile Python code");
+        dbgln("🐍 PythonScript: ❌ Failed to compile Python code");
+        PyErr_Print();
 
         // Create a simple error
         script->set_parse_error(JS::SyntaxError::create(realm, "Python compilation failed"sv));
         script->set_error_to_rethrow(script->parse_error());
         return script;
     }
+    
+    dbgln("🐍 PythonScript: ✅ Compilation successful");
 
     // 9. Set script's record to compiled code.
     script->m_script_record = compiled_code;
@@ -99,16 +103,28 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // 6. Otherwise, execute Python script
         else {
         [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
+        
+        dbgln("🐍 PythonScript::run() - Starting execution");
 
         // Execute the Python code
         if (m_script_record) {
+            dbgln("🐍 PythonScript::run() - Has compiled code, executing...");
             // Create a new Python thread state to execute the script
             PyGILState_STATE gstate = PyGILState_Ensure();
             
             if (!m_execution_context) {
                 m_execution_context = PyDict_New();
+                // Provide minimal module-like globals
                 PyObject* builtins = PyEval_GetBuiltins();
-                PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                if (builtins)
+                    PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__package__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__doc__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__spec__", Py_None);
             }
 
             if (m_execution_context) {
@@ -148,14 +164,43 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                     }
                 }
                 
-                // Setup cross-language bridge to enable access to JavaScript objects
-                if (!Bindings::PythonJSBridge::setup_bridge_in_context(m_execution_context, this->realm())) {
-                    dbgln("Warning: Failed to setup Python-JS bridge");
+                // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
+                PyObject* sys_module = PyImport_ImportModule("sys");
+                if (sys_module) {
+                    // Flush stdout before execution
+                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                    if (stdout_obj && stdout_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stdout_obj);
+                    }
+                    Py_DECREF(sys_module);
                 }
                 
+                dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
                 PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
+                dbgln("🐍 PythonScript::run() - PyEval_EvalCode returned");
+                
+                // Flush stdout/stderr after execution to ensure output appears immediately
+                sys_module = PyImport_ImportModule("sys");
+                if (sys_module) {
+                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                    if (stdout_obj && stdout_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stdout_obj);
+                    }
+                    PyObject* stderr_obj = PyObject_GetAttrString(sys_module, "stderr");
+                    if (stderr_obj && stderr_obj != Py_None) {
+                        PyObject* flush_result = PyObject_CallMethod(stderr_obj, "flush", nullptr);
+                        Py_XDECREF(flush_result);
+                        Py_DECREF(stderr_obj);
+                    }
+                    Py_DECREF(sys_module);
+                }
                 
                 if (!result) {
+                    dbgln("🐍 PythonScript::run() - ❌ Execution failed with Python error");
                     // Python error occurred
                     PyObject* error_type = nullptr;
                     PyObject* error_value = nullptr;
@@ -182,6 +227,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                         Py_DECREF(error_traceback);
                 } else {
                     // Execution was successful
+                    dbgln("🐍 PythonScript::run() - ✅ Execution successful!");
                     if (result != Py_None) {
                         // Currently unused; mark success
                     }

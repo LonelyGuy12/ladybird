@@ -100,7 +100,7 @@ void initialize_main_thread_vm(AgentType type)
     VERIFY(!s_main_thread_vm);
 
     // Initialize Python engine before creating the JS VM
-    // HTML::PythonEngine::initialize();
+    HTML::PythonEngine::initialize();
 
     // Initialize Python DOM API bindings
     // Web::Bindings::PythonDOMAPI::initialize_module();

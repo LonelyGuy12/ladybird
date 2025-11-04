@@ -160,6 +160,8 @@ void HTMLScriptElement::execute_script()
     }
     // -> "python"
     else if (m_script_type == ScriptType::Python) {
+        dbgln("🐍 HTMLScriptElement::execute_script() - Python script type detected!");
+        
         // 1. Let oldCurrentScript be the value to which document's currentScript object was most recently set.
         auto old_current_script = document->current_script();
         // 2. If el's root is not a shadow root, then set document's currentScript attribute to el. Otherwise, set it to null.
@@ -169,12 +171,14 @@ void HTMLScriptElement::execute_script()
             document->set_current_script({}, nullptr);
 
         if (m_from_an_external_file)
-            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running Python script {}", attribute(HTML::AttributeNames::src).value_or(String {}));
+            dbgln("🐍 HTMLScriptElement: Running external Python script {}", attribute(HTML::AttributeNames::src).value_or(String {}));
         else
-            dbgln_if(HTML_SCRIPT_DEBUG, "HTMLScriptElement: Running inline Python script");
+            dbgln("🐍 HTMLScriptElement: Running inline Python script");
 
         // 3. Run the Python script given by el's result.
+        dbgln("🐍 HTMLScriptElement: About to call PythonScript::run()");
         (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
+        dbgln("🐍 HTMLScriptElement: PythonScript::run() completed");
 
         // 4. Set document's currentScript attribute to oldCurrentScript.
         document->set_current_script({}, old_current_script);
@@ -267,6 +271,7 @@ void HTMLScriptElement::prepare_script()
     // 11.5. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "python" or "text/python",
     else if (script_block_type.equals_ignoring_ascii_case("python"sv) || script_block_type.equals_ignoring_ascii_case("text/python"sv)) {
         // then set el's type to "python".
+        dbgln("🐍 HTMLScriptElement: Detected Python script type: '{}'", script_block_type);
         m_script_type = ScriptType::Python;
     }
     // FIXME: 12. Otherwise, if the script block's type string is an ASCII case-insensitive match for the string "speculationrules", then set el's type to "speculationrules".
@@ -538,13 +543,19 @@ void HTMLScriptElement::prepare_script()
         // FIXME: -> "speculationrules"
     }
 
-    // 35. If el's type is "classic" and el has a src attribute, or el's type is "module", or el's type is "python":
-    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module || m_script_type == ScriptType::Python) {
+    // 35. If el's type is "classic" and el has a src attribute, or el's type is "module", or el's type is "python" and el has a src attribute:
+    if ((m_script_type == ScriptType::Classic && has_attribute(HTML::AttributeNames::src)) || m_script_type == ScriptType::Module || (m_script_type == ScriptType::Python && has_attribute(HTML::AttributeNames::src))) {
         // 1. Assert: el's result is "uninitialized".
         // FIXME: I believe this step to be a spec bug, and it should be removed: https://github.com/whatwg/html/issues/8534
 
+        if (m_script_type == ScriptType::Python)
+            dbgln("🐍 HTMLScriptElement: Python script entering execution scheduling (parser_inserted={}, has_defer={}, has_async={})", 
+                is_parser_inserted(), has_attribute(HTML::AttributeNames::defer), has_attribute(HTML::AttributeNames::async));
+
         // 2. If el has an async attribute or el's force async is true:
         if (has_attribute(HTML::AttributeNames::async) || m_force_async) {
+            if (m_script_type == ScriptType::Python)
+                dbgln("🐍 HTMLScriptElement: Scheduling Python script for ASYNC execution");
             // 1. Let scripts be el's preparation-time document's set of scripts that will execute as soon as possible.
             // 2. Append el to scripts.
             m_preparation_time_document->scripts_to_execute_as_soon_as_possible().append(*this);
@@ -563,6 +574,8 @@ void HTMLScriptElement::prepare_script()
 
         // 3. Otherwise, if el is not parser-inserted:
         else if (!is_parser_inserted()) {
+            if (m_script_type == ScriptType::Python)
+                dbgln("🐍 HTMLScriptElement: Scheduling Python script for IN-ORDER execution (not parser-inserted)");
             // 1. Let scripts be el's preparation-time document's list of scripts that will execute in order as soon as possible.
             // 2. Append el to scripts.
             m_preparation_time_document->scripts_to_execute_in_order_as_soon_as_possible().append(*this);
@@ -585,8 +598,10 @@ void HTMLScriptElement::prepare_script()
             };
         }
 
-        // 4. Otherwise, if el has a defer attribute or el's type is "module":
-        else if (has_attribute(HTML::AttributeNames::defer) || m_script_type == ScriptType::Module) {
+        // 4. Otherwise, if el is parser-inserted and has a defer attribute:
+        else if (is_parser_inserted() && has_attribute(HTML::AttributeNames::defer)) {
+            if (m_script_type == ScriptType::Python)
+                dbgln("🐍 HTMLScriptElement: Scheduling Python script for DEFERRED execution (after parsing)");
             // 1. Append el to its parser document's list of scripts that will execute when the document has finished parsing.
             m_parser_document->add_script_to_execute_when_parsing_has_finished({}, *this);
 
@@ -599,6 +614,8 @@ void HTMLScriptElement::prepare_script()
 
         // 5. Otherwise:
         else {
+            if (m_script_type == ScriptType::Python)
+                dbgln("🐍 HTMLScriptElement: Scheduling Python script as PARSING-BLOCKING (parser will execute)");
             // 1. Set el's parser document's pending parsing-blocking script to el.
             m_parser_document->set_pending_parsing_blocking_script(this);
 
@@ -635,6 +652,8 @@ void HTMLScriptElement::prepare_script()
 
         // 3. Otherwise,
         else {
+            if (m_script_type == ScriptType::Python)
+                dbgln("🐍 HTMLScriptElement: Executing Python script IMMEDIATELY");
             // immediately execute the script element el, even if other scripts are already executing.
             execute_script();
         }
@@ -668,12 +687,18 @@ void HTMLScriptElement::post_connection()
 // https://html.spec.whatwg.org/multipage/scripting.html#mark-as-ready
 void HTMLScriptElement::mark_as_ready(Result result)
 {
+    if (m_script_type == ScriptType::Python)
+        dbgln("🐍 HTMLScriptElement::mark_as_ready() - Python script marked as ready, has_callback={}", static_cast<bool>(m_steps_to_run_when_the_result_is_ready));
+    
     // 1. Set el's result to result.
     m_result = move(result);
 
     // 2. If el's steps to run when the result is ready are not null, then run them.
-    if (m_steps_to_run_when_the_result_is_ready)
+    if (m_steps_to_run_when_the_result_is_ready) {
+        if (m_script_type == ScriptType::Python)
+            dbgln("🐍 HTMLScriptElement::mark_as_ready() - Invoking ready callback now");
         m_steps_to_run_when_the_result_is_ready();
+    }
 
     // 3. Set el's steps to run when the result is ready to null.
     m_steps_to_run_when_the_result_is_ready = nullptr;
