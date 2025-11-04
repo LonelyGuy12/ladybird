@@ -9,7 +9,9 @@
 #include <LibWeb/Bindings/PythonDOMBindings.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
+#include <LibWeb/HTML/Scripting/PythonDebugHelpers.h>
 #include <Python.h>
+#include <AK/Debug.h>
 
 namespace Web::HTML {
 
@@ -17,22 +19,33 @@ bool PythonEngine::s_initialized = false;
 
 void PythonEngine::initialize()
 {
+    dbgln("🐍 PythonEngine::initialize() called");
+    
     if (s_initialized) {
+        dbgln("🐍 PythonEngine already initialized, skipping");
         return;
     }
 
+    dbgln("🐍 Initializing Python interpreter...");
     // Initialize Python interpreter
     Py_Initialize();
+    
+    debug_python_status("After Py_Initialize()");
 
     // GIL is automatically initialized in Python 3.9+
 
+    dbgln("🐍 Initializing Python DOM API...");
     // Initialize Python DOM API
     Web::Bindings::PythonDOMAPI::initialize_module();
 
+    dbgln("🐍 Initializing Python security model...");
     // Initialize Python security model
     (void)Web::HTML::PythonSecurityModel::initialize_security();
 
     s_initialized = true;
+    
+    dbgln("🐍 PythonEngine initialization complete!");
+    debug_test_python_execution();
 }
 
 void PythonEngine::shutdown()
@@ -48,6 +61,7 @@ void PythonEngine::shutdown()
 
 bool PythonEngine::is_initialized()
 {
+    dbgln("🐍 PythonEngine::is_initialized() = {}", s_initialized);
     return s_initialized;
 }
 
