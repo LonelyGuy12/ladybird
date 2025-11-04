@@ -28,9 +28,6 @@ void PythonEngine::initialize()
 
     dbgln("🐍 Initializing Python interpreter...");
     
-    // Set UTF-8 mode before initialization to handle emojis and unicode properly
-    Py_SetPythonHome(NULL);
-    
     // Initialize Python interpreter
     Py_Initialize();
     
