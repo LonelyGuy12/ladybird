@@ -114,8 +114,17 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             
             if (!m_execution_context) {
                 m_execution_context = PyDict_New();
+                // Provide minimal module-like globals
                 PyObject* builtins = PyEval_GetBuiltins();
-                PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                if (builtins)
+                    PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__package__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__doc__", Py_None);
+                Py_INCREF(Py_None);
+                PyDict_SetItemString(m_execution_context, "__spec__", Py_None);
             }
 
             if (m_execution_context) {
