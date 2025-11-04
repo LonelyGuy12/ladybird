@@ -111,18 +111,31 @@ inline bool debug_test_python_execution()
     
     PyGILState_STATE gil_state = PyGILState_Ensure();
     
+    // Create proper dictionaries for execution context
+    PyObject* main_module = PyImport_AddModule("__main__");
+    if (!main_module) {
+        dbgln("  ✗ Cannot get __main__ module");
+        PyGILState_Release(gil_state);
+        return false;
+    }
+    
+    PyObject* global_dict = PyModule_GetDict(main_module);
+    PyObject* local_dict = PyDict_New();
+    
     // Test simple expression
-    PyObject* result = PyRun_String("2 + 2", Py_eval_input, PyEval_GetGlobals(), PyEval_GetLocals());
+    PyObject* result = PyRun_String("2 + 2", Py_eval_input, global_dict, local_dict);
     
     if (result) {
         long value = PyLong_AsLong(result);
         dbgln("  ✓ Python execution works! 2 + 2 = {}", value);
         Py_DECREF(result);
+        Py_DECREF(local_dict);
         PyGILState_Release(gil_state);
         return value == 4;
     } else {
         dbgln("  ✗ Python execution failed!");
         debug_python_error("Test execution");
+        Py_DECREF(local_dict);
         PyGILState_Release(gil_state);
         return false;
     }

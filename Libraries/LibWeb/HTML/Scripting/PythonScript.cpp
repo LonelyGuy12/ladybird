@@ -51,19 +51,24 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
     // 8. Parse Python source code
     auto parse_timer = Core::ElapsedTimer::start_new();
 
+    dbgln("🐍 PythonScript: Compiling Python code ({} bytes)", source.length());
+    
     // Convert StringView to Python-compatible string
     auto source_bytes = source.to_byte_string();
     PyObject* compiled_code = Py_CompileString(source_bytes.characters(), filename.characters(), Py_file_input);
 
     if (!compiled_code) {
         // Handle compilation error
-        dbgln("PythonScript: Failed to compile Python code");
+        dbgln("🐍 PythonScript: ❌ Failed to compile Python code");
+        PyErr_Print();
 
         // Create a simple error
         script->set_parse_error(JS::SyntaxError::create(realm, "Python compilation failed"sv));
         script->set_error_to_rethrow(script->parse_error());
         return script;
     }
+    
+    dbgln("🐍 PythonScript: ✅ Compilation successful");
 
     // 9. Set script's record to compiled code.
     script->m_script_record = compiled_code;
@@ -99,9 +104,12 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         // 6. Otherwise, execute Python script
         else {
         [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
+        
+        dbgln("🐍 PythonScript::run() - Starting execution");
 
         // Execute the Python code
         if (m_script_record) {
+            dbgln("🐍 PythonScript::run() - Has compiled code, executing...");
             // Create a new Python thread state to execute the script
             PyGILState_STATE gstate = PyGILState_Ensure();
             
@@ -153,9 +161,12 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                     dbgln("Warning: Failed to setup Python-JS bridge");
                 }
                 
+                dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
                 PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
+                dbgln("🐍 PythonScript::run() - PyEval_EvalCode returned");
                 
                 if (!result) {
+                    dbgln("🐍 PythonScript::run() - ❌ Execution failed with Python error");
                     // Python error occurred
                     PyObject* error_type = nullptr;
                     PyObject* error_value = nullptr;
@@ -182,6 +193,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                         Py_DECREF(error_traceback);
                 } else {
                     // Execution was successful
+                    dbgln("🐍 PythonScript::run() - ✅ Execution successful!");
                     if (result != Py_None) {
                         // Currently unused; mark success
                     }
