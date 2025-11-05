@@ -14,7 +14,10 @@
 #include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
 #include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/WebIDL/DOMException.h>
+#include <AK/Assertions.h>
+#include <AK/TypeCasts.h>
 #include <Python.h>
 #include <cstring>
 
@@ -142,24 +145,38 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                     PyObject* web_module = Bindings::PythonDOMAPI::get_module();
                     if (web_module) {
                         PyDict_SetItemString(m_execution_context, "web", web_module);
-                        
-                        // For convenience, also add common functions/classes directly
+
+                        // Expose Python wrapper types for convenience
                         PyObject* doc_class = PyObject_GetAttrString(web_module, "Document");
                         if (doc_class) {
                             PyDict_SetItemString(m_execution_context, "Document", doc_class);
                             Py_DECREF(doc_class);
                         }
-                        
                         PyObject* elem_class = PyObject_GetAttrString(web_module, "Element");
                         if (elem_class) {
                             PyDict_SetItemString(m_execution_context, "Element", elem_class);
                             Py_DECREF(elem_class);
                         }
-                        
                         PyObject* win_class = PyObject_GetAttrString(web_module, "Window");
                         if (win_class) {
                             PyDict_SetItemString(m_execution_context, "Window", win_class);
                             Py_DECREF(win_class);
+                        }
+
+                        // Expose current window and document instances to Python (no JS bridge)
+                        auto& window_object = HTML::relevant_global_object(realm.global_object());
+                        VERIFY(is<HTML::Window>(window_object));
+                        auto& win = static_cast<HTML::Window&>(window_object);
+                        PyObject* py_window = Bindings::PythonWindow::create_from_cpp_window(win);
+                        if (py_window) {
+                            PyDict_SetItemString(m_execution_context, "window", py_window);
+                            Py_DECREF(py_window);
+                        }
+                        auto& doc = const_cast<DOM::Document&>(*win.document());
+                        PyObject* py_document = Bindings::PythonDocument::create_from_cpp_document(doc);
+                        if (py_document) {
+                            PyDict_SetItemString(m_execution_context, "document", py_document);
+                            Py_DECREF(py_document);
                         }
                     }
                 }
