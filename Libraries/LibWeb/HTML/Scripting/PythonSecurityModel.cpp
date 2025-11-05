@@ -38,6 +38,7 @@ Vector<String> default_safe_builtins()
 
     // Core language/runtime support
     append_literal("__build_class__"sv); // required for class statements
+    append_literal("__import__"sv);      // required for import statements
     append_literal("object"sv);
     append_literal("type"sv);
     append_literal("super"sv);
@@ -226,6 +227,8 @@ ErrorOr<void> PythonSecurityModel::setup_sandboxed_environment(void* globals_ptr
 
     auto* globals = static_cast<PyObject*>(globals_ptr);
     TRY(restrict_builtins(globals));
+    // Apply basic FS restrictions to neutralize obvious modules/APIs regardless of imports
+    TRY(setup_restricted_filesystem_access(globals_ptr));
 
     auto limits = s_origin_resource_limits.get(normalize_origin(origin));
     if (!limits.has_value())
