@@ -210,7 +210,7 @@ GC::Ptr<Attr> Element::get_attribute_node_ns(Optional<FlyString> const& namespac
 
 // FIXME: Trusted Types integration with DOM is still under review https://github.com/whatwg/dom/pull/1268
 // https://whatpr.org/dom/1268.html#dom-element-setattribute
-WebIDL::ExceptionOr<void> Element::set_attribute(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_for_bindings(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value)
 {
     // 1. If qualifiedName is not a valid attribute local name, then throw an "InvalidCharacterError" DOMException.
     if (!is_valid_attribute_local_name(qualified_name))
@@ -245,9 +245,9 @@ WebIDL::ExceptionOr<void> Element::set_attribute(FlyString qualified_name, Varia
 
 // FIXME: Trusted Types integration with DOM is still under review https://github.com/whatwg/dom/pull/1268
 // https://whatpr.org/dom/1268.html#dom-element-setattribute
-WebIDL::ExceptionOr<void> Element::set_attribute(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, String> const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_for_bindings(FlyString qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, String> const& value)
 {
-    return set_attribute(move(qualified_name),
+    return set_attribute_for_bindings(move(qualified_name),
         value.visit(
             [](auto const& trusted_type) -> Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> { return trusted_type; },
             [](String const& string) -> Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> { return Utf16String::from_utf8(string); }));
@@ -365,7 +365,7 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, Option
 
 // FIXME: Trusted Types integration with DOM is still under review https://github.com/whatwg/dom/pull/1268
 // https://whatpr.org/dom/1268.html#dom-element-setattributens
-WebIDL::ExceptionOr<void> Element::set_attribute_ns(Optional<FlyString> const& namespace_, FlyString const& qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value)
+WebIDL::ExceptionOr<void> Element::set_attribute_ns_for_bindings(Optional<FlyString> const& namespace_, FlyString const& qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value)
 {
     // 1. Let (namespace, prefix, localName) be the result of validating and extracting namespace and qualifiedName given "element".
     auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name, ValidationContext::Element));
@@ -421,14 +421,14 @@ void Element::set_attribute_value(FlyString const& local_name, String const& val
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributenode
-WebIDL::ExceptionOr<GC::Ptr<Attr>> Element::set_attribute_node(Attr& attr)
+WebIDL::ExceptionOr<GC::Ptr<Attr>> Element::set_attribute_node_for_bindings(Attr& attr)
 {
     // The setAttributeNode(attr) and setAttributeNodeNS(attr) methods steps are to return the result of setting an attribute given attr and this.
     return attributes()->set_attribute(attr);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattributenodens
-WebIDL::ExceptionOr<GC::Ptr<Attr>> Element::set_attribute_node_ns(Attr& attr)
+WebIDL::ExceptionOr<GC::Ptr<Attr>> Element::set_attribute_node_ns_for_bindings(Attr& attr)
 {
     // The setAttributeNode(attr) and setAttributeNodeNS(attr) methods steps are to return the result of setting an attribute given attr and this.
     return attributes()->set_attribute(attr);
@@ -566,7 +566,7 @@ GC::Ptr<DOM::Element> Element::get_the_attribute_associated_element(FlyString co
 }
 
 // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#attr-associated-elements
-Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<GC::Weak<DOM::Element>>> const& explicitly_set_attribute_elements) const
+Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<GC::Weak<DOM::Element>> const&> explicitly_set_attribute_elements) const
 {
     // 1. Let elements be an empty list.
     GC::RootVector<GC::Ref<DOM::Element>> elements(heap());
@@ -1066,7 +1066,7 @@ WebIDL::ExceptionOr<void> Element::set_inner_html(TrustedTypes::TrustedHTMLOrStr
         TrustedTypes::TrustedTypeName::TrustedHTML,
         HTML::relevant_global_object(*this),
         value,
-        TrustedTypes::InjectionSink::ElementinnerHTML,
+        TrustedTypes::InjectionSink::Element_innerHTML,
         TrustedTypes::Script.to_string()));
 
     // 2. Let context be this.
@@ -1746,7 +1746,7 @@ i32 Element::tab_index() const
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
 void Element::set_tab_index(i32 tab_index)
 {
-    MUST(set_attribute(HTML::AttributeNames::tabindex, String::number(tab_index)));
+    set_attribute_value(HTML::AttributeNames::tabindex, String::number(tab_index));
 }
 
 // https://drafts.csswg.org/cssom-view/#potentially-scrollable
@@ -2120,7 +2120,7 @@ WebIDL::ExceptionOr<void> Element::set_outer_html(TrustedTypes::TrustedHTMLOrStr
         TrustedTypes::TrustedTypeName::TrustedHTML,
         HTML::relevant_global_object(*this),
         value,
-        TrustedTypes::InjectionSink::ElementouterHTML,
+        TrustedTypes::InjectionSink::Element_outerHTML,
         TrustedTypes::Script.to_string()));
 
     // 2. Let parent be this's parent.
@@ -2156,7 +2156,7 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String const& position, 
         TrustedTypes::TrustedTypeName::TrustedHTML,
         HTML::relevant_global_object(*this),
         string,
-        TrustedTypes::InjectionSink::ElementinsertAdjacentHTML,
+        TrustedTypes::InjectionSink::Element_insertAdjacentHTML,
         TrustedTypes::Script.to_string()));
 
     // 2. Let context be null.
@@ -2543,6 +2543,22 @@ ErrorOr<void> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOpt
 
     return {};
 }
+
+#define __ENUMERATE_ARIA_ATTRIBUTE(name, attribute)                  \
+    Optional<String> Element::name() const                           \
+    {                                                                \
+        return get_attribute(ARIA::AttributeNames::name);            \
+    }                                                                \
+                                                                     \
+    void Element::set_##name(Optional<String> const& value)          \
+    {                                                                \
+        if (value.has_value())                                       \
+            set_attribute_value(ARIA::AttributeNames::name, *value); \
+        else                                                         \
+            remove_attribute(ARIA::AttributeNames::name);            \
+    }
+ENUMERATE_ARIA_ATTRIBUTES
+#undef __ENUMERATE_ARIA_ATTRIBUTE
 
 void Element::invalidate_style_after_attribute_change(FlyString const& attribute_name, Optional<String> const& old_value, Optional<String> const& new_value)
 {
@@ -3891,6 +3907,11 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             m_dir = Dir::Auto;
         else
             m_dir = {};
+    } else if (local_name == HTML::AttributeNames::lang) {
+        for_each_in_inclusive_subtree_of_type<Element>([](auto& element) {
+            element.invalidate_lang_value();
+            return TraversalDecision::Continue;
+        });
     }
 
     // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes:concept-element-attributes-change-ext
@@ -3968,7 +3989,7 @@ WebIDL::ExceptionOr<void> Element::set_html_unsafe(TrustedTypes::TrustedHTMLOrSt
         TrustedTypes::TrustedTypeName::TrustedHTML,
         HTML::relevant_global_object(*this),
         html,
-        TrustedTypes::InjectionSink::ElementsetHTMLUnsafe,
+        TrustedTypes::InjectionSink::Element_setHTMLUnsafe,
         TrustedTypes::Script.to_string()));
 
     // 2. Let target be this's template contents if this is a template element; otherwise this.
@@ -4004,7 +4025,7 @@ void Element::set_counters_set(OwnPtr<CSS::CountersSet>&& counters_set)
 // https://html.spec.whatwg.org/multipage/dom.html#the-lang-and-xml:lang-attributes
 Optional<String> Element::lang() const
 {
-    auto attempt_to_determine_lang_attribute = [&]() -> Optional<String> {
+    auto determine_lang_attribute = [&]() -> String {
         // 1. If the node is an element that has a lang attribute in the XML namespace set
         //      Use the value of that attribute.
         auto maybe_xml_lang = get_attribute_ns(Namespace::XML, HTML::AttributeNames::lang);
@@ -4023,23 +4044,23 @@ Optional<String> Element::lang() const
         //      Use the language of that shadow root's host.
         if (auto parent = parent_element()) {
             if (parent->is_shadow_root())
-                return parent->shadow_root()->host()->lang();
+                return parent->shadow_root()->host()->lang().value_or({});
         }
 
         // 4. If the node's parent element is not null
         //      Use the language of that parent element.
         if (auto parent = parent_element())
-            return parent->lang();
+            return parent->lang().value_or({});
 
         // 5. Otherwise
         //      - If there is a pragma-set default language set, then that is the language of the node.
         if (document().pragma_set_default_language().has_value()) {
-            return document().pragma_set_default_language();
+            return document().pragma_set_default_language().value_or({});
         }
 
         //      - If there is no pragma-set default language set, then language information from a higher-level protocol (such as HTTP),
         if (document().http_content_language().has_value()) {
-            return document().http_content_language();
+            return document().http_content_language().value_or({});
         }
 
         //        if any, must be used as the final fallback language instead.
@@ -4049,11 +4070,22 @@ Optional<String> Element::lang() const
         return {};
     };
 
+    if (!m_lang_value.has_value())
+        m_lang_value = determine_lang_attribute();
+
     // If the resulting value is the empty string, then it must be interpreted as meaning that the language of the node is explicitly unknown.
-    auto maybe_lang = attempt_to_determine_lang_attribute();
-    if (!maybe_lang.has_value() || maybe_lang->is_empty())
+    if (m_lang_value->is_empty())
         return {};
-    return maybe_lang.release_value();
+
+    return m_lang_value;
+}
+
+void Element::invalidate_lang_value()
+{
+    if (m_lang_value.has_value()) {
+        m_lang_value.clear();
+        set_needs_style_update(true);
+    }
 }
 
 template<typename Callback>
@@ -4161,6 +4193,10 @@ FlyString const& Element::html_uppercased_qualified_name() const
 
 void Element::play_or_cancel_animations_after_display_property_change()
 {
+    // OPTIMIZATION: We don't care about elements with no CSS defined animations
+    if (!has_css_defined_animations())
+        return;
+
     // OPTIMIZATION: We don't care about animations in disconnected subtrees.
     if (!is_connected())
         return;
@@ -4239,6 +4275,12 @@ bool Element::should_indicate_focus() const
     //   that element should indicate focus.
 
     return false;
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#tabindex-value
+bool Element::is_focusable() const
+{
+    return HTML::parse_integer(get_attribute_value(HTML::AttributeNames::tabindex)).has_value();
 }
 
 void Element::set_had_duplicate_attribute_during_tokenization(Badge<HTML::HTMLParser>)

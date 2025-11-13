@@ -58,7 +58,7 @@ JS::ThrowCompletionOr<GC::Ptr<WebGL2RenderingContext>> WebGL2RenderingContext::c
 
 WebGL2RenderingContext::WebGL2RenderingContext(JS::Realm& realm, HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<OpenGLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters)
     : PlatformObject(realm)
-    , WebGL2RenderingContextImpl(realm, move(context))
+    , WebGL2RenderingContextOverloads(realm, move(context))
     , m_canvas_element(canvas_element)
     , m_context_creation_parameters(context_creation_parameters)
     , m_actual_context_parameters(actual_context_parameters)
@@ -107,15 +107,6 @@ void WebGL2RenderingContext::needs_to_present()
     if (!m_canvas_element->paintable())
         return;
     m_canvas_element->paintable()->set_needs_display();
-}
-
-void WebGL2RenderingContext::set_error(GLenum error)
-{
-    auto context_error = glGetError();
-    if (context_error != GL_NO_ERROR)
-        m_error = context_error;
-    else
-        m_error = error;
 }
 
 bool WebGL2RenderingContext::is_context_lost() const
@@ -175,6 +166,11 @@ JS::Object* WebGL2RenderingContext::get_extension(String const& name)
     if (name.equals_ignoring_ascii_case("WEBGL_compressed_texture_s3tc"sv)) {
         if (!m_webgl_compressed_texture_s3tc_extension) {
             m_webgl_compressed_texture_s3tc_extension = MUST(Extensions::WebGLCompressedTextureS3tc::create(realm(), this));
+
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGBA_S3TC_DXT3_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
         }
 
         VERIFY(m_webgl_compressed_texture_s3tc_extension);
@@ -184,6 +180,11 @@ JS::Object* WebGL2RenderingContext::get_extension(String const& name)
     if (name.equals_ignoring_ascii_case("WEBGL_compressed_texture_s3tc_srgb"sv)) {
         if (!m_webgl_compressed_texture_s3tc_srgb_extension) {
             m_webgl_compressed_texture_s3tc_srgb_extension = MUST(Extensions::WebGLCompressedTextureS3tcSrgb::create(realm(), this));
+
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT);
+            m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT);
         }
 
         VERIFY(m_webgl_compressed_texture_s3tc_srgb_extension);
@@ -244,6 +245,26 @@ WebIDL::Long WebGL2RenderingContext::drawing_buffer_height() const
 bool WebGL2RenderingContext::ext_texture_filter_anisotropic_extension_enabled() const
 {
     return !!m_ext_texture_filter_anisotropic;
+}
+
+bool WebGL2RenderingContext::angle_instanced_arrays_extension_enabled() const
+{
+    return false;
+}
+
+bool WebGL2RenderingContext::oes_standard_derivatives_extension_enabled() const
+{
+    return false;
+}
+
+bool WebGL2RenderingContext::webgl_draw_buffers_extension_enabled() const
+{
+    return false;
+}
+
+ReadonlySpan<WebIDL::UnsignedLong> WebGL2RenderingContext::enabled_compressed_texture_formats() const
+{
+    return m_enabled_compressed_texture_formats;
 }
 
 }

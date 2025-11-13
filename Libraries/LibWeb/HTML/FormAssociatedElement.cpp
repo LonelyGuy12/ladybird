@@ -230,10 +230,10 @@ String FormAssociatedElement::form_action() const
     return {};
 }
 
-WebIDL::ExceptionOr<void> FormAssociatedElement::set_form_action(String const& value)
+void FormAssociatedElement::set_form_action(String const& value)
 {
     auto& html_element = form_associated_element_to_html_element();
-    return html_element.set_attribute(HTML::AttributeNames::formaction, value);
+    html_element.set_attribute_value(HTML::AttributeNames::formaction, value);
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#dom-cva-reportvalidity
@@ -266,7 +266,7 @@ Utf16String FormAssociatedElement::validation_message() const
     if (!is_candidate_for_constraint_validation() || satisfies_its_constraints())
         return {};
 
-    // FIXME
+    // FIXME:
     // 2. Return a suitably localized message that the user agent would show the user if this were the only form
     //    control with a validity constraint problem. If the user agent would not actually show a textual message in
     //    such a situation (e.g., it would show a graphical cue instead), then return a suitably localized message that

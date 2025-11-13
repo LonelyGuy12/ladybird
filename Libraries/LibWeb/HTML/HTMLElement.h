@@ -24,7 +24,7 @@ namespace Web::HTML {
     __ENUMERATE_HTML_ELEMENT_DIR_ATTRIBUTE(auto)
 
 // https://html.spec.whatwg.org/multipage/interaction.html#attr-contenteditable
-enum class ContentEditableState {
+enum class ContentEditableState : u8 {
     True,
     False,
     PlaintextOnly,
@@ -158,13 +158,13 @@ public:
 
     WebIDL::ExceptionOr<GC::Ref<ElementInternals>> attach_internals();
 
-    WebIDL::ExceptionOr<void> set_popover(Optional<String> value);
+    void set_popover(Optional<String> value);
     Optional<String> popover() const;
     Optional<String> opened_in_popover_mode() const { return m_opened_in_popover_mode; }
 
     virtual void removed_from(Node* old_parent, Node& old_root) override;
 
-    enum class PopoverVisibilityState {
+    enum class PopoverVisibilityState : u8 {
         Hidden,
         Showing,
     };
@@ -186,7 +186,7 @@ public:
     bool is_inert() const { return m_inert; }
 
     bool draggable() const;
-    void set_draggable(bool draggable) { MUST(set_attribute(HTML::AttributeNames::draggable, draggable ? "true"_string : "false"_string)); }
+    void set_draggable(bool draggable);
 
     virtual bool is_valid_invoker_command(String&) { return false; }
     virtual void invoker_command_steps(DOM::Element&, String&) { }
@@ -261,11 +261,11 @@ private:
     // https://html.spec.whatwg.org/multipage/popover.html#popover-visibility-state
     PopoverVisibilityState m_popover_visibility_state { PopoverVisibilityState::Hidden };
 
-    // https://html.spec.whatwg.org/multipage/popover.html#popover-invoker
-    GC::Ptr<HTMLElement> m_popover_invoker;
-
     // https://html.spec.whatwg.org/multipage/popover.html#popover-showing-or-hiding
     bool m_popover_showing_or_hiding { false };
+
+    // https://html.spec.whatwg.org/multipage/popover.html#popover-invoker
+    GC::Ptr<HTMLElement> m_popover_invoker;
 
     // https://html.spec.whatwg.org/multipage/popover.html#the-popover-attribute:toggle-task-tracker
     Optional<ToggleTaskTracker> m_popover_toggle_task_tracker;

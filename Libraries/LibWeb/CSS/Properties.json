@@ -1637,7 +1637,6 @@
     "animation-type": "discrete",
     "inherited": true,
     "initial": "auto",
-    "multiplicity": "list",
     "valid-types": [
       "url",
       "cursor-predefined",
@@ -3216,6 +3215,17 @@
       "paint-order"
     ]
   },
+  "perspective": {
+    "animation-type": "by-computed-value",
+    "inherited": false,
+    "initial": "none",
+    "valid-identifiers": [
+      "none"
+    ],
+    "valid-types": [
+      "length [0,∞]"
+    ]
+  },
   "place-content": {
     "inherited": false,
     "initial": "normal",
@@ -3802,7 +3812,6 @@
     "affects-layout": false,
     "affects-stacking-context": true,
     "percentages-resolve-to": "length",
-    "multiplicity": "list",
     "valid-types": [
       "transform-list"
     ],
@@ -3837,6 +3846,15 @@
       "top"
     ],
     "percentages-resolve-to": "length"
+  },
+  "transform-style": {
+    "animation-type": "discrete",
+    "inherited": false,
+    "initial": "flat",
+    "valid-identifiers": [
+      "flat",
+      "preserve-3d"
+    ]
   },
   "transition": {
     "affects-layout": false,
@@ -3888,10 +3906,9 @@
     "initial": "all",
     "multiplicity": "coordinating-list",
     "valid-types": [
-      "custom-ident ![all,none]"
+      "custom-ident ![none]"
     ],
     "valid-identifiers": [
-      "all",
       "none"
     ]
   },

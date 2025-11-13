@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibCore/DirIterator.h>
 #include <LibCore/StandardPaths.h>
 #include <LibFileSystem/FileSystem.h>
 #include <LibURL/URL.h>
@@ -75,7 +74,7 @@ Variant<Optional<CacheEntryReader&>, DiskCache::CacheHasOpenEntry> DiskCache::op
         return Optional<CacheEntryReader&> {};
     }
 
-    auto cache_entry = CacheEntryReader::create(*this, m_index, cache_key, index_entry->data_size);
+    auto cache_entry = CacheEntryReader::create(*this, m_index, cache_key, index_entry->response_headers, index_entry->data_size);
     if (cache_entry.is_error()) {
         dbgln("\033[31;1mUnable to open cache entry for\033[0m {}: {}", request.url(), cache_entry.error());
         m_index.remove_entry(cache_key);
@@ -83,17 +82,30 @@ Variant<Optional<CacheEntryReader&>, DiskCache::CacheHasOpenEntry> DiskCache::op
         return Optional<CacheEntryReader&> {};
     }
 
-    auto freshness_lifetime = calculate_freshness_lifetime(cache_entry.value()->headers());
-    auto current_age = calculate_age(cache_entry.value()->headers(), index_entry->request_time, index_entry->response_time);
+    auto const& response_headers = cache_entry.value()->response_headers();
+    auto freshness_lifetime = calculate_freshness_lifetime(response_headers);
+    auto current_age = calculate_age(response_headers, index_entry->request_time, index_entry->response_time);
 
-    if (!is_response_fresh(freshness_lifetime, current_age)) {
+    switch (cache_lifetime_status(response_headers, freshness_lifetime, current_age)) {
+    case CacheLifetimeStatus::Fresh:
+        dbgln("\033[32;1mOpened disk cache entry for\033[0m {} (lifetime={}s age={}s) ({} bytes)", request.url(), freshness_lifetime.to_seconds(), current_age.to_seconds(), index_entry->data_size);
+        break;
+
+    case CacheLifetimeStatus::Expired:
         dbgln("\033[33;1mCache entry expired for\033[0m {} (lifetime={}s age={}s)", request.url(), freshness_lifetime.to_seconds(), current_age.to_seconds());
         cache_entry.value()->remove();
 
         return Optional<CacheEntryReader&> {};
-    }
 
-    dbgln("\033[32;1mOpened disk cache entry for\033[0m {} (lifetime={}s age={}s) ({} bytes)", request.url(), freshness_lifetime.to_seconds(), current_age.to_seconds(), index_entry->data_size);
+    case CacheLifetimeStatus::MustRevalidate:
+        // We will hold an exclusive lock on the cache entry for revalidation requests.
+        if (check_if_cache_has_open_entry(request, cache_key, CheckReaderEntries::Yes))
+            return Optional<CacheEntryReader&> {};
+
+        dbgln("\033[36;1mMust revalidate disk cache entry for\033[0m {} (lifetime={}s age={}s)", request.url(), freshness_lifetime.to_seconds(), current_age.to_seconds());
+        cache_entry.value()->set_must_revalidate();
+        break;
+    }
 
     auto* cache_entry_pointer = cache_entry.value().ptr();
     m_open_cache_entries.ensure(cache_key).append(cache_entry.release_value());
@@ -113,38 +125,35 @@ bool DiskCache::check_if_cache_has_open_entry(Request& request, u64 cache_key, C
             m_requests_waiting_completion.ensure(cache_key).append(request);
             return true;
         }
+
+        // We allow concurrent readers unless another reader is open for revalidation. That reader will issue the network
+        // request, which may then result in the cache entry being updated or deleted.
+        if (check_reader_entries == CheckReaderEntries::Yes || as<CacheEntryReader>(*open_entry).must_revalidate()) {
+            dbgln("\033[36;1mDeferring disk cache entry for\033[0m {} (waiting for existing reader)", request.url());
+            m_requests_waiting_completion.ensure(cache_key).append(request);
+            return true;
+        }
     }
 
-    if (check_reader_entries == CheckReaderEntries::No)
-        return false;
-
-    dbgln("\033[36;1mDeferring disk cache entry for\033[0m {} (waiting for existing reader)", request.url());
-    m_requests_waiting_completion.ensure(cache_key).append(request);
-    return true;
+    return false;
 }
 
-void DiskCache::clear_cache()
+Requests::CacheSizes DiskCache::estimate_cache_size_accessed_since(UnixDateTime since) const
 {
-    for (auto const& [_, open_entries] : m_open_cache_entries) {
-        for (auto const& open_entry : open_entries)
-            open_entry->mark_for_deletion({});
-    }
+    return m_index.estimate_cache_size_accessed_since(since);
+}
 
-    m_index.remove_all_entries();
+void DiskCache::remove_entries_accessed_since(UnixDateTime since)
+{
+    m_index.remove_entries_accessed_since(since, [&](auto cache_key) {
+        if (auto open_entries = m_open_cache_entries.get(cache_key); open_entries.has_value()) {
+            for (auto const& open_entry : *open_entries)
+                open_entry->mark_for_deletion({});
+        }
 
-    Core::DirIterator it { m_cache_directory.string(), Core::DirIterator::SkipDots };
-    size_t cache_entries { 0 };
-
-    while (it.has_next()) {
-        auto entry = it.next_full_path();
-        if (LexicalPath { entry }.title() == INDEX_DATABASE)
-            continue;
-
-        (void)FileSystem::remove(entry, FileSystem::RecursionMode::Disallowed);
-        ++cache_entries;
-    }
-
-    dbgln("Cleared {} disk cache entries", cache_entries);
+        auto cache_path = path_for_cache_key(m_cache_directory, cache_key);
+        (void)FileSystem::remove(cache_path.string(), FileSystem::RecursionMode::Disallowed);
+    });
 }
 
 void DiskCache::cache_entry_closed(Badge<CacheEntry>, CacheEntry const& cache_entry)

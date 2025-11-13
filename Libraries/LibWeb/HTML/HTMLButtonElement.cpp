@@ -5,6 +5,8 @@
  */
 
 #include <LibWeb/Bindings/HTMLButtonElementPrototype.h>
+#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/HTML/CommandEvent.h>
@@ -27,6 +29,23 @@ void HTMLButtonElement::initialize(JS::Realm& realm)
 {
     WEB_SET_PROTOTYPE_FOR_INTERFACE(HTMLButtonElement);
     Base::initialize(realm);
+}
+
+void HTMLButtonElement::adjust_computed_style(CSS::ComputedProperties& style)
+{
+    // https://html.spec.whatwg.org/multipage/rendering.html#button-layout
+    // If the computed value of 'display' is 'inline-grid', 'grid', 'inline-flex', 'flex', 'none', or 'contents', then behave as the computed value.
+    auto display = style.display();
+    if (display.is_flex_inside() || display.is_grid_inside() || display.is_none() || display.is_contents()) {
+        // No-op
+    } else if (display.is_inline_outside()) {
+        // Otherwise, if the computed value of 'display' is a value such that the outer display type is 'inline', then behave as 'inline-block'.
+        // AD-HOC: See https://github.com/whatwg/html/issues/11857
+        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::InlineBlock)));
+    } else {
+        // Otherwise, behave as 'flow-root'.
+        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::FlowRoot)));
+    }
 }
 
 HTMLButtonElement::TypeAttributeState HTMLButtonElement::type_state() const
@@ -74,10 +93,10 @@ String HTMLButtonElement::type_for_bindings() const
 }
 
 // https://html.spec.whatwg.org/multipage/form-elements.html#dom-button-type
-WebIDL::ExceptionOr<void> HTMLButtonElement::set_type_for_bindings(String const& type)
+void HTMLButtonElement::set_type_for_bindings(String const& type)
 {
     // The type setter steps are to set the type content attribute to the given value.
-    return set_attribute(HTML::AttributeNames::type, type);
+    set_attribute_value(HTML::AttributeNames::type, type);
 }
 
 void HTMLButtonElement::form_associated_element_attribute_changed(FlyString const& name, Optional<String> const&, Optional<String> const& value, Optional<FlyString> const& namespace_)
@@ -320,9 +339,9 @@ String HTMLButtonElement::command() const
 }
 
 // https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:dom-button-command-2
-WebIDL::ExceptionOr<void> HTMLButtonElement::set_command(String const& value)
+void HTMLButtonElement::set_command(String const& value)
 {
-    return set_attribute(AttributeNames::command, value);
+    set_attribute_value(AttributeNames::command, value);
 }
 
 }

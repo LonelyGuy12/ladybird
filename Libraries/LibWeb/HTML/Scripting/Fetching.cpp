@@ -326,7 +326,7 @@ String resolve_a_module_integrity_metadata(URL::URL const& url, EnvironmentSetti
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-classic-script
-WebIDL::ExceptionOr<void> fetch_classic_script(GC::Ref<HTMLScriptElement> element, URL::URL const& url, EnvironmentSettingsObject& settings_object, ScriptFetchOptions options, CORSSettingAttribute cors_setting, String character_encoding, OnFetchScriptComplete on_complete)
+void fetch_classic_script(GC::Ref<HTMLScriptElement> element, URL::URL const& url, EnvironmentSettingsObject& settings_object, ScriptFetchOptions options, CORSSettingAttribute cors_setting, String character_encoding, OnFetchScriptComplete on_complete)
 {
     auto& realm = element->realm();
     auto& vm = realm.vm();
@@ -386,8 +386,7 @@ WebIDL::ExceptionOr<void> fetch_classic_script(GC::Ref<HTMLScriptElement> elemen
         on_complete->function()(script);
     };
 
-    TRY(Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
-    return {};
+    Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-classic-worker-script
@@ -465,7 +464,7 @@ WebIDL::ExceptionOr<void> fetch_classic_worker_script(URL::URL const& url, Envir
     else {
         Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
         fetch_algorithms_input.process_response_consume_body = move(process_response_consume_body);
-        TRY(Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+        Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
     }
     return {};
 }
@@ -573,7 +572,7 @@ WebIDL::ExceptionOr<GC::Ref<ClassicScript>> fetch_a_classic_worker_imported_scri
     else {
         Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
         fetch_algorithms_input.process_response_consume_body = move(process_response_consume_body);
-        TRY(Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+        Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
     }
 
     // 5. Pause until response is not null.
@@ -794,7 +793,7 @@ void fetch_single_module_script(JS::Realm& realm,
     } else {
         Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
         fetch_algorithms_input.process_response_consume_body = move(process_response_consume_body);
-        Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(realm.vm(), move(fetch_algorithms_input))).release_value_but_fixme_should_propagate_errors();
+        Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(realm.vm(), move(fetch_algorithms_input)));
     }
 }
 
