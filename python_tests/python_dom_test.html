@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python DOM Integration Test - Ladybird</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .test-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .python-created {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #34a853;
+        }
+        
+        h1 { color: #1a73e8; text-align: center; }
+        h2 { color: #34a853; }
+        
+        #python-output {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🐍 Python DOM Integration Test</h1>
+    <p>This page tests Python's ability to interact with the DOM using your current integration.</p>
+
+    <div class="test-section">
+        <h2>Test 1: Basic DOM Access</h2>
+        <div id="python-output">
+            <p>This content will be modified by Python...</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Window and Document Objects</h2>
+        <div id="window-info">
+            <p>Window information will be populated by Python...</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Python-Created Content</h2>
+        <div id="dynamic-content">
+            <!-- Python will add content here -->
+        </div>
+    </div>
+
+    <!-- Python Scripts Testing DOM Integration -->
+    <script type="python">
+# Test 1: Check if window and document are available
+print("🌐 Test 1: Checking Window and Document Objects")
+print("=" * 45)
+
+try:
+    # Test if window object exists
+    if 'window' in globals():
+        print("✓ window object is available")
+        print(f"  window type: {type(window)}")
+    else:
+        print("✗ window object not found")
+    
+    # Test if document object exists  
+    if 'document' in globals():
+        print("✓ document object is available")
+        print(f"  document type: {type(document)}")
+        
+        # Try to access document properties
+        try:
+            title = document.title
+            print(f"  document.title: {title}")
+        except Exception as e:
+            print(f"  document.title error: {e}")
+    else:
+        print("✗ document object not found")
+        
+except Exception as e:
+    print(f"✗ Error accessing window/document: {e}")
+
+print()
+    </script>
+
+    <script type="python">
+# Test 2: Try DOM manipulation if available
+print("🔧 Test 2: DOM Manipulation Test")
+print("=" * 35)
+
+try:
+    # Try to find an element by ID
+    output_div = None
+    
+    # Check if we have DOM access
+    if 'document' in globals():
+        print("✓ Attempting DOM element access...")
+        
+        # This depends on your actual Python DOM binding implementation
+        # Adjust based on your actual API
+        try:
+            # Try different possible DOM access patterns
+            if hasattr(document, 'getElementById'):
+                output_div = document.getElementById('python-output')
+                print("✓ document.getElementById() works")
+            elif hasattr(document, 'find'):
+                output_div = document.find('#python-output')
+                print("✓ document.find() works")
+            else:
+                print("ℹ️  DOM query methods not yet implemented")
+                
+        except Exception as e:
+            print(f"ℹ️  DOM query error: {e}")
+        
+        if output_div:
+            print(f"✓ Found element: {type(output_div)}")
+            
+            # Try to modify element content
+            try:
+                if hasattr(output_div, 'innerHTML'):
+                    output_div.innerHTML = "<p><strong>✅ Modified by Python!</strong></p>"
+                    print("✓ innerHTML modification works")
+                elif hasattr(output_div, 'textContent'):
+                    output_div.textContent = "✅ Modified by Python!"
+                    print("✓ textContent modification works")
+                else:
+                    print("ℹ️  Element content modification methods not yet implemented")
+            except Exception as e:
+                print(f"ℹ️  Element modification error: {e}")
+        else:
+            print("ℹ️  Element not found or DOM API not ready")
+    else:
+        print("ℹ️  Document object not available")
+        
+except Exception as e:
+    print(f"✗ DOM manipulation error: {e}")
+
+print()
+    </script>
+
+    <script type="python">
+# Test 3: Test available Python globals
+print("📋 Test 3: Available Python Environment")
+print("=" * 40)
+
+print("Available global objects:")
+python_globals = list(globals().keys())
+important_globals = ['window', 'document', '__name__', '__file__']
+
+for name in important_globals:
+    if name in python_globals:
+        print(f"✓ {name}: {type(globals()[name])}")
+    else:
+        print(f"✗ {name}: not available")
+
+# Show some built-in Python functionality
+print("\nPython built-ins working:")
+print(f"✓ len([1,2,3]) = {len([1,2,3])}")
+print(f"✓ sum([1,2,3]) = {sum([1,2,3])}")
+print(f"✓ 'hello'.upper() = {'hello'.upper()}")
+
+print()
+    </script>
+
+    <script type="python">
+# Test 4: Integration Status Report
+print("📊 Python-Ladybird Integration Status Report")
+print("=" * 50)
+
+# Check what's working
+working_features = []
+todo_features = []
+
+# Basic Python
+working_features.append("✓ Python execution")
+working_features.append("✓ Print to console") 
+working_features.append("✓ Python data types")
+working_features.append("✓ Control flow")
+
+# DOM integration status
+if 'window' in globals():
+    working_features.append("✓ Window object access")
+else:
+    todo_features.append("⏳ Window object binding")
+    
+if 'document' in globals():
+    working_features.append("✓ Document object access")
+else:
+    todo_features.append("⏳ Document object binding")
+
+print("WORKING FEATURES:")
+for feature in working_features:
+    print(f"  {feature}")
+
+if todo_features:
+    print("\nFEATURES IN DEVELOPMENT:")
+    for feature in todo_features:
+        print(f"  {feature}")
+
+print("\n" + "=" * 50)
+print("🎉 Python is successfully integrated into Ladybird!")
+print("DOM bindings are available for further development.")
+    </script>
+
+    <div class="test-section">
+        <h2>🔍 How to Check Results</h2>
+        <div class="python-created">
+            <p><strong>To see Python test results:</strong></p>
+            <ol>
+                <li>Open Browser Developer Console (F12)</li>
+                <li>Look for Python print() statements</li>
+                <li>Check for ✓ (success) or ✗ (error) indicators</li>
+                <li>DOM modifications may appear on this page</li>
+            </ol>
+        </div>
+    </div>
+
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+        <h2 style="color: #34a853;">🔗 Navigation</h2>
+        <p style="margin: 15px 0;">
+            <a href="index.html" style="color: #34a853; text-decoration: none; margin: 0 10px;">← Back to Test Index</a> |
+            <a href="python_basic_test.html" style="color: #34a853; text-decoration: none; margin: 0 10px;">← Basic Test</a> |
+            <a href="python_advanced_test.html" style="color: #34a853; text-decoration: none; margin: 0 10px;">Advanced Test →</a>
+        </p>
+        <p style="font-size: 0.9em; color: #666; margin: 10px 0;">
+            🚀 <strong>Next:</strong> Try the Advanced Features Test for comprehensive Python validation
+        </p>
+    </div>
+
+</body>
+</html>

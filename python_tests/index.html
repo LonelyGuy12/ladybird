@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Integration Tests - Ladybird Browser</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 3em;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.3em;
+            margin: 10px 0;
+            opacity: 0.9;
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin: 30px 0;
+        }
+        
+        .test-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease, border-color 0.3s ease;
+            text-decoration: none;
+            color: white;
+            display: block;
+        }
+        
+        .test-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(255, 255, 255, 0.4);
+            text-decoration: none;
+            color: white;
+        }
+        
+        .test-card h3 {
+            margin: 0 0 15px 0;
+            font-size: 1.5em;
+            color: #fbbf24;
+        }
+        
+        .test-card .icon {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        .test-card p {
+            margin: 10px 0;
+            line-height: 1.6;
+            opacity: 0.9;
+        }
+        
+        .features-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .features-list li {
+            margin: 8px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .features-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #4ade80;
+            font-weight: bold;
+        }
+        
+        .info-section {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 25px;
+            margin: 30px 0;
+        }
+        
+        .info-section h2 {
+            color: #fbbf24;
+            margin-top: 0;
+        }
+        
+        .quick-start {
+            background: rgba(34, 197, 94, 0.2);
+            border-left: 4px solid #22c55e;
+        }
+        
+        .nav-footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 8px;
+            text-decoration: none;
+            margin: 5px;
+            transition: background 0.3s ease;
+        }
+        
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            text-decoration: none;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🐍 Python Integration Tests</h1>
+        <p>Comprehensive testing suite for Python in Ladybird Browser</p>
+        <p><strong>Choose a test to begin verification</strong></p>
+    </div>
+
+    <div class="test-grid">
+        <a href="python_basic_test.html" class="test-card">
+            <span class="icon">🔧</span>
+            <h3>Basic Python Test</h3>
+            <p><strong>Start here!</strong> Tests core Python functionality including:</p>
+            <ul class="features-list">
+                <li>Basic operations & arithmetic</li>
+                <li>Data structures (lists, dicts)</li>
+                <li>Control flow (loops, conditionals)</li>
+                <li>Functions and string operations</li>
+            </ul>
+            <p><strong>Duration:</strong> ~30 seconds</p>
+        </a>
+
+        <a href="python_dom_test.html" class="test-card">
+            <span class="icon">🌐</span>
+            <h3>DOM Integration Test</h3>
+            <p>Tests Python's browser integration capabilities:</p>
+            <ul class="features-list">
+                <li>Window & document object access</li>
+                <li>DOM element manipulation</li>
+                <li>Python-browser environment</li>
+                <li>Integration status reporting</li>
+            </ul>
+            <p><strong>Duration:</strong> ~45 seconds</p>
+        </a>
+
+        <a href="python_advanced_test.html" class="test-card">
+            <span class="icon">🚀</span>
+            <h3>Advanced Features Test</h3>
+            <p>Comprehensive testing of advanced Python features:</p>
+            <ul class="features-list">
+                <li>Performance benchmarks</li>
+                <li>Object-oriented programming</li>
+                <li>Complex algorithms & recursion</li>
+                <li>Exception handling</li>
+            </ul>
+            <p><strong>Duration:</strong> ~1-2 minutes</p>
+        </a>
+    </div>
+
+    <div class="info-section quick-start">
+        <h2>🚀 Quick Start Guide</h2>
+        <ol>
+            <li><strong>Start with Basic Test:</strong> Click "Basic Python Test" to verify core functionality</li>
+            <li><strong>Check Console:</strong> Open Developer Tools (F12) to see Python output</li>
+            <li><strong>Look for ✓ symbols:</strong> Green checkmarks indicate successful tests</li>
+            <li><strong>Run all tests:</strong> Complete all three tests for full verification</li>
+            <li><strong>Review results:</strong> Check console logs for detailed test information</li>
+        </ol>
+    </div>
+
+    <div class="info-section">
+        <h2>📋 Test Status Indicators</h2>
+        <ul class="features-list">
+            <li><strong>✓ Green checkmarks:</strong> Tests passed successfully</li>
+            <li><strong>✗ Red X marks:</strong> Tests failed (check console for details)</li>
+            <li><strong>ℹ️ Blue info:</strong> Informational messages</li>
+            <li><strong>⏳ Clock:</strong> Features in development</li>
+        </ul>
+    </div>
+
+    <div class="info-section">
+        <h2>🛠️ Troubleshooting</h2>
+        <p><strong>If tests fail or don't show output:</strong></p>
+        <ul class="features-list">
+            <li>Ensure Python integration is enabled in Ladybird build</li>
+            <li>Check browser console (F12) for error messages</li>
+            <li>Verify `<script type="python">` tags are supported</li>
+            <li>Reload the page and try again</li>
+        </ul>
+        
+        <p><strong>Expected build flags:</strong> <code>-DENABLE_PYTHON=ON</code></p>
+    </div>
+
+    <div class="nav-footer">
+        <a href="../README.md" class="btn">📖 Main Documentation</a>
+        <a href="README.md" class="btn">📋 Test Documentation</a>
+        <a href="test_python_integration.py" class="btn">🐍 Python Test Script</a>
+    </div>
+
+    <!-- Quick inline test to verify Python is working -->
+    <script type="python">
+# Quick verification that Python is working on the index page
+print("🎯 Python Integration Index - Quick Verification")
+print("=" * 50)
+print("✓ Python execution is working!")
+print("✓ You can now run the comprehensive test suite")
+print("✓ Click on any test card above to begin")
+print("=" * 50)
+    </script>
+
+    <script>
+        // Add some interactivity
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🐍 Python Integration Tests loaded');
+            console.log('📝 Check the console output above for Python verification');
+            
+            // Add click tracking
+            document.querySelectorAll('.test-card').forEach(card => {
+                card.addEventListener('click', function(e) {
+                    const testName = this.querySelector('h3').textContent;
+                    console.log(`🚀 Starting test: ${testName}`);
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>
