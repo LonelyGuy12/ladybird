@@ -246,8 +246,12 @@ void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
     for (auto string : m_single_ascii_character_strings)
         roots.set(string, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
 
-    for (auto string : m_numeric_string_cache)
+    for (auto string : m_numeric_string_cache) {
+        // The numeric string cache is populated lazily, so skip null entries.
+        if (!string)
+            continue;
         roots.set(string, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
+    }
 
     roots.set(cached_strings.number, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
     roots.set(cached_strings.undefined, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
@@ -753,20 +757,21 @@ void VM::load_imported_module(ImportedModuleReferrer referrer, ModuleRequest con
     finish_loading_imported_module(referrer, module_request, payload, module);
 }
 
-static RefPtr<CachedSourceRange> get_source_range(ExecutionContext const* context)
+static GC::Ptr<CachedSourceRange> get_source_range(ExecutionContext* context)
 {
     // native function
     if (!context->executable)
         return {};
 
-    if (!context->cached_source_range
-        || context->cached_source_range->program_counter != context->program_counter) {
+    if (!context->rare_data()
+        || !context->rare_data()->cached_source_range
+        || context->rare_data()->cached_source_range->program_counter != context->program_counter) {
         auto unrealized_source_range = context->executable->source_range_at(context->program_counter);
-        context->cached_source_range = adopt_ref(*new CachedSourceRange(
+        context->ensure_rare_data()->cached_source_range = context->executable->heap().allocate<CachedSourceRange>(
             context->program_counter,
-            move(unrealized_source_range)));
+            move(unrealized_source_range));
     }
-    return context->cached_source_range;
+    return context->rare_data()->cached_source_range;
 }
 
 Vector<StackTraceElement> VM::stack_trace() const

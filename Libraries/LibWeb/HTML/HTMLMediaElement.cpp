@@ -68,7 +68,7 @@ void HTMLMediaElement::initialize(JS::Realm& realm)
     m_document_observer->set_document_became_inactive([this]() {
         // If the media element's node document stops being a fully active document, then the playback will stop until
         // the document is active again.
-        pause_element().release_value_but_fixme_should_propagate_errors();
+        pause_element();
     });
 
     document().page().register_media_element({}, unique_id());
@@ -136,7 +136,7 @@ void HTMLMediaElement::removed_from(DOM::Node* old_parent, DOM::Node& old_root)
         return;
 
     // 3. ⌛ Run the internal pause steps for the media element.
-    pause_element().release_value_but_fixme_should_propagate_errors();
+    pause_element();
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#fatal-decode-error
@@ -369,7 +369,7 @@ void HTMLMediaElement::set_duration(double duration)
         paintable->set_needs_display();
 }
 
-WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> HTMLMediaElement::play()
+GC::Ref<WebIDL::Promise> HTMLMediaElement::play()
 {
     auto& realm = this->realm();
 
@@ -387,37 +387,33 @@ WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> HTMLMediaElement::play()
     m_pending_play_promises.append(promise);
 
     // 4. Run the internal play steps for the media element.
-    TRY(play_element());
+    play_element();
 
     // 5. Return promise.
     return promise;
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#dom-media-pause
-WebIDL::ExceptionOr<void> HTMLMediaElement::pause()
+void HTMLMediaElement::pause()
 {
     // 1. If the media element's networkState attribute has the value NETWORK_EMPTY, invoke the media element's resource
     //    selection algorithm.
     if (m_network_state == NetworkState::Empty)
-        TRY(select_resource());
+        select_resource();
 
     // 2. Run the internal pause steps for the media element.
-    TRY(pause_element());
-
-    return {};
+    pause_element();
 }
 
-WebIDL::ExceptionOr<void> HTMLMediaElement::toggle_playback()
+void HTMLMediaElement::toggle_playback()
 {
     // AD-HOC: An execution context is required for Promise creation hooks.
     TemporaryExecutionContext execution_context { realm() };
 
     if (potentially_playing())
-        TRY(pause());
+        pause();
     else
-        TRY(play());
-
-    return {};
+        play();
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#dom-media-volume
@@ -628,7 +624,7 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::load_element()
     m_can_autoplay = true;
 
     // 9. Invoke the media element's resource selection algorithm.
-    TRY(select_resource());
+    select_resource();
 
     // 10. NOTE: Playback of any previously playing media resource for this element stops.
     return {};
@@ -825,7 +821,7 @@ void HTMLMediaElement::children_changed(ChildrenChangedMetadata const* metadata)
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#concept-media-load-algorithm
-WebIDL::ExceptionOr<void> HTMLMediaElement::select_resource()
+void HTMLMediaElement::select_resource()
 {
     auto& realm = this->realm();
 
@@ -972,8 +968,6 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::select_resource()
             break;
         }
     });
-
-    return {};
 }
 
 enum class FetchMode {
@@ -1104,7 +1098,7 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::fetch_resource(URL::URL const& url_r
             response->body()->fully_read(realm, update_media, empty_algorithm, GC::Ref { global });
         };
 
-        m_fetch_controller = TRY(Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+        m_fetch_controller = Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
         break;
     }
 
@@ -1265,8 +1259,8 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(Str
         if (enable == TriState::True)
             audio_track->set_enabled(true);
 
-        // AD-HOC(ish): According to https://dev.w3.org/html5/html-sourcing-inband-tracks/, kind should be set according to format, and the following criteria within
-        //              the specified formats.
+        // NB: According to https://dev.w3.org/html5/html-sourcing-inband-tracks/, kind should be set according to format, and the following criteria within
+        //     the specified formats.
         // WebM:
         //     - "main": the FlagDefault element is set on the track
         //     - "translation": not first audio (video) track
@@ -1324,7 +1318,7 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(Str
         if (enable == TriState::True)
             video_track->set_selected(true);
 
-        // AD-HOC(ish): See the comment regarding AudioTrack.kind above with regard to https://dev.w3.org/html5/html-sourcing-inband-tracks/.
+        // NB: See the comment regarding AudioTrack.kind above with regard to https://dev.w3.org/html5/html-sourcing-inband-tracks/.
         video_track->set_kind(enable == TriState::True ? "main"_utf16 : "translation"_utf16);
 
         // 7. Fire an event named addtrack at this VideoTrackList object, using TrackEvent, with the track attribute initialized to the new VideoTrack object.
@@ -1592,12 +1586,12 @@ void HTMLMediaElement::on_playback_manager_state_change()
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#internal-play-steps
-WebIDL::ExceptionOr<void> HTMLMediaElement::play_element()
+void HTMLMediaElement::play_element()
 {
     // 1. If the media element's networkState attribute has the value NETWORK_EMPTY, invoke the media element's resource
     //    selection algorithm.
     if (m_network_state == NetworkState::Empty)
-        TRY(select_resource());
+        select_resource();
 
     // 2. If the playback has ended and the direction of playback is forwards, seek to the earliest possible position
     //    of the media resource.
@@ -1654,12 +1648,10 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::play_element()
 
     // 5. Set the media element's can autoplay flag to false.
     m_can_autoplay = false;
-
-    return {};
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#internal-pause-steps
-WebIDL::ExceptionOr<void> HTMLMediaElement::pause_element()
+void HTMLMediaElement::pause_element()
 {
     // 1. Set the media element's can autoplay flag to false.
     m_can_autoplay = false;
@@ -1689,8 +1681,6 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::pause_element()
         // 4. Set the official playback position to the current playback position.
         m_official_playback_position = m_current_playback_position;
     }
-
-    return {};
 }
 
 // https://html.spec.whatwg.org/multipage/media.html#dom-media-seek
@@ -2217,14 +2207,14 @@ void HTMLMediaElement::reject_pending_play_promises(ReadonlySpan<GC::Ref<WebIDL:
         WebIDL::reject_promise(realm, promise, error);
 }
 
-WebIDL::ExceptionOr<bool> HTMLMediaElement::handle_keydown(Badge<Web::EventHandler>, UIEvents::KeyCode key, u32 modifiers)
+bool HTMLMediaElement::handle_keydown(Badge<Web::EventHandler>, UIEvents::KeyCode key, u32 modifiers)
 {
     if (modifiers != UIEvents::KeyModifier::Mod_None)
         return false;
 
     switch (key) {
     case UIEvents::KeyCode::Key_Space:
-        TRY(toggle_playback());
+        toggle_playback();
         break;
 
     case UIEvents::KeyCode::Key_Home:
@@ -2258,7 +2248,8 @@ WebIDL::ExceptionOr<bool> HTMLMediaElement::handle_keydown(Badge<Web::EventHandl
         else
             volume = max(0.0, volume - volume_change_per_key_press);
 
-        TRY(set_volume(volume));
+        // This should never fail since volume is clamped to 0.0..1.0 above.
+        MUST(set_volume(volume));
         break;
     }
 

@@ -150,8 +150,7 @@ String CSSStyleProperties::item(size_t index) const
 
     if (index < custom_properties_count) {
         auto keys = m_custom_properties.keys();
-        auto custom_property = m_custom_properties.get(keys[index]);
-        return custom_property.ptr()->custom_name.to_string();
+        return keys[index].to_string();
     }
 
     return CSS::string_from_property_id(m_properties[index - custom_properties_count].property_id).to_string();
@@ -250,7 +249,6 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_property_internal(PropertyName
                 .important = !priority.is_empty() ? Important::Yes : Important::No,
                 .property_id = property.id(),
                 .value = component_value_list.release_nonnull(),
-                .custom_name = property.name(),
             };
             m_custom_properties.set(property.name(), style_property);
             updated = true;
@@ -415,8 +413,7 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_property_style_value(PropertyN
             StyleProperty {
                 Important::No,
                 PropertyID::Custom,
-                style_value,
-                property.name() });
+                style_value });
         return {};
     }
 
@@ -517,14 +514,6 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
 
         Layout::NodeWithStyle* layout_node = abstract_element.layout_node();
 
-        // Pending changes to an ancestor document's layout can affect an element's computed style e.g. an IFrame's
-        // width being changed can affect media query evaluation and the value of the `vw` unit.
-        // FIXME: This is likely overkill and can be optimized
-        for (auto const& navigable : abstract_element.document().ancestor_navigables()) {
-            if (navigable->active_document())
-                navigable->active_document()->update_layout(DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty);
-        }
-
         // FIXME: Be smarter about updating layout if there's no layout node.
         //        We may legitimately have no layout node if we're not visible, but this protects against situations
         //        where we're requesting the computed style before layout has happened.
@@ -542,7 +531,6 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
                 return StyleProperty {
                     .property_id = property_id,
                     .value = maybe_value.release_nonnull(),
-                    .custom_name = property_name_and_id.name(),
                 };
             }
             return {};

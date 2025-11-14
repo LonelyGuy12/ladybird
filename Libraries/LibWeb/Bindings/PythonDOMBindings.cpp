@@ -362,11 +362,7 @@ static PyObject* python_element_set_attribute(PythonElementObject* self, PyObjec
     auto name_fly = FlyString(name_str);
     auto value_view = StringView { value, strlen(value) };
     auto value_str = MUST(String::from_utf8(value_view));
-    auto result = self->element->set_attribute(name_fly, value_str);
-    if (result.is_error()) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to set attribute");
-        return nullptr;
-    }
+    self->element->set_attribute_value(name_fly, value_str);
 
     Py_RETURN_NONE;
 }

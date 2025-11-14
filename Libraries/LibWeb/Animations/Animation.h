@@ -48,6 +48,7 @@ public:
     double playback_rate() const { return m_playback_rate; }
     WebIDL::ExceptionOr<void> set_playback_rate(double value);
 
+    Bindings::AnimationPlayState play_state_for_bindings() const;
     Bindings::AnimationPlayState play_state() const;
 
     bool is_relevant() const;
@@ -107,7 +108,7 @@ public:
     void set_owning_element(GC::Ptr<DOM::Element> value) { m_owning_element = value; }
 
     virtual AnimationClass animation_class() const { return AnimationClass::None; }
-    virtual Optional<int> class_specific_composite_order(GC::Ref<Animation>) const { return {}; }
+    virtual int class_specific_composite_order(GC::Ref<Animation>) const { return 0; }
 
     unsigned int global_animation_list_order() const { return m_global_animation_list_order; }
 

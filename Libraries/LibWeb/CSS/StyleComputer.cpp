@@ -92,6 +92,7 @@
 #include <LibWeb/MimeSniff/MimeType.h>
 #include <LibWeb/MimeSniff/Resource.h>
 #include <LibWeb/Namespace.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <math.h>
@@ -129,6 +130,18 @@ struct Traits<Web::CSS::FontFaceKey> : public DefaultTraits<Web::CSS::FontFaceKe
 template<>
 struct Traits<Web::CSS::OwnFontFaceKey> : public DefaultTraits<Web::CSS::OwnFontFaceKey> {
     static unsigned hash(Web::CSS::OwnFontFaceKey const& key) { return pair_int_hash(key.family_name.hash(), pair_int_hash(key.weight, key.slope)); }
+};
+
+template<>
+struct Traits<Web::CSS::FontMatchingAlgorithmCacheKey> : public DefaultTraits<Web::CSS::FontMatchingAlgorithmCacheKey> {
+    static unsigned hash(Web::CSS::FontMatchingAlgorithmCacheKey const& key)
+    {
+        auto hash = key.family_name.hash();
+        hash = pair_int_hash(hash, key.weight);
+        hash = pair_int_hash(hash, key.slope);
+        hash = pair_int_hash(hash, Traits<float>::hash(key.font_size_in_pt));
+        return hash;
+    }
 };
 
 }
@@ -229,14 +242,14 @@ bool FontLoader::is_loading() const
     return m_fetch_controller && !m_vector_font;
 }
 
-RefPtr<Gfx::Font const> FontLoader::font_with_point_size(float point_size)
+RefPtr<Gfx::Font const> FontLoader::font_with_point_size(float point_size, Gfx::FontVariationSettings const& variations)
 {
     if (!m_vector_font) {
         if (!m_fetch_controller)
             start_loading_next_url();
         return nullptr;
     }
-    return m_vector_font->font(point_size);
+    return m_vector_font->font(point_size, variations);
 }
 
 void FontLoader::start_loading_next_url()
@@ -252,7 +265,7 @@ void FontLoader::start_loading_next_url()
     // CSS style sheet, destination "font", CORS mode "cors", and processResponse being the following steps given
     // response res and null, failure or a byte stream stream:
     auto style_sheet_or_document = m_parent_style_sheet ? StyleSheetOrDocument { *m_parent_style_sheet } : StyleSheetOrDocument { m_style_computer->document() };
-    auto maybe_fetch_controller = fetch_a_style_resource(m_urls.take_first(), style_sheet_or_document, Fetch::Infrastructure::Request::Destination::Font, CorsMode::Cors,
+    m_fetch_controller = fetch_a_style_resource(m_urls.take_first(), style_sheet_or_document, Fetch::Infrastructure::Request::Destination::Font, CorsMode::Cors,
         [loader = this](auto response, auto stream) {
             // 1. If stream is null, return.
             // 2. Load a font from stream according to its type.
@@ -277,11 +290,8 @@ void FontLoader::start_loading_next_url()
             }
         });
 
-    if (maybe_fetch_controller.is_error()) {
+    if (!m_fetch_controller)
         font_did_load_or_fail(nullptr);
-    } else {
-        m_fetch_controller = maybe_fetch_controller.release_value();
-    }
 }
 
 void FontLoader::font_did_load_or_fail(RefPtr<Gfx::Typeface const> typeface)
@@ -330,18 +340,18 @@ struct StyleComputer::MatchingFontCandidate {
     FontFaceKey key;
     Variant<FontLoaderList*, Gfx::Typeface const*> loader_or_typeface;
 
-    [[nodiscard]] RefPtr<Gfx::FontCascadeList const> font_with_point_size(float point_size) const
+    [[nodiscard]] RefPtr<Gfx::FontCascadeList const> font_with_point_size(float point_size, Gfx::FontVariationSettings const& variations) const
     {
         auto font_list = Gfx::FontCascadeList::create();
         if (auto* loader_list = loader_or_typeface.get_pointer<FontLoaderList*>(); loader_list) {
             for (auto const& loader : **loader_list) {
-                if (auto font = loader->font_with_point_size(point_size); font)
+                if (auto font = loader->font_with_point_size(point_size, variations); font)
                     font_list->add(*font, loader->unicode_ranges());
             }
             return font_list;
         }
 
-        font_list->add(loader_or_typeface.get<Gfx::Typeface const*>()->font(point_size));
+        font_list->add(loader_or_typeface.get<Gfx::Typeface const*>()->font(point_size, variations));
         return font_list;
     }
 };
@@ -1235,7 +1245,7 @@ void StyleComputer::process_animation_definitions(ComputedProperties const& comp
         // An animation applies to an element if its name appears as one of the identifiers in the computed value of the
         // animation-name property and the animation uses a valid @keyframes rule
         auto animation = CSSAnimation::create(document.realm());
-        animation->set_id(animation_properties.name);
+        animation->set_animation_name(animation_properties.name);
         animation->set_timeline(document.timeline());
         animation->set_owning_element(element);
 
@@ -1253,6 +1263,7 @@ void StyleComputer::process_animation_definitions(ComputedProperties const& comp
         }
 
         effect->set_target(&element);
+        element.set_has_css_defined_animations();
         element_animations->set(animation_properties.name, animation);
     }
 
@@ -1309,18 +1320,14 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
         auto const append_property_mapping_logical_aliases = [&](PropertyID property_id) {
             if (property_is_logical_alias(property_id))
                 properties_for_this_transition.append(map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { style.writing_mode(), style.direction() }));
-            else
+            else if (property_id != PropertyID::Custom)
                 properties_for_this_transition.append(property_id);
         };
 
         if (property_value->is_keyword()) {
-            auto keyword = property_value->as_keyword().keyword();
-            if (keyword == Keyword::None) {
-                properties.append({});
-                continue;
-            }
-            if (keyword == Keyword::All)
-                properties_for_this_transition = expanded_longhands_for_shorthand(PropertyID::All);
+            VERIFY(property_value->to_keyword() == Keyword::None);
+            properties.append({});
+            continue;
         } else {
             auto maybe_property = property_id_from_string(property_value->as_custom_ident().custom_ident());
             if (!maybe_property.has_value()) {
@@ -1365,9 +1372,10 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
     auto& element = abstract_element.element();
     auto pseudo_element = abstract_element.pseudo_element();
 
-    for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
-        auto property_id = static_cast<CSS::PropertyID>(i);
-        auto matching_transition_properties = element.property_transition_attributes(pseudo_element, property_id);
+    // OPTIMIZATION: Instead of iterating over all properties we split the logic into two loops, one for the properties
+    //               which appear in transition-property and one for those which have existing transitions
+    for (auto property_id : element.property_ids_with_matching_transition_property_entry(pseudo_element)) {
+        auto matching_transition_properties = element.property_transition_attributes(pseudo_element, property_id).value();
         auto const& before_change_value = previous_style.property(property_id, ComputedProperties::WithAnimationsApplied::Yes);
         auto const& after_change_value = new_style.property(property_id, ComputedProperties::WithAnimationsApplied::No);
 
@@ -1389,14 +1397,14 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             // - the element does not have a running transition for the property,
             (!has_running_transition) &&
             // - there is a matching transition-property value, and
-            (matching_transition_properties.has_value()) &&
+            // NOTE: We only iterate over properties for which this is true
             // - the before-change style is different from the after-change style for that property, and the values for the property are transitionable,
-            (!before_change_value.equals(after_change_value) && property_values_are_transitionable(property_id, before_change_value, after_change_value, element, matching_transition_properties->transition_behavior)) &&
+            (!before_change_value.equals(after_change_value) && property_values_are_transitionable(property_id, before_change_value, after_change_value, element, matching_transition_properties.transition_behavior)) &&
             // - the element does not have a completed transition for the property
             //   or the end value of the completed transition is different from the after-change style for the property,
             (!has_completed_transition || !existing_transition->transition_end_value()->equals(after_change_value)) &&
             // - the combined duration is greater than 0s,
-            (combined_duration(matching_transition_properties.value()) > 0)) {
+            (combined_duration(matching_transition_properties) > 0)) {
 
             dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 1.");
 
@@ -1406,13 +1414,13 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             // and start a transition whose:
 
             // AD-HOC: We pass delay to the constructor separately so we can use it to construct the contained KeyframeEffect
-            auto delay = matching_transition_properties->delay;
+            auto delay = matching_transition_properties.delay;
 
             // - start time is the time of the style change event plus the matching transition delay,
             auto start_time = style_change_event_time;
 
             // - end time is the start time plus the matching transition duration,
-            auto end_time = start_time + matching_transition_properties->duration;
+            auto end_time = start_time + matching_transition_properties.duration;
 
             // - start value is the value of the transitioning property in the before-change style,
             auto const& start_value = before_change_value;
@@ -1437,27 +1445,18 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             element.remove_transition(pseudo_element, property_id);
         }
 
-        // 3. If the element has a running transition or completed transition for the property,
-        //    and there is not a matching transition-property value,
-        if (existing_transition && !matching_transition_properties.has_value()) {
-            // then implementations must cancel the running transition or remove the completed transition from the set of completed transitions.
-            dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 3.");
-            if (has_running_transition)
-                existing_transition->cancel();
-            else
-                element.remove_transition(pseudo_element, property_id);
-        }
+        // NOTE: Step 3 is handled in a separate loop below for performance reasons
 
         // 4. If the element has a running transition for the property,
         //    there is a matching transition-property value,
         //    and the end value of the running transition is not equal to the value of the property in the after-change style, then:
-        if (has_running_transition && matching_transition_properties.has_value() && !existing_transition->transition_end_value()->equals(after_change_value)) {
+        if (has_running_transition && !existing_transition->transition_end_value()->equals(after_change_value)) {
             dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 4. existing end value = {}, after change value = {}", existing_transition->transition_end_value()->to_string(SerializationMode::Normal), after_change_value.to_string(SerializationMode::Normal));
             // 1. If the current value of the property in the running transition is equal to the value of the property in the after-change style,
             //    or if these two values are not transitionable,
             //    then implementations must cancel the running transition.
             auto& current_value = new_style.property(property_id, ComputedProperties::WithAnimationsApplied::Yes);
-            if (current_value.equals(after_change_value) || !property_values_are_transitionable(property_id, current_value, after_change_value, element, matching_transition_properties->transition_behavior)) {
+            if (current_value.equals(after_change_value) || !property_values_are_transitionable(property_id, current_value, after_change_value, element, matching_transition_properties.transition_behavior)) {
                 dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 4.1");
                 existing_transition->cancel();
             }
@@ -1465,8 +1464,8 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             // 2. Otherwise, if the combined duration is less than or equal to 0s,
             //    or if the current value of the property in the running transition is not transitionable with the value of the property in the after-change style,
             //    then implementations must cancel the running transition.
-            else if ((combined_duration(matching_transition_properties.value()) <= 0)
-                || !property_values_are_transitionable(property_id, current_value, after_change_value, element, matching_transition_properties->transition_behavior)) {
+            else if ((combined_duration(matching_transition_properties) <= 0)
+                || !property_values_are_transitionable(property_id, current_value, after_change_value, element, matching_transition_properties.transition_behavior)) {
                 dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 4.2");
                 existing_transition->cancel();
             }
@@ -1493,9 +1492,9 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
                 double reversing_shortening_factor = clamp(abs(term_1 + term_2), 0.0, 1.0);
 
                 // AD-HOC: We pass delay to the constructor separately so we can use it to construct the contained KeyframeEffect
-                auto delay = (matching_transition_properties->delay >= 0
-                        ? (matching_transition_properties->delay)
-                        : (reversing_shortening_factor * matching_transition_properties->delay));
+                auto delay = (matching_transition_properties.delay >= 0
+                        ? (matching_transition_properties.delay)
+                        : (reversing_shortening_factor * matching_transition_properties.delay));
 
                 // - start time is the time of the style change event plus:
                 //   1. if the matching transition delay is nonnegative, the matching transition delay, or
@@ -1503,7 +1502,7 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
                 auto start_time = style_change_event_time;
 
                 // - end time is the start time plus the product of the matching transition duration and the new transition’s reversing shortening factor,
-                auto end_time = start_time + (matching_transition_properties->duration * reversing_shortening_factor);
+                auto end_time = start_time + (matching_transition_properties.duration * reversing_shortening_factor);
 
                 // - start value is the current value of the property in the running transition,
                 auto const& start_value = current_value;
@@ -1524,13 +1523,13 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
                 element.remove_transition(pseudo_element, property_id);
 
                 // AD-HOC: We pass delay to the constructor separately so we can use it to construct the contained KeyframeEffect
-                auto delay = matching_transition_properties->delay;
+                auto delay = matching_transition_properties.delay;
 
                 // - start time is the time of the style change event plus the matching transition delay,
                 auto start_time = style_change_event_time;
 
                 // - end time is the start time plus the matching transition duration,
-                auto end_time = start_time + matching_transition_properties->duration;
+                auto end_time = start_time + matching_transition_properties.duration;
 
                 // - start value is the current value of the property in the running transition,
                 auto const& start_value = current_value;
@@ -1547,6 +1546,22 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
                 start_a_transition(delay, start_time, end_time, start_value, end_value, reversing_adjusted_start_value, reversing_shortening_factor);
             }
         }
+    }
+
+    for (auto property_id : element.property_ids_with_existing_transitions(pseudo_element)) {
+        // 3. If the element has a running transition or completed transition for the property, and there is not a
+        //    matching transition-property value, then implementations must cancel the running transition or remove the
+        //    completed transition from the set of completed transitions.
+        if (element.property_transition_attributes(pseudo_element, property_id).has_value())
+            continue;
+
+        auto const& existing_transition = element.property_transition(pseudo_element, property_id);
+
+        dbgln_if(CSS_TRANSITIONS_DEBUG, "Transition step 3.");
+        if (!existing_transition->is_finished())
+            existing_transition->cancel();
+        else
+            element.remove_transition(pseudo_element, property_id);
     }
 }
 
@@ -1672,35 +1687,43 @@ Length::FontMetrics StyleComputer::calculate_root_element_font_metrics(ComputedP
     return font_metrics;
 }
 
-RefPtr<Gfx::FontCascadeList const> StyleComputer::find_matching_font_weight_ascending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, bool inclusive)
+RefPtr<Gfx::FontCascadeList const> StyleComputer::find_matching_font_weight_ascending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, bool inclusive)
 {
     using Fn = AK::Function<bool(MatchingFontCandidate const&)>;
     auto pred = inclusive ? Fn([&](auto const& matching_font_candidate) { return matching_font_candidate.key.weight >= target_weight; })
                           : Fn([&](auto const& matching_font_candidate) { return matching_font_candidate.key.weight > target_weight; });
     auto it = find_if(candidates.begin(), candidates.end(), pred);
     for (; it != candidates.end(); ++it) {
-        if (auto found_font = it->font_with_point_size(font_size_in_pt))
+        if (auto found_font = it->font_with_point_size(font_size_in_pt, variations))
             return found_font;
     }
     return {};
 }
 
-RefPtr<Gfx::FontCascadeList const> StyleComputer::find_matching_font_weight_descending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, bool inclusive)
+RefPtr<Gfx::FontCascadeList const> StyleComputer::find_matching_font_weight_descending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, bool inclusive)
 {
     using Fn = AK::Function<bool(MatchingFontCandidate const&)>;
     auto pred = inclusive ? Fn([&](auto const& matching_font_candidate) { return matching_font_candidate.key.weight <= target_weight; })
                           : Fn([&](auto const& matching_font_candidate) { return matching_font_candidate.key.weight < target_weight; });
     auto it = find_if(candidates.rbegin(), candidates.rend(), pred);
     for (; it != candidates.rend(); ++it) {
-        if (auto found_font = it->font_with_point_size(font_size_in_pt))
+        if (auto found_font = it->font_with_point_size(font_size_in_pt, variations))
             return found_font;
     }
     return {};
 }
 
+RefPtr<Gfx::FontCascadeList const> StyleComputer::font_matching_algorithm(FlyString const& family_name, int weight, int slope, float font_size_in_pt) const
+{
+    FontMatchingAlgorithmCacheKey key { family_name, weight, slope, font_size_in_pt };
+    return m_font_matching_algorithm_cache.ensure(key, [&] {
+        return font_matching_algorithm_impl(family_name, weight, slope, font_size_in_pt);
+    });
+}
+
 // Partial implementation of the font-matching algorithm: https://www.w3.org/TR/css-fonts-4/#font-matching-algorithm
 // FIXME: This should be replaced by the full CSS font selection algorithm.
-RefPtr<Gfx::FontCascadeList const> StyleComputer::font_matching_algorithm(FlyString const& family_name, int weight, int slope, float font_size_in_pt) const
+RefPtr<Gfx::FontCascadeList const> StyleComputer::font_matching_algorithm_impl(FlyString const& family_name, int weight, int slope, float font_size_in_pt) const
 {
     // If a font family match occurs, the user agent assembles the set of font faces in that family and then
     // narrows the set to a single face using other font properties in the order given below.
@@ -1736,34 +1759,38 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::font_matching_algorithm(FlyStr
     // If the desired weight is inclusively between 400 and 500, weights greater than or equal to the target weight
     // are checked in ascending order until 500 is hit and checked, followed by weights less than the target weight
     // in descending order, followed by weights greater than 500, until a match is found.
+
+    Gfx::FontVariationSettings variations;
+    variations.set_weight(weight);
+
     if (weight >= 400 && weight <= 500) {
         auto it = find_if(matching_family_fonts.begin(), matching_family_fonts.end(),
             [&](auto const& matching_font_candidate) { return matching_font_candidate.key.weight >= weight; });
         for (; it != matching_family_fonts.end() && it->key.weight <= 500; ++it) {
-            if (auto found_font = it->font_with_point_size(font_size_in_pt))
+            if (auto found_font = it->font_with_point_size(font_size_in_pt, variations))
                 return found_font;
         }
-        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, false))
+        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, variations, false))
             return found_font;
         for (; it != matching_family_fonts.end(); ++it) {
-            if (auto found_font = it->font_with_point_size(font_size_in_pt))
+            if (auto found_font = it->font_with_point_size(font_size_in_pt, variations))
                 return found_font;
         }
     }
     // If the desired weight is less than 400, weights less than or equal to the desired weight are checked in descending order
     // followed by weights above the desired weight in ascending order until a match is found.
     if (weight < 400) {
-        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, true))
+        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, variations, true))
             return found_font;
-        if (auto found_font = find_matching_font_weight_ascending(matching_family_fonts, weight, font_size_in_pt, false))
+        if (auto found_font = find_matching_font_weight_ascending(matching_family_fonts, weight, font_size_in_pt, variations, false))
             return found_font;
     }
     // If the desired weight is greater than 500, weights greater than or equal to the desired weight are checked in ascending order
     // followed by weights below the desired weight in descending order until a match is found.
     if (weight > 500) {
-        if (auto found_font = find_matching_font_weight_ascending(matching_family_fonts, weight, font_size_in_pt, true))
+        if (auto found_font = find_matching_font_weight_ascending(matching_family_fonts, weight, font_size_in_pt, variations, true))
             return found_font;
-        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, false))
+        if (auto found_font = find_matching_font_weight_descending(matching_family_fonts, weight, font_size_in_pt, variations, false))
             return found_font;
     }
     return {};
@@ -1825,7 +1852,7 @@ CSSPixels StyleComputer::relative_size_mapping(RelativeSize relative_size, CSSPi
     VERIFY_NOT_REACHED();
 }
 
-RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width) const
+RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width, HashMap<FlyString, NumberOrCalculated> const& font_variation_settings, Length::ResolutionContext const& length_resolution_context) const
 {
     // FIXME: We round to int here as that is what is expected by our font infrastructure below
     auto width = round_to<int>(font_width.value());
@@ -1846,10 +1873,32 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(
         auto result = Gfx::FontCascadeList::create();
         if (auto it = m_loaded_fonts.find(key); it != m_loaded_fonts.end()) {
             auto const& loaders = it->value;
+
+            Gfx::FontVariationSettings variation;
+            variation.set_weight(font_weight);
+
+            CalculationResolutionContext context {
+                .length_resolution_context = length_resolution_context,
+            };
+
+            for (auto const& [tag_string, value] : font_variation_settings) {
+                auto string_view = tag_string.bytes_as_string_view();
+                if (string_view.length() != 4)
+                    continue;
+                auto tag = Gfx::FourCC(string_view.characters_without_null_termination());
+
+                auto resolved_value = value.resolved(context);
+                if (!resolved_value.has_value())
+                    continue;
+
+                variation.axes.set(tag, resolved_value.release_value());
+            }
+
             for (auto const& loader : loaders) {
-                if (auto found_font = loader->font_with_point_size(font_size_in_pt))
+                if (auto found_font = loader->font_with_point_size(font_size_in_pt, variation))
                     result->add(*found_font, loader->unicode_ranges());
             }
+
             return result;
         }
 
@@ -1931,8 +1980,11 @@ RefPtr<Gfx::FontCascadeList const> StyleComputer::compute_font_for_style_values(
         font_list->add(*default_font);
     }
 
-    if (auto emoji_font = Platform::FontPlugin::the().default_emoji_font(font_size_in_pt); emoji_font) {
-        font_list->add(*emoji_font);
+    // Add emoji and symbol fonts
+    for (auto font_name : Platform::FontPlugin::the().symbol_font_names()) {
+        if (auto other_font_list = find_font(font_name)) {
+            font_list->extend(*other_font_list);
+        }
     }
 
     // The default font is already included in the font list, but we explicitly set it
@@ -1983,9 +2035,15 @@ void StyleComputer::compute_font(ComputedProperties& style, Optional<DOM::Abstra
         PropertyID::FontStyle,
         compute_font_style(font_style_specified_value, font_computation_context));
 
+    auto const& font_variation_settings_value = style.property(PropertyID::FontVariationSettings, ComputedProperties::WithAnimationsApplied::No);
+
+    style.set_property_without_modifying_flags(
+        PropertyID::FontVariationSettings,
+        compute_font_variation_settings(font_variation_settings_value, font_computation_context));
+
     auto const& font_family = style.property(CSS::PropertyID::FontFamily);
 
-    auto font_list = compute_font_for_style_values(font_family, style.font_size(), style.font_slope(), style.font_weight(), style.font_width());
+    auto font_list = compute_font_for_style_values(font_family, style.font_size(), style.font_slope(), style.font_weight(), style.font_width(), style.font_variation_settings().value_or({}), font_computation_context.length_resolution_context);
     VERIFY(font_list);
     VERIFY(!font_list->is_empty());
 
@@ -2088,8 +2146,9 @@ void StyleComputer::compute_property_values(ComputedProperties& style, Optional<
         return style.property(property_id);
     };
 
+    auto device_pixels_per_css_pixel = m_document->page().client().device_pixels_per_css_pixel();
     style.for_each_property([&](PropertyID property_id, auto& specified_value) {
-        auto const& computed_value = compute_value_of_property(property_id, specified_value, get_property_specified_value, computation_context, m_document->page().client().device_pixels_per_css_pixel());
+        auto const& computed_value = compute_value_of_property(property_id, specified_value, get_property_specified_value, computation_context, device_pixels_per_css_pixel);
 
         style.set_property_without_modifying_flags(property_id, computed_value);
     });
@@ -2350,6 +2409,7 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
             for (auto const& property : inline_style->properties())
                 style->set_property(property.property_id, property.value);
         }
+        abstract_element.element().adjust_computed_style(style);
         return style;
     }
 
@@ -2571,17 +2631,6 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
     // 5. Add or modify CSS-defined animations
     process_animation_definitions(computed_style, abstract_element);
 
-    // FIXME: Support multiple entries for `animation` properties
-    // Animation declarations [css-animations-2]
-    auto animation_name = [&]() -> Optional<String> {
-        auto const& animation_name = computed_style->property(PropertyID::AnimationName);
-        if (animation_name.is_keyword() && animation_name.to_keyword() == Keyword::None)
-            return OptionalNone {};
-        if (animation_name.is_string())
-            return animation_name.as_string().string_value().to_string();
-        return animation_name.to_string(SerializationMode::Normal);
-    }();
-
     auto animations = abstract_element.element().get_animations_internal(Animations::GetAnimationsOptions { .subtree = false });
     if (animations.is_exception()) {
         dbgln("Error getting animations for element {}", abstract_element.debug_description());
@@ -2603,7 +2652,8 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
     compute_text_align(computed_style, abstract_element);
 
     // 8. Let the element adjust computed style
-    abstract_element.element().adjust_computed_style(computed_style);
+    if (!abstract_element.pseudo_element().has_value())
+        abstract_element.element().adjust_computed_style(computed_style);
 
     // 9. Transition declarations [css-transitions-1]
     // Theoretically this should be part of the cascade, but it works with computed values, which we don't have until now.
@@ -2780,6 +2830,9 @@ void StyleComputer::make_rule_cache_for_cascade_origin(CascadeOrigin cascade_ori
                 auto key = static_cast<u64>(keyframe.key().value() * Animations::KeyframeEffect::AnimationKeyFrameKeyScaleFactor);
                 auto const& keyframe_style = *keyframe.style();
                 for (auto const& it : keyframe_style.properties()) {
+                    if (!is_animatable_property(it.property_id))
+                        continue;
+
                     // Unresolved properties will be resolved in collect_animation_into()
                     for_each_property_expanding_shorthands(it.property_id, it.value, [&](PropertyID shorthand_id, StyleValue const& shorthand_value) {
                         animated_properties.set(shorthand_id);
@@ -2923,6 +2976,7 @@ void StyleComputer::invalidate_rule_cache()
 
 void StyleComputer::did_load_font(FlyString const&)
 {
+    m_font_matching_algorithm_cache = {};
     document().invalidate_style(DOM::StyleInvalidationReason::CSSFontLoaded);
 }
 
@@ -3042,7 +3096,6 @@ void StyleComputer::compute_custom_properties(ComputedProperties&, DOM::Abstract
                 .important = style_property.important,
                 .property_id = style_property.property_id,
                 .value = compute_value_of_custom_property(abstract_element, name),
-                .custom_name = style_property.custom_name,
             });
     }
     abstract_element.set_custom_properties(move(resolved_custom_properties));
@@ -3051,7 +3104,7 @@ void StyleComputer::compute_custom_properties(ComputedProperties&, DOM::Abstract
 static CSSPixels line_width_keyword_to_css_pixels(Keyword keyword)
 {
     // https://drafts.csswg.org/css-backgrounds/#typedef-line-width
-    //	The thin, medium, and thick keywords are equivalent to 1px, 3px, and 5px, respectively.
+    // The thin, medium, and thick keywords are equivalent to 1px, 3px, and 5px, respectively.
     switch (keyword) {
     case Keyword::Thin:
         return CSSPixels { 1 };
@@ -3128,7 +3181,7 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_property(
     case PropertyID::CornerTopRightShape:
         return compute_corner_shape(absolutized_value);
     case PropertyID::FontVariationSettings:
-        return compute_font_variation_settings(absolutized_value);
+        return compute_font_variation_settings(absolutized_value, computation_context);
     case PropertyID::LetterSpacing:
     case PropertyID::WordSpacing:
         if (absolutized_value->to_keyword() == Keyword::Normal)
@@ -3175,8 +3228,10 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_animation_name(NonnullRef
     });
 }
 
-NonnullRefPtr<StyleValue const> StyleComputer::compute_font_variation_settings(NonnullRefPtr<StyleValue const> const& absolutized_value)
+NonnullRefPtr<StyleValue const> StyleComputer::compute_font_variation_settings(NonnullRefPtr<StyleValue const> const& specified_value, ComputationContext const& computation_context)
 {
+    auto const& absolutized_value = specified_value->absolutized(computation_context);
+
     if (absolutized_value->is_keyword())
         return absolutized_value;
 
@@ -3692,7 +3747,7 @@ static void for_each_element_hash(DOM::Element const& element, auto callback)
     for (auto const& class_ : element.class_names())
         callback(class_.hash());
     element.for_each_attribute([&](auto& attribute) {
-        callback(attribute.lowercase_name().hash());
+        callback(attribute.name().ascii_case_insensitive_hash());
     });
 }
 
