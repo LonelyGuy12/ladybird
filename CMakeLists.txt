@@ -79,6 +79,12 @@ find_package(OpenSSL REQUIRED)
 
 include(CTest) # for BUILD_TESTING option, default ON
 
+option(ENABLE_BENCHMARKS "Build CodSpeed/Google Benchmark targets" OFF)
+
+if (ENABLE_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
 # Python is already found above (before EnableLagom.cmake)
 
 if (ENABLE_GUI_TARGETS)
