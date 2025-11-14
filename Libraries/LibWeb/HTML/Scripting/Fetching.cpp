@@ -530,7 +530,7 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
         on_complete->function()(nullptr);
     };
 
-    TRY(Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input))));
+    Fetch::Fetching::fetch(element->realm(), request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
     return {};
 }
 
