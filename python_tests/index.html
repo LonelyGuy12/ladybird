@@ -225,26 +225,44 @@
         <a href="test_python_integration.py" class="btn">🐍 Python Test Script</a>
     </div>
 
+    <!-- Hidden storage for quick test -->
+    <div id="python-quick-test" style="display: none;" data-complete="false"></div>
+    
     <!-- Quick inline test to verify Python is working -->
     <script type="python">
 # Quick verification that Python is working on the index page
-# Store results on window object for JavaScript to verify
-window.python_quick_test = {}
-
-# Test 1: Simple arithmetic
+# Test 1: Simple arithmetic - 2+2=4
 result = 2 + 2
-window.python_quick_test['arithmetic'] = (result == 4)
-
-# Test 2: String operations
-text = "Hello"
-window.python_quick_test['string_length'] = (len(text) == 5)
-
-# Test 3: List operations
-numbers = [1, 2, 3]
-window.python_quick_test['list_sum'] = (sum(numbers) == 6)
-
-# Mark as complete
-window.python_quick_test['complete'] = True
+storage = document.find("#python-quick-test")
+if storage:
+    if result == 4:
+        storage.set_attribute("data-arithmetic", "PASS")
+        print("✓ Arithmetic: 2 + 2 = 4")
+    else:
+        storage.set_attribute("data-arithmetic", "FAIL")
+        print(f"✗ Arithmetic: Expected 4, got {result}")
+    
+    # Test 2: String operations
+    text = "Hello"
+    if len(text) == 5:
+        storage.set_attribute("data-string", "PASS")
+        print("✓ String operations working")
+    else:
+        storage.set_attribute("data-string", "FAIL")
+        print(f"✗ String: Expected length 5, got {len(text)}")
+    
+    # Test 3: List operations
+    numbers = [1, 2, 3]
+    if sum(numbers) == 6:
+        storage.set_attribute("data-list", "PASS")
+        print("✓ List operations working")
+    else:
+        storage.set_attribute("data-list", "FAIL")
+        print(f"✗ List: Expected sum 6, got {sum(numbers)}")
+    
+    # Mark as complete
+    storage.set_attribute("data-complete", "true")
+    print("Quick verification complete!")
     </script>
     
     <!-- Display verification results -->
@@ -255,14 +273,24 @@ window.python_quick_test['complete'] = True
     
     <script>
         function checkQuickTest() {
-            const statusDiv = document.getElementById('quick-test-status');
-            if (!window.python_quick_test || !window.python_quick_test.complete) {
+            const storage = document.getElementById('python-quick-test');
+            if (!storage) {
                 setTimeout(checkQuickTest, 100);
                 return;
             }
             
-            const tests = window.python_quick_test;
-            const allPassed = tests.arithmetic && tests.string_length && tests.list_sum;
+            const isComplete = storage.getAttribute('data-complete') === 'true';
+            if (!isComplete) {
+                setTimeout(checkQuickTest, 200);
+                return;
+            }
+            
+            const arithmetic = storage.getAttribute('data-arithmetic');
+            const string = storage.getAttribute('data-string');
+            const list = storage.getAttribute('data-list');
+            
+            const statusDiv = document.getElementById('quick-test-status');
+            const allPassed = arithmetic === 'PASS' && string === 'PASS' && list === 'PASS';
             
             if (allPassed) {
                 statusDiv.innerHTML = `
@@ -281,9 +309,9 @@ window.python_quick_test['complete'] = True
                         ✗ Python Integration Issues Detected
                     </div>
                     <div style="font-size: 0.9em; opacity: 0.9;">
-                        <div>Arithmetic: ${tests.arithmetic ? '✓' : '✗'}</div>
-                        <div>String: ${tests.string_length ? '✓' : '✗'}</div>
-                        <div>List: ${tests.list_sum ? '✓' : '✗'}</div>
+                        <div>Arithmetic: ${arithmetic === 'PASS' ? '✓' : '✗'}</div>
+                        <div>String: ${string === 'PASS' ? '✓' : '✗'}</div>
+                        <div>List: ${list === 'PASS' ? '✓' : '✗'}</div>
                     </div>
                 `;
             }
