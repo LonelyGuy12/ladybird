@@ -109,7 +109,7 @@ Vector<String> default_safe_builtins()
 // Restricted open function that raises PermissionError when called
 // This allows Python's internal code to check for 'open' without KeyError,
 // but prevents user code from actually using it
-static PyObject* restricted_open_func(PyObject* self, PyObject* args)
+static PyObject* restricted_open_func([[maybe_unused]] PyObject* self, [[maybe_unused]] PyObject* args)
 {
     PyErr_SetString(PyExc_PermissionError, "open() is not allowed in browser environment for security reasons");
     return nullptr;
