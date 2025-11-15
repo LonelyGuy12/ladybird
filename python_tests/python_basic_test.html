@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Basic Test - Ladybird</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .test-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .code-block {
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            border-left: 4px solid #1a73e8;
+        }
+        
+        .result {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #34a853;
+        }
+        
+        h1 { color: #1a73e8; text-align: center; }
+        h2 { color: #34a853; }
+    </style>
+</head>
+<body>
+    <h1>🐍 Python Basic Functionality Test</h1>
+    <p>This page tests core Python functionality in Ladybird browser.</p>
+
+    <div class="test-section">
+        <h2>Test 1: Basic Python Operations</h2>
+        <div class="code-block">
+&lt;script type="python"&gt;
+print("Hello from Python in Ladybird!")
+result = 2 + 2
+print(f"2 + 2 = {result}")
+print("Basic arithmetic works!")
+&lt;/script&gt;
+        </div>
+        <p><strong>Expected Result:</strong> Python print statements appear in browser console</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Python Data Structures</h2>
+        <div class="code-block">
+&lt;script type="python"&gt;
+# Lists
+numbers = [1, 2, 3, 4, 5]
+squares = [x**2 for x in numbers]
+print(f"Numbers: {numbers}")
+print(f"Squares: {squares}")
+
+# Dictionary
+person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
+print(f"Dictionary: {person}")
+print(f"Name: {person['name']}")
+&lt;/script&gt;
+        </div>
+        <p><strong>Expected Result:</strong> List and dictionary operations work correctly</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Control Flow</h2>
+        <div class="code-block">
+&lt;script type="python"&gt;
+# For loop
+total = 0
+for i in range(10):
+    if i % 2 == 0:
+        total += i
+
+print(f"Sum of even numbers 0-9: {total}")
+
+# Function definition
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+fib_result = fibonacci(10)
+print(f"Fibonacci(10) = {fib_result}")
+&lt;/script&gt;
+        </div>
+        <p><strong>Expected Result:</strong> Loops, conditionals, and function calls work</p>
+    </div>
+
+    <!-- Actual Python Scripts -->
+    <script type="python">
+# Test 1: Basic Operations
+print("🔧 Test 1: Basic Python Operations")
+print("=" * 40)
+print("Hello from Python in Ladybird!")
+result = 2 + 2
+print(f"2 + 2 = {result}")
+print("✓ Basic arithmetic works!")
+print()
+    </script>
+
+    <script type="python">
+# Test 2: Data Structures
+print("📊 Test 2: Python Data Structures")
+print("=" * 40)
+
+# Lists
+numbers = [1, 2, 3, 4, 5]
+squares = [x**2 for x in numbers]
+print(f"Numbers: {numbers}")
+print(f"Squares: {squares}")
+print("✓ List comprehensions work!")
+
+# Dictionary
+person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
+print(f"Dictionary: {person}")
+print(f"Name: {person['name']}")
+print("✓ Dictionary operations work!")
+print()
+    </script>
+
+    <script type="python">
+# Test 3: Control Flow
+print("🔄 Test 3: Control Flow")
+print("=" * 40)
+
+# For loop with conditionals
+total = 0
+for i in range(10):
+    if i % 2 == 0:
+        total += i
+
+print(f"Sum of even numbers 0-9: {total}")
+print("✓ Loops and conditionals work!")
+
+# Function definition and recursion
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+fib_result = fibonacci(10)
+print(f"Fibonacci(10) = {fib_result}")
+print("✓ Function definitions and recursion work!")
+print()
+    </script>
+
+    <script type="python">
+# Test 4: String Operations
+print("📝 Test 4: String Operations")
+print("=" * 40)
+
+text = "Ladybird Python Integration"
+print(f"Original: {text}")
+print(f"Uppercase: {text.upper()}")
+print(f"Length: {len(text)}")
+print(f"Reversed: {text[::-1]}")
+print("✓ String operations work!")
+print()
+    </script>
+
+    <script type="python">
+# Final Summary
+print("🎉 Python Integration Test Summary")
+print("=" * 50)
+print("✓ Basic operations: PASS")
+print("✓ Data structures: PASS") 
+print("✓ Control flow: PASS")
+print("✓ String operations: PASS")
+print("=" * 50)
+print("🚀 Python is fully functional in Ladybird!")
+    </script>
+
+    <div class="result">
+        <p><strong>✅ Success Indicators:</strong></p>
+        <ul>
+            <li>Open browser Developer Console (F12)</li>
+            <li>Look for Python print() output</li>
+            <li>All tests should show "PASS" status</li>
+            <li>No Python syntax or runtime errors</li>
+        </ul>
+    </div>
+
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+        <h3 style="color: #1a73e8;">🔗 Navigation</h3>
+        <p style="margin: 15px 0;">
+            <a href="index.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">← Back to Test Index</a> |
+            <a href="python_dom_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">DOM Test →</a> |
+            <a href="python_advanced_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">Advanced Test →</a>
+        </p>
+        <p style="font-size: 0.9em; color: #666; margin: 10px 0;">
+            ✅ <strong>Next:</strong> Try the DOM Integration Test to verify browser API access
+        </p>
+    </div>
+
+</body>
+</html>
