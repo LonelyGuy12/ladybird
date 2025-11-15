@@ -7,7 +7,7 @@
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
             background: #f8f9fa;
@@ -21,192 +21,361 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
-        .code-block {
-            background: #f1f3f4;
-            padding: 15px;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 14px;
+        .test-result {
             margin: 10px 0;
-            border-left: 4px solid #1a73e8;
+            padding: 12px;
+            border-radius: 6px;
+            font-weight: 500;
         }
         
-        .result {
-            background: #e8f5e8;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
-            border-left: 4px solid #34a853;
+        .test-pass {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
         }
         
-        h1 { color: #1a73e8; text-align: center; }
-        h2 { color: #34a853; }
+        .test-fail {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+        
+        .test-pending {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+        
+        h1 { 
+            color: #1a73e8; 
+            text-align: center; 
+            margin-bottom: 10px;
+        }
+        
+        h2 { 
+            color: #34a853; 
+            margin-top: 0;
+        }
+        
+        .summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .summary h2 {
+            color: white;
+            margin: 0 0 15px 0;
+        }
+        
+        .summary-stats {
+            font-size: 1.5em;
+            margin: 15px 0;
+        }
     </style>
 </head>
 <body>
     <h1>🐍 Python Basic Functionality Test</h1>
-    <p>This page tests core Python functionality in Ladybird browser.</p>
+    <p style="text-align: center; color: #666;">Self-verifying tests - results appear below automatically</p>
 
-    <div class="test-section">
-        <h2>Test 1: Basic Python Operations</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-print("Hello from Python in Ladybird!")
+    <div id="test-results"></div>
+
+    <div class="summary" id="summary">
+        <h2>Test Summary</h2>
+        <div class="summary-stats" id="summary-stats">Running tests...</div>
+    </div>
+
+    <!-- Python Scripts - Tests run and store results on window object -->
+    <script type="python">
+# Initialize test results storage
+window.python_test_results = {}
+window.python_test_count = 0
+window.python_test_passed = 0
+window.python_test_failed = 0
+
+def test(name, expected, actual):
+    """Helper function to run a test and store result"""
+    window.python_test_count += 1
+    passed = (expected == actual)
+    window.python_test_results[name] = {
+        'passed': passed,
+        'expected': expected,
+        'actual': actual
+    }
+    if passed:
+        window.python_test_passed += 1
+    else:
+        window.python_test_failed += 1
+    return passed
+
+# Test 1: Basic Arithmetic
 result = 2 + 2
-print(f"2 + 2 = {result}")
-print("Basic arithmetic works!")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> Python print statements appear in browser console</p>
-    </div>
+test("test1_arithmetic", 4, result)
 
-    <div class="test-section">
-        <h2>Test 2: Python Data Structures</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-# Lists
+result2 = 10 * 5
+test("test1_multiplication", 50, result2)
+
+result3 = 100 / 4
+test("test1_division", 25.0, result3)
+
+result4 = 15 - 7
+test("test1_subtraction", 8, result4)
+    </script>
+
+    <script type="python">
+# Test 2: Data Structures - Lists
 numbers = [1, 2, 3, 4, 5]
+test("test2_list_length", 5, len(numbers))
+
 squares = [x**2 for x in numbers]
-print(f"Numbers: {numbers}")
-print(f"Squares: {squares}")
+expected_squares = [1, 4, 9, 16, 25]
+test("test2_list_comprehension", expected_squares, squares)
 
-# Dictionary
+# Test 2: Data Structures - Dictionary
 person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
-print(f"Dictionary: {person}")
-print(f"Name: {person['name']}")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> List and dictionary operations work correctly</p>
-    </div>
+test("test2_dict_length", 3, len(person))
+test("test2_dict_access", "Python", person.get("name", None))
 
-    <div class="test-section">
-        <h2>Test 3: Control Flow</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-# For loop
+# Test 2: Data Structures - Tuple
+coordinates = (10, 20)
+test("test2_tuple_length", 2, len(coordinates))
+test("test2_tuple_access", 10, coordinates[0])
+    </script>
+
+    <script type="python">
+# Test 3: Control Flow - Loops
 total = 0
 for i in range(10):
     if i % 2 == 0:
         total += i
+# Sum of even numbers 0-9: 0+2+4+6+8 = 20
+test("test3_loop_sum", 20, total)
 
-print(f"Sum of even numbers 0-9: {total}")
+# Test 3: Control Flow - Conditionals
+x = 15
+if x > 10:
+    result = "greater"
+else:
+    result = "less"
+test("test3_conditional", "greater", result)
 
-# Function definition
-def fibonacci(n):
+# Test 3: Control Flow - While loop
+counter = 0
+while counter < 5:
+    counter += 1
+test("test3_while_loop", 5, counter)
+    </script>
+
+    <script type="python">
+# Test 4: Functions
+def add(a, b):
+    return a + b
+
+test("test4_function_call", 7, add(3, 4))
+
+def multiply(x, y):
+    return x * y
+
+test("test4_function_multiply", 12, multiply(3, 4))
+
+# Test 4: Recursion
+def factorial(n):
     if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
+        return 1
+    return n * factorial(n - 1)
 
-fib_result = fibonacci(10)
-print(f"Fibonacci(10) = {fib_result}")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> Loops, conditionals, and function calls work</p>
-    </div>
-
-    <!-- Actual Python Scripts -->
-    <script type="python">
-# Test 1: Basic Operations
-print("🔧 Test 1: Basic Python Operations")
-print("=" * 40)
-print("Hello from Python in Ladybird!")
-result = 2 + 2
-print(f"2 + 2 = {result}")
-print("✓ Basic arithmetic works!")
-print()
+test("test4_recursion", 120, factorial(5))  # 5! = 120
     </script>
 
     <script type="python">
-# Test 2: Data Structures
-print("📊 Test 2: Python Data Structures")
-print("=" * 40)
-
-# Lists
-numbers = [1, 2, 3, 4, 5]
-squares = [x**2 for x in numbers]
-print(f"Numbers: {numbers}")
-print(f"Squares: {squares}")
-print("✓ List comprehensions work!")
-
-# Dictionary
-person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
-print(f"Dictionary: {person}")
-print(f"Name: {person['name']}")
-print("✓ Dictionary operations work!")
-print()
-    </script>
-
-    <script type="python">
-# Test 3: Control Flow
-print("🔄 Test 3: Control Flow")
-print("=" * 40)
-
-# For loop with conditionals
-total = 0
-for i in range(10):
-    if i % 2 == 0:
-        total += i
-
-print(f"Sum of even numbers 0-9: {total}")
-print("✓ Loops and conditionals work!")
-
-# Function definition and recursion
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
-
-fib_result = fibonacci(10)
-print(f"Fibonacci(10) = {fib_result}")
-print("✓ Function definitions and recursion work!")
-print()
-    </script>
-
-    <script type="python">
-# Test 4: String Operations
-print("📝 Test 4: String Operations")
-print("=" * 40)
-
+# Test 5: String Operations
 text = "Ladybird Python Integration"
-print(f"Original: {text}")
-print(f"Uppercase: {text.upper()}")
-print(f"Length: {len(text)}")
-print(f"Reversed: {text[::-1]}")
-print("✓ String operations work!")
-print()
+test("test5_string_length", 29, len(text))
+test("test5_string_upper", "LADYBIRD PYTHON INTEGRATION", text.upper())
+test("test5_string_lower", "ladybird python integration", text.lower())
+
+# String slicing
+test("test5_string_slice", "Ladybird", text[:9])
+test("test5_string_reverse", text[::-1][:5], "noita")  # First 5 chars of reversed
     </script>
 
     <script type="python">
-# Final Summary
-print("🎉 Python Integration Test Summary")
-print("=" * 50)
-print("✓ Basic operations: PASS")
-print("✓ Data structures: PASS") 
-print("✓ Control flow: PASS")
-print("✓ String operations: PASS")
-print("=" * 50)
-print("🚀 Python is fully functional in Ladybird!")
+# Test 6: List Operations
+my_list = [1, 2, 3]
+my_list.append(4)
+test("test6_list_append", [1, 2, 3, 4], my_list)
+
+my_list.insert(0, 0)
+test("test6_list_insert", [0, 1, 2, 3, 4], my_list)
+
+test("test6_list_pop", 4, my_list.pop())
+test("test6_list_after_pop", [0, 1, 2, 3], my_list)
     </script>
 
-    <div class="result">
-        <p><strong>✅ Success Indicators:</strong></p>
-        <ul>
-            <li>Open browser Developer Console (F12)</li>
-            <li>Look for Python print() output</li>
-            <li>All tests should show "PASS" status</li>
-            <li>No Python syntax or runtime errors</li>
-        </ul>
-    </div>
+    <script type="python">
+# Test 7: Dictionary Operations
+my_dict = {"a": 1, "b": 2}
+my_dict["c"] = 3
+test("test7_dict_set", 3, len(my_dict))
+test("test7_dict_get", 2, my_dict.get("b", None))
 
-    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+keys = list(my_dict.keys())
+test("test7_dict_keys", ["a", "b", "c"], sorted(keys))
+    </script>
+
+    <script type="python">
+# Test 8: Complex Operations
+# List of dictionaries
+data = [
+    {"name": "Alice", "age": 30},
+    {"name": "Bob", "age": 25},
+    {"name": "Charlie", "age": 35}
+]
+
+ages = [person["age"] for person in data]
+test("test8_list_comprehension_dict", [30, 25, 35], ages)
+
+total_age = sum(ages)
+test("test8_sum_function", 90, total_age)
+
+average_age = total_age / len(ages)
+test("test8_average", 30.0, average_age)
+    </script>
+
+    <script type="python">
+# Test 9: Error Handling
+try:
+    result = 10 / 2
+    test("test9_division_success", 5.0, result)
+except:
+    test("test9_division_success", 5.0, 0)  # Fail if exception
+
+try:
+    result = 10 / 0
+    test("test9_division_by_zero", False, True)  # Should not reach here
+except ZeroDivisionError:
+    test("test9_division_by_zero", True, True)  # Should catch exception
+except:
+    test("test9_division_by_zero", False, True)  # Wrong exception type
+    </script>
+
+    <script type="python">
+# Mark tests as complete
+window.python_tests_complete = True
+    </script>
+
+    <!-- JavaScript to display results -->
+    <script>
+        function displayTestResults() {
+            const resultsDiv = document.getElementById('test-results');
+            const summaryStats = document.getElementById('summary-stats');
+            
+            // Wait for Python tests to complete
+            if (!window.python_tests_complete) {
+                setTimeout(displayTestResults, 100);
+                return;
+            }
+            
+            const results = window.python_test_results || {};
+            const testCount = window.python_test_count || 0;
+            const passed = window.python_test_passed || 0;
+            const failed = window.python_test_failed || 0;
+            
+            // Display individual test results
+            const testNames = {
+                'test1_arithmetic': 'Test 1.1: Basic Addition (2+2=4)',
+                'test1_multiplication': 'Test 1.2: Multiplication (10*5=50)',
+                'test1_division': 'Test 1.3: Division (100/4=25)',
+                'test1_subtraction': 'Test 1.4: Subtraction (15-7=8)',
+                'test2_list_length': 'Test 2.1: List Length',
+                'test2_list_comprehension': 'Test 2.2: List Comprehension (squares)',
+                'test2_dict_length': 'Test 2.3: Dictionary Length',
+                'test2_dict_access': 'Test 2.4: Dictionary Access',
+                'test2_tuple_length': 'Test 2.5: Tuple Length',
+                'test2_tuple_access': 'Test 2.6: Tuple Access',
+                'test3_loop_sum': 'Test 3.1: For Loop with Conditionals',
+                'test3_conditional': 'Test 3.2: If/Else Statement',
+                'test3_while_loop': 'Test 3.3: While Loop',
+                'test4_function_call': 'Test 4.1: Function Definition & Call',
+                'test4_function_multiply': 'Test 4.2: Function with Parameters',
+                'test4_recursion': 'Test 4.3: Recursive Function (factorial)',
+                'test5_string_length': 'Test 5.1: String Length',
+                'test5_string_upper': 'Test 5.2: String Upper Case',
+                'test5_string_lower': 'Test 5.3: String Lower Case',
+                'test5_string_slice': 'Test 5.4: String Slicing',
+                'test5_string_reverse': 'Test 5.5: String Reversal',
+                'test6_list_append': 'Test 6.1: List Append',
+                'test6_list_insert': 'Test 6.2: List Insert',
+                'test6_list_pop': 'Test 6.3: List Pop',
+                'test6_list_after_pop': 'Test 6.4: List After Pop',
+                'test7_dict_set': 'Test 7.1: Dictionary Set Item',
+                'test7_dict_get': 'Test 7.2: Dictionary Get Item',
+                'test7_dict_keys': 'Test 7.3: Dictionary Keys',
+                'test8_list_comprehension_dict': 'Test 8.1: Complex List Comprehension',
+                'test8_sum_function': 'Test 8.2: Sum Function',
+                'test8_average': 'Test 8.3: Average Calculation',
+                'test9_division_success': 'Test 9.1: Successful Division',
+                'test9_division_by_zero': 'Test 9.2: Exception Handling'
+            };
+            
+            let html = '';
+            for (const [key, result] of Object.entries(results)) {
+                const testName = testNames[key] || key;
+                const status = result.passed ? 'PASS' : 'FAIL';
+                const className = result.passed ? 'test-pass' : 'test-fail';
+                const icon = result.passed ? '✓' : '✗';
+                
+                html += `
+                    <div class="test-section">
+                        <div class="test-result ${className}">
+                            <strong>${icon} ${testName}</strong>
+                            <div style="margin-top: 5px; font-size: 0.9em;">
+                                Expected: ${JSON.stringify(result.expected)} | 
+                                Got: ${JSON.stringify(result.actual)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            resultsDiv.innerHTML = html;
+            
+            // Update summary
+            const passRate = testCount > 0 ? Math.round((passed / testCount) * 100) : 0;
+            summaryStats.innerHTML = `
+                <div>Total: ${testCount} tests</div>
+                <div style="color: #4ade80;">Passed: ${passed}</div>
+                <div style="color: ${failed > 0 ? '#f87171' : '#4ade80'};">Failed: ${failed}</div>
+                <div style="font-size: 1.2em; margin-top: 10px;">Success Rate: ${passRate}%</div>
+            `;
+            
+            // Update summary background based on results
+            const summary = document.getElementById('summary');
+            if (failed === 0) {
+                summary.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+            } else if (passed > failed) {
+                summary.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+            } else {
+                summary.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+            }
+        }
+        
+        // Start checking for results
+        window.addEventListener('load', function() {
+            setTimeout(displayTestResults, 500); // Give Python time to execute
+            setInterval(displayTestResults, 1000); // Keep checking
+        });
+    </script>
+
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.05); border-radius: 8px;">
         <h3 style="color: #1a73e8;">🔗 Navigation</h3>
         <p style="margin: 15px 0;">
             <a href="index.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">← Back to Test Index</a> |
             <a href="python_dom_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">DOM Test →</a> |
             <a href="python_advanced_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">Advanced Test →</a>
-        </p>
-        <p style="font-size: 0.9em; color: #666; margin: 10px 0;">
-            ✅ <strong>Next:</strong> Try the DOM Integration Test to verify browser API access
         </p>
     </div>
 

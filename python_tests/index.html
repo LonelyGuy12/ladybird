@@ -228,12 +228,71 @@
     <!-- Quick inline test to verify Python is working -->
     <script type="python">
 # Quick verification that Python is working on the index page
-print("🎯 Python Integration Index - Quick Verification")
-print("=" * 50)
-print("✓ Python execution is working!")
-print("✓ You can now run the comprehensive test suite")
-print("✓ Click on any test card above to begin")
-print("=" * 50)
+# Store results on window object for JavaScript to verify
+window.python_quick_test = {}
+
+# Test 1: Simple arithmetic
+result = 2 + 2
+window.python_quick_test['arithmetic'] = (result == 4)
+
+# Test 2: String operations
+text = "Hello"
+window.python_quick_test['string_length'] = (len(text) == 5)
+
+# Test 3: List operations
+numbers = [1, 2, 3]
+window.python_quick_test['list_sum'] = (sum(numbers) == 6)
+
+# Mark as complete
+window.python_quick_test['complete'] = True
+    </script>
+    
+    <!-- Display verification results -->
+    <div id="quick-test-results" style="background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; margin: 30px 0; border: 2px solid rgba(255, 255, 255, 0.2);">
+        <h2 style="color: #fbbf24; margin-top: 0;">⚡ Quick Verification</h2>
+        <div id="quick-test-status" style="font-size: 1.1em;">Checking Python integration...</div>
+    </div>
+    
+    <script>
+        function checkQuickTest() {
+            const statusDiv = document.getElementById('quick-test-status');
+            if (!window.python_quick_test || !window.python_quick_test.complete) {
+                setTimeout(checkQuickTest, 100);
+                return;
+            }
+            
+            const tests = window.python_quick_test;
+            const allPassed = tests.arithmetic && tests.string_length && tests.list_sum;
+            
+            if (allPassed) {
+                statusDiv.innerHTML = `
+                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 10px;">
+                        ✓ Python Integration Verified!
+                    </div>
+                    <div style="font-size: 0.9em; opacity: 0.9;">
+                        <div>✓ Arithmetic: 2 + 2 = 4</div>
+                        <div>✓ String operations working</div>
+                        <div>✓ List operations working</div>
+                    </div>
+                `;
+            } else {
+                statusDiv.innerHTML = `
+                    <div style="color: #f87171; font-weight: bold; margin-bottom: 10px;">
+                        ✗ Python Integration Issues Detected
+                    </div>
+                    <div style="font-size: 0.9em; opacity: 0.9;">
+                        <div>Arithmetic: ${tests.arithmetic ? '✓' : '✗'}</div>
+                        <div>String: ${tests.string_length ? '✓' : '✗'}</div>
+                        <div>List: ${tests.list_sum ? '✓' : '✗'}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        window.addEventListener('load', function() {
+            setTimeout(checkQuickTest, 500);
+            setInterval(checkQuickTest, 1000);
+        });
     </script>
 
     <script>
