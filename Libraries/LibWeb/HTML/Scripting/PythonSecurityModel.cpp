@@ -257,8 +257,32 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
     for (auto const& name : safe_names) {
         auto name_bytes = name.to_byte_string();
         PyObject* builtin = PyDict_GetItemString(builtins_module, name_bytes.characters());
-        if (builtin)
+        if (builtin) {
+            Py_INCREF(builtin);
             PyDict_SetItemString(safe_builtins, name_bytes.characters(), builtin);
+        }
+    }
+    
+    // Create a restricted 'open' function that raises an error when called
+    // This allows Python's internal code to check for 'open' without KeyError,
+    // but prevents user code from actually using it
+    static PyObject* restricted_open_func(PyObject* self, PyObject* args)
+    {
+        PyErr_SetString(PyExc_PermissionError, "open() is not allowed in browser environment for security reasons");
+        return nullptr;
+    }
+    
+    static PyMethodDef restricted_open_method = {
+        "open",
+        (PyCFunction)restricted_open_func,
+        METH_VARARGS,
+        "Restricted: open() is not allowed"
+    };
+    
+    PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
+    if (restricted_open) {
+        PyDict_SetItemString(safe_builtins, "open", restricted_open);
+        Py_DECREF(restricted_open);
     }
 
     PyDict_SetItemString(globals, "__builtins__", safe_builtins);
