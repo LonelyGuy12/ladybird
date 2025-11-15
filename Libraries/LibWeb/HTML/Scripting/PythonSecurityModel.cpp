@@ -284,8 +284,20 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
     
     PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
     if (restricted_open) {
+        // Add to the execution context's __builtins__
         PyDict_SetItemString(safe_builtins, "open", restricted_open);
-        Py_DECREF(restricted_open);
+        
+        // Also add to the actual builtins module to prevent KeyError during imports
+        // Python's internal code (e.g., during module imports) may check the actual builtins module
+        // Save the original 'open' if it exists, then replace it with our restricted version
+        PyObject* original_open = PyDict_GetItemString(builtins_module, "open");
+        if (original_open) {
+            Py_INCREF(original_open); // Keep a reference to the original
+        }
+        Py_INCREF(restricted_open); // Need to keep a reference since we're adding it to builtins_module
+        PyDict_SetItemString(builtins_module, "open", restricted_open);
+        
+        Py_DECREF(restricted_open); // Safe to decref, builtins_module now holds a reference
     }
 
     PyDict_SetItemString(globals, "__builtins__", safe_builtins);
