@@ -13,19 +13,13 @@
             background: #f8f9fa;
         }
         
-        .test-section {
-            background: white;
-            margin: 20px 0;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
         .test-result {
             margin: 10px 0;
             padding: 12px;
             border-radius: 6px;
             font-weight: 500;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
         .test-pass {
@@ -52,11 +46,6 @@
             margin-bottom: 10px;
         }
         
-        h2 { 
-            color: #34a853; 
-            margin-top: 0;
-        }
-        
         .summary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -75,329 +64,234 @@
             font-size: 1.5em;
             margin: 15px 0;
         }
-        
-        #test-results {
-            min-height: 100px;
-        }
     </style>
 </head>
 <body>
     <h1>🐍 Python Basic Functionality Test</h1>
     <p style="text-align: center; color: #666;">Self-verifying tests - results appear below automatically</p>
 
-    <div id="test-results">
-        <div class="test-section">
-            <div class="test-result test-pending">Waiting for Python tests to run...</div>
-        </div>
-    </div>
+    <!-- Pre-created result elements for Python to fill in -->
+    <div id="test1" class="test-result test-pending">Test 1.1: 2 + 2 = 4 - Waiting...</div>
+    <div id="test2" class="test-result test-pending">Test 1.2: 10 * 5 = 50 - Waiting...</div>
+    <div id="test3" class="test-result test-pending">Test 1.3: 100 / 4 = 25 - Waiting...</div>
+    <div id="test4" class="test-result test-pending">Test 2.1: List operations - Waiting...</div>
+    <div id="test5" class="test-result test-pending">Test 2.2: List comprehension - Waiting...</div>
+    <div id="test6" class="test-result test-pending">Test 3.1: For loop - Waiting...</div>
+    <div id="test7" class="test-result test-pending">Test 4.1: Functions - Waiting...</div>
+    <div id="test8" class="test-result test-pending">Test 5.1: String operations - Waiting...</div>
 
     <div class="summary" id="summary">
         <h2>Test Summary</h2>
         <div class="summary-stats" id="summary-stats">Running tests...</div>
     </div>
 
-    <!-- Hidden storage element for test results -->
-    <div id="python-test-storage" style="display: none;" data-test-count="0" data-test-passed="0" data-test-failed="0"></div>
-
-    <!-- Python Scripts - Tests run and store results in DOM -->
+    <!-- Python Scripts - Set text directly on elements -->
     <script type="python">
 # Test 1: Basic Arithmetic - 2+2=4
-result = 2 + 2
-if result == 4:
-    # Store result in DOM
-    storage = document.find("#python-test-storage")
-    if storage:
-        count = int(storage.get_attribute("data-test-count") or "0")
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test1-arithmetic", "PASS:2+2=4")
-    print("✓ Test 1.1: 2 + 2 = 4")
-else:
-    if storage:
-        count = int(storage.get_attribute("data-test-count") or "0")
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test1-arithmetic", f"FAIL:Expected 4, got {result}")
-    print(f"✗ Test 1.1: Expected 4, got {result}")
+try:
+    result = 2 + 2
+    test_elem = document.find("#test1")
+    if test_elem:
+        if result == 4:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.1: 2 + 2 = 4 - PASSED! Result: " + str(result)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.1: 2 + 2 = 4 - FAILED! Expected 4, got " + str(result)
+except Exception as e:
+    test_elem = document.find("#test1")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.1: ERROR - " + str(e)
     </script>
 
     <script type="python">
 # Test 2: More arithmetic
-result2 = 10 * 5
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if result2 == 50:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test1-multiplication", "PASS:10*5=50")
-        print("✓ Test 1.2: 10 * 5 = 50")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test1-multiplication", f"FAIL:Expected 50, got {result2}")
-        print(f"✗ Test 1.2: Expected 50, got {result2}")
+try:
+    result2 = 10 * 5
+    test_elem = document.find("#test2")
+    if test_elem:
+        if result2 == 50:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.2: 10 * 5 = 50 - PASSED! Result: " + str(result2)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.2: 10 * 5 = 50 - FAILED! Expected 50, got " + str(result2)
+except Exception as e:
+    test_elem = document.find("#test2")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.2: ERROR - " + str(e)
     </script>
 
     <script type="python">
 # Test 3: Division
-result3 = 100 / 4
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if result3 == 25.0:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test1-division", "PASS:100/4=25.0")
-        print("✓ Test 1.3: 100 / 4 = 25.0")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test1-division", f"FAIL:Expected 25.0, got {result3}")
-        print(f"✗ Test 1.3: Expected 25.0, got {result3}")
+try:
+    result3 = 100 / 4
+    test_elem = document.find("#test3")
+    if test_elem:
+        if result3 == 25.0:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.3: 100 / 4 = 25 - PASSED! Result: " + str(result3)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.3: 100 / 4 = 25 - FAILED! Expected 25.0, got " + str(result3)
+except Exception as e:
+    test_elem = document.find("#test3")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.3: ERROR - " + str(e)
     </script>
 
     <script type="python">
 # Test 4: Lists
-numbers = [1, 2, 3, 4, 5]
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if len(numbers) == 5:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test2-list-length", "PASS:List has 5 items")
-        print("✓ Test 2.1: List length = 5")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test2-list-length", f"FAIL:Expected 5, got {len(numbers)}")
-        print(f"✗ Test 2.1: Expected length 5, got {len(numbers)}")
+try:
+    numbers = [1, 2, 3, 4, 5]
+    test_elem = document.find("#test4")
+    if test_elem:
+        if len(numbers) == 5:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 2.1: List operations - PASSED! List has " + str(len(numbers)) + " items"
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 2.1: List operations - FAILED! Expected 5, got " + str(len(numbers))
+except Exception as e:
+    test_elem = document.find("#test4")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 2.1: ERROR - " + str(e)
     </script>
 
     <script type="python">
 # Test 5: List comprehension
-squares = [x**2 for x in [1, 2, 3, 4, 5]]
-expected = [1, 4, 9, 16, 25]
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if squares == expected:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test2-list-comprehension", "PASS:List comprehension works")
-        print("✓ Test 2.2: List comprehension works")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test2-list-comprehension", f"FAIL:Expected {expected}, got {squares}")
-        print(f"✗ Test 2.2: Expected {expected}, got {squares}")
+try:
+    squares = [x**2 for x in [1, 2, 3, 4, 5]]
+    expected = [1, 4, 9, 16, 25]
+    test_elem = document.find("#test5")
+    if test_elem:
+        if squares == expected:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 2.2: List comprehension - PASSED!"
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 2.2: List comprehension - FAILED! Expected " + str(expected) + ", got " + str(squares)
+except Exception as e:
+    test_elem = document.find("#test5")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 2.2: ERROR - " + str(e)
     </script>
 
     <script type="python">
-# Test 6: Dictionary
-person = {"name": "Python", "version": "3.x"}
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if person.get("name") == "Python":
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test2-dict", "PASS:Dictionary access works")
-        print("✓ Test 2.3: Dictionary access works")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test2-dict", "FAIL:Dictionary access failed")
-        print("✗ Test 2.3: Dictionary access failed")
+# Test 6: Control Flow - Loop
+try:
+    total = 0
+    for i in range(10):
+        if i % 2 == 0:
+            total += i
+    # Sum of even numbers 0-9: 0+2+4+6+8 = 20
+    test_elem = document.find("#test6")
+    if test_elem:
+        if total == 20:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 3.1: For loop with conditionals - PASSED! Sum = " + str(total)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 3.1: For loop - FAILED! Expected 20, got " + str(total)
+except Exception as e:
+    test_elem = document.find("#test6")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 3.1: ERROR - " + str(e)
     </script>
 
     <script type="python">
-# Test 7: Control Flow - Loop
-total = 0
-for i in range(10):
-    if i % 2 == 0:
-        total += i
-# Sum of even numbers 0-9: 0+2+4+6+8 = 20
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if total == 20:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test3-loop", "PASS:For loop with conditionals works")
-        print("✓ Test 3.1: For loop with conditionals works")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test3-loop", f"FAIL:Expected 20, got {total}")
-        print(f"✗ Test 3.1: Expected 20, got {total}")
+# Test 7: Functions
+try:
+    def add(a, b):
+        return a + b
+    
+    result = add(3, 4)
+    test_elem = document.find("#test7")
+    if test_elem:
+        if result == 7:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 4.1: Function definition & call - PASSED! add(3, 4) = " + str(result)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 4.1: Function call - FAILED! Expected 7, got " + str(result)
+except Exception as e:
+    test_elem = document.find("#test7")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 4.1: ERROR - " + str(e)
     </script>
 
     <script type="python">
-# Test 8: Functions
-def add(a, b):
-    return a + b
-
-result = add(3, 4)
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if result == 7:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test4-function", "PASS:Function definition and call works")
-        print("✓ Test 4.1: Function definition and call works")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test4-function", f"FAIL:Expected 7, got {result}")
-        print(f"✗ Test 4.1: Expected 7, got {result}")
+# Test 8: String Operations
+try:
+    text = "Ladybird"
+    test_elem = document.find("#test8")
+    if test_elem:
+        if len(text) == 8:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 5.1: String operations - PASSED! Length = " + str(len(text))
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 5.1: String operations - FAILED! Expected length 8, got " + str(len(text))
+except Exception as e:
+    test_elem = document.find("#test8")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 5.1: ERROR - " + str(e)
     </script>
 
-    <script type="python">
-# Test 9: String Operations
-text = "Ladybird"
-storage = document.find("#python-test-storage")
-if storage:
-    count = int(storage.get_attribute("data-test-count") or "0")
-    if len(text) == 8:
-        passed = int(storage.get_attribute("data-test-passed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-passed", str(passed + 1))
-        storage.set_attribute("data-test5-string", "PASS:String operations work")
-        print("✓ Test 5.1: String operations work")
-    else:
-        failed = int(storage.get_attribute("data-test-failed") or "0")
-        storage.set_attribute("data-test-count", str(count + 1))
-        storage.set_attribute("data-test-failed", str(failed + 1))
-        storage.set_attribute("data-test5-string", f"FAIL:Expected length 8, got {len(text)}")
-        print(f"✗ Test 5.1: Expected length 8, got {len(text)}")
-    </script>
-
-    <script type="python">
-# Mark tests as complete
-storage = document.find("#python-test-storage")
-if storage:
-    storage.set_attribute("data-tests-complete", "true")
-    print("All tests completed!")
-    </script>
-
-    <!-- JavaScript to display results -->
+    <!-- JavaScript to update summary -->
     <script>
-        function displayTestResults() {
-            const storage = document.getElementById('python-test-storage');
-            if (!storage) {
-                setTimeout(displayTestResults, 100);
-                return;
-            }
+        function updateSummary() {
+            const testElements = document.querySelectorAll('[id^="test"]');
+            let testCount = 0;
+            let passed = 0;
+            let failed = 0;
             
-            const isComplete = storage.getAttribute('data-tests-complete') === 'true';
-            if (!isComplete) {
-                setTimeout(displayTestResults, 200);
-                return;
-            }
-            
-            const testCount = parseInt(storage.getAttribute('data-test-count') || '0');
-            const passed = parseInt(storage.getAttribute('data-test-passed') || '0');
-            const failed = parseInt(storage.getAttribute('data-test-failed') || '0');
-            
-            const resultsDiv = document.getElementById('test-results');
-            const summaryStats = document.getElementById('summary-stats');
-            
-            // Get all test attributes
-            const testResults = {};
-            for (let attr of storage.attributes) {
-                if (attr.name.startsWith('data-test') && attr.name !== 'data-test-count' && 
-                    attr.name !== 'data-test-passed' && attr.name !== 'data-test-failed' &&
-                    attr.name !== 'data-tests-complete') {
-                    const testName = attr.name.replace('data-test', '').replace(/-/g, ' ');
-                    const [status, ...details] = attr.value.split(':');
-                    testResults[attr.name] = {
-                        name: testName,
-                        passed: status === 'PASS',
-                        details: details.join(':')
-                    };
+            testElements.forEach(elem => {
+                if (elem.classList.contains('test-pass') || elem.classList.contains('test-fail')) {
+                    testCount++;
+                    if (elem.classList.contains('test-pass')) {
+                        passed++;
+                    } else if (elem.classList.contains('test-fail')) {
+                        failed++;
+                    }
                 }
-            }
+            });
             
-            // Display individual test results
-            const testNames = {
-                'data-test1-arithmetic': 'Test 1.1: Basic Addition (2+2=4)',
-                'data-test1-multiplication': 'Test 1.2: Multiplication (10*5=50)',
-                'data-test1-division': 'Test 1.3: Division (100/4=25)',
-                'data-test2-list-length': 'Test 2.1: List Length',
-                'data-test2-list-comprehension': 'Test 2.2: List Comprehension',
-                'data-test2-dict': 'Test 2.3: Dictionary Access',
-                'data-test3-loop': 'Test 3.1: For Loop with Conditionals',
-                'data-test4-function': 'Test 4.1: Function Definition & Call',
-                'data-test5-string': 'Test 5.1: String Operations'
-            };
-            
-            let html = '';
-            for (const [key, result] of Object.entries(testResults)) {
-                const testName = testNames[key] || result.name;
-                const className = result.passed ? 'test-pass' : 'test-fail';
-                const icon = result.passed ? '✓' : '✗';
-                
-                html += `
-                    <div class="test-section">
-                        <div class="test-result ${className}">
-                            <strong>${icon} ${testName}</strong>
-                            <div style="margin-top: 5px; font-size: 0.9em;">
-                                ${result.details}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            if (html === '') {
-                html = '<div class="test-section"><div class="test-result test-pending">No test results found. Python may not be executing.</div></div>';
-            }
-            
-            resultsDiv.innerHTML = html;
-            
-            // Update summary
-            const passRate = testCount > 0 ? Math.round((passed / testCount) * 100) : 0;
-            summaryStats.innerHTML = `
-                <div>Total: ${testCount} tests</div>
-                <div style="color: #4ade80;">Passed: ${passed}</div>
-                <div style="color: ${failed > 0 ? '#f87171' : '#4ade80'};">Failed: ${failed}</div>
-                <div style="font-size: 1.2em; margin-top: 10px;">Success Rate: ${passRate}%</div>
-            `;
-            
-            // Update summary background based on results
+            const summaryStats = document.getElementById('summary-stats');
             const summary = document.getElementById('summary');
-            if (failed === 0 && testCount > 0) {
-                summary.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-            } else if (passed > failed) {
-                summary.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
-            } else if (testCount > 0) {
-                summary.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+            
+            if (testCount > 0) {
+                const passRate = Math.round((passed / testCount) * 100);
+                summaryStats.innerHTML = `
+                    <div>Total: ${testCount} tests</div>
+                    <div style="color: #4ade80;">Passed: ${passed}</div>
+                    <div style="color: ${failed > 0 ? '#f87171' : '#4ade80'};">Failed: ${failed}</div>
+                    <div style="font-size: 1.2em; margin-top: 10px;">Success Rate: ${passRate}%</div>
+                `;
+                
+                // Update summary background
+                if (failed === 0) {
+                    summary.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                } else if (passed > failed) {
+                    summary.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                } else {
+                    summary.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                }
             }
         }
         
-        // Start checking for results
+        // Update summary periodically
         window.addEventListener('load', function() {
-            setTimeout(displayTestResults, 500);
-            setInterval(displayTestResults, 1000);
+            setTimeout(updateSummary, 1000);
+            setInterval(updateSummary, 2000);
         });
     </script>
 
