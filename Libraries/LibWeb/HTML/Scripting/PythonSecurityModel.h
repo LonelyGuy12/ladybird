@@ -21,6 +21,10 @@ public:
     // Initialize the security model
     static ErrorOr<void> initialize_security();
 
+    // Set up restricted builtins in the global Python builtins module
+    // This should be called during Python initialization, before any scripts run
+    static ErrorOr<void> setup_global_restricted_builtins();
+
     // Check if a Python script should be allowed to run
     static ErrorOr<bool> should_allow_script_execution(String const& script_content, URL::URL const& origin);
 

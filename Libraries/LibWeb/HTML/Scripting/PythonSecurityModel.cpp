@@ -216,6 +216,39 @@ ErrorOr<void> PythonSecurityModel::initialize_security()
     return {};
 }
 
+ErrorOr<void> PythonSecurityModel::setup_global_restricted_builtins()
+{
+    // This function sets up the restricted 'open' in the global builtins module
+    // It should be called during Python initialization, before any scripts run
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    
+    PyObject* builtins_module = PyEval_GetBuiltins();
+    if (!builtins_module) {
+        PyGILState_Release(gstate);
+        return Error::from_string_literal("Failed to retrieve Python builtins");
+    }
+    
+    // Create a restricted 'open' function that raises an error when called
+    static PyMethodDef restricted_open_method = {
+        "open",
+        (PyCFunction)restricted_open_func,
+        METH_VARARGS,
+        "Restricted: open() is not allowed"
+    };
+    
+    PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
+    if (restricted_open) {
+        // Add to the global builtins module to prevent KeyError during imports
+        // Python's internal code (e.g., during module imports) checks the actual builtins module
+        Py_INCREF(restricted_open); // Need to keep a reference since we're adding it to builtins_module
+        PyDict_SetItemString(builtins_module, "open", restricted_open);
+        Py_DECREF(restricted_open); // Safe to decref, builtins_module now holds a reference
+    }
+    
+    PyGILState_Release(gstate);
+    return {};
+}
+
 ErrorOr<bool> PythonSecurityModel::should_allow_script_execution(String const& script_content, URL::URL const& origin)
 {
     (void)origin;
@@ -285,19 +318,10 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
     PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
     if (restricted_open) {
         // Add to the execution context's __builtins__
+        // Note: The global builtins module already has the restricted 'open' set up
+        // during Python initialization, so we just need to add it to the execution context
         PyDict_SetItemString(safe_builtins, "open", restricted_open);
-        
-        // Also add to the actual builtins module to prevent KeyError during imports
-        // Python's internal code (e.g., during module imports) may check the actual builtins module
-        // Save the original 'open' if it exists, then replace it with our restricted version
-        PyObject* original_open = PyDict_GetItemString(builtins_module, "open");
-        if (original_open) {
-            Py_INCREF(original_open); // Keep a reference to the original
-        }
-        Py_INCREF(restricted_open); // Need to keep a reference since we're adding it to builtins_module
-        PyDict_SetItemString(builtins_module, "open", restricted_open);
-        
-        Py_DECREF(restricted_open); // Safe to decref, builtins_module now holds a reference
+        Py_DECREF(restricted_open);
     }
 
     PyDict_SetItemString(globals, "__builtins__", safe_builtins);
