@@ -165,8 +165,6 @@ void HTMLScriptElement::execute_script()
     else if (m_script_type == ScriptType::Python) {
         dbgln("🐍 HTMLScriptElement::execute_script() - Python script type detected!");
         
-        HTML::TemporaryExecutionContext execution_context { realm() };
-        
         // 1. Let oldCurrentScript be the value to which document's currentScript object was most recently set.
         auto old_current_script = document->current_script();
         // 2. If el's root is not a shadow root, then set document's currentScript attribute to el. Otherwise, set it to null.
@@ -181,6 +179,8 @@ void HTMLScriptElement::execute_script()
             dbgln("🐍 HTMLScriptElement: Running inline Python script");
 
         // 3. Run the Python script given by el's result.
+        // Note: PythonScript::run() handles prepare_to_run_script and clean_up_after_running_script internally,
+        // similar to ClassicScript, so we don't need TemporaryExecutionContext here.
         dbgln("🐍 HTMLScriptElement: About to call PythonScript::run()");
         (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
         dbgln("🐍 HTMLScriptElement: PythonScript::run() completed");
