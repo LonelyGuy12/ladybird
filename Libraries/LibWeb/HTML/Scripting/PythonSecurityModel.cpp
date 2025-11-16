@@ -352,7 +352,10 @@ ErrorOr<void> PythonSecurityModel::setup_restricted_filesystem_access(void* inte
         return Error::from_string_literal("Invalid interpreter state");
 
     PyObject* globals = static_cast<PyObject*>(interpreter);
-    PyDict_DelItemString(globals, "open");
+    
+    // Don't delete 'open' from globals - the restricted version is already set up in __builtins__
+    // by restrict_builtins(). Deleting it would cause KeyError when Python's internal code
+    // tries to access it. The restricted version in __builtins__ will prevent actual file operations.
 
     PyObject* os_module = PyImport_ImportModule("os");
     if (os_module) {
