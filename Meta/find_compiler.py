@@ -20,7 +20,10 @@ from Meta.utils import run_command
 
 CLANG_MINIMUM_VERSION = 19
 GCC_MINIMUM_VERSION = 14
-XCODE_MINIMUM_VERSION = ("16.3", 17000013)
+# Apple's clang versioning is tied to Xcode releases and does not match upstream clang.
+# Our CI runners currently provide Xcode 15.4 (build 15E300), so accept that baseline
+# to avoid falling back to GCC, which cannot compile the Objective-C++ sources.
+XCODE_MINIMUM_VERSION = ("15.4", 15040000)
 
 COMPILER_VERSION_REGEX = re.compile(r"(\d+)(\.\d+)*")
 
