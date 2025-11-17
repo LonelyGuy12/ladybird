@@ -93,7 +93,7 @@ jobs:
       - name: Build Ladybird
         env:
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
-        run: ./Meta/ladybird.py build
+        run: python3 ./Meta/ladybird.py build
 
       - name: Create tarball
         run: |
