@@ -357,23 +357,12 @@ ErrorOr<void> PythonSecurityModel::setup_restricted_filesystem_access(void* inte
     // by restrict_builtins(). Deleting it would cause KeyError when Python's internal code
     // tries to access it. The restricted version in __builtins__ will prevent actual file operations.
 
-    PyObject* os_module = PyImport_ImportModule("os");
-    if (os_module) {
-        PyObject* os_disabled = PyModule_New("os_disabled");
-        if (os_disabled)
-            PyDict_SetItemString(globals, "os", os_disabled);
-        Py_XDECREF(os_disabled);
-        Py_DECREF(os_module);
-    }
-
-    PyObject* sys_module = PyImport_ImportModule("sys");
-    if (sys_module) {
-        PyObject* modules_dict = PyObject_GetAttrString(sys_module, "modules");
-        if (modules_dict)
-            PyDict_SetItemString(modules_dict, "os", Py_None);
-        Py_XDECREF(modules_dict);
-        Py_DECREF(sys_module);
-    }
+    // FIXME: We eventually want to intercept module imports via a custom __import__ hook
+    //        so we can selectively allowlist modules. Until then, avoid mutating sys.modules
+    //        globally, as other parts of the Python runtime and standard library expect
+    //        modules like 'os' to remain importable for their own internal use.
+    //        For now we can still shadow the name inside the script's globals if needed,
+    //        but we must not corrupt sys.modules.
 
     return {};
 }
