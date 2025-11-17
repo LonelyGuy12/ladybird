@@ -27,6 +27,9 @@ jobs:
 
       - name: Build Ladybird
         run: python3 ./Meta/ladybird.py build
+        env:
+          CC: clang
+          CXX: clang++
 
       - name: Create .dmg
         run: |
@@ -92,6 +95,8 @@ jobs:
 
       - name: Build Ladybird
         env:
+          CC: clang
+          CXX: clang++
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
         run: python3 ./Meta/ladybird.py build
 
