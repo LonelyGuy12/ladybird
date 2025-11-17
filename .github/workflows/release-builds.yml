@@ -18,7 +18,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install cmake ninja ccache qt6 python@3.12
+          brew install cmake ninja ccache qt6 python@3.12 autoconf autoconf-archive automake libtool
 
       - name: Cache ccache
         uses: hendrikmuhs/ccache-action@v1.2
