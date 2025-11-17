@@ -11,6 +11,8 @@
 
 This fork adds **Python scripting support** to Ladybird, enabling web pages to run Python code alongside JavaScript.
 
+> **CI note:** Multi-platform release builds now pin the Xcode-supplied `clang` toolchain to avoid GCC compiling Objective-C++ sources.
+
 ### Goals
 
 - **`<script type="python">`** - Execute Python in web pages with browser API access
