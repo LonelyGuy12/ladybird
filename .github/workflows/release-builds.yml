@@ -110,6 +110,9 @@ jobs:
     # Windows builds are disabled for now
     if: false
     runs-on: windows-latest
+    steps:
+      - name: Skip Windows build
+        run: echo "Windows build job is currently disabled"
 
   create-release:
     name: Create GitHub Release
