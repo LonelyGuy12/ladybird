@@ -188,14 +188,10 @@ def factorial(n):
     return 1 if n <= 1 else n * factorial(n-1)
 
 # Test recursive functions
-fib_start = time.perf_counter()
 fib_25 = fibonacci(25)
-fib_end = time.perf_counter()
-
 fact_10 = factorial(10)
 
 print(f"✓ Fibonacci(25) = {fib_25}")
-print(f"✓ Fibonacci calculation time: {(fib_end - fib_start) * 1000:.2f}ms")
 print(f"✓ Factorial(10) = {fact_10}")
 print("✓ Recursive function calls working")
 print()
