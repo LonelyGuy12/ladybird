@@ -74,14 +74,16 @@ print("=" * 45)
 
 try:
     # Test if window object exists
-    if 'window' in globals():
+    try:
+        window
         print("✓ window object is available")
         print(f"  window type: {type(window)}")
-    else:
+    except NameError:
         print("✗ window object not found")
     
     # Test if document object exists  
-    if 'document' in globals():
+    try:
+        document
         print("✓ document object is available")
         print(f"  document type: {type(document)}")
         
@@ -91,7 +93,7 @@ try:
             print(f"  document.title: {title}")
         except Exception as e:
             print(f"  document.title error: {e}")
-    else:
+    except NameError:
         print("✗ document object not found")
         
 except Exception as e:
@@ -110,7 +112,8 @@ try:
     output_div = None
     
     # Check if we have DOM access
-    if 'document' in globals():
+    try:
+        document
         print("✓ Attempting DOM element access...")
         
         # This depends on your actual Python DOM binding implementation
@@ -146,7 +149,7 @@ try:
                 print(f"ℹ️  Element modification error: {e}")
         else:
             print("ℹ️  Element not found or DOM API not ready")
-    else:
+    except NameError:
         print("ℹ️  Document object not available")
         
 except Exception as e:
@@ -161,12 +164,16 @@ print("📋 Test 3: Available Python Environment")
 print("=" * 40)
 
 print("Available global objects:")
-python_globals = list(globals().keys())
+python_globals = list(dir())
 important_globals = ['window', 'document', '__name__', '__file__']
 
 for name in important_globals:
     if name in python_globals:
-        print(f"✓ {name}: {type(globals()[name])}")
+        obj = eval(name) if name in ['window', 'document'] else None
+        if obj is not None:
+            print(f"✓ {name}: {type(obj)}")
+        else:
+            print(f"✓ {name}: available")
     else:
         print(f"✗ {name}: not available")
 
@@ -195,14 +202,16 @@ working_features.append("✓ Python data types")
 working_features.append("✓ Control flow")
 
 # DOM integration status
-if 'window' in globals():
+try:
+    window
     working_features.append("✓ Window object access")
-else:
+except NameError:
     todo_features.append("⏳ Window object binding")
     
-if 'document' in globals():
+try:
+    document
     working_features.append("✓ Document object access")
-else:
+except NameError:
     todo_features.append("⏳ Document object binding")
 
 print("WORKING FEATURES:")
