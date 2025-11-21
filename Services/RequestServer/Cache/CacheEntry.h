@@ -18,14 +18,18 @@
 
 namespace RequestServer {
 
-struct [[gnu::packed]] CacheHeader {
+struct CacheHeader {
     static ErrorOr<CacheHeader> read_from_stream(Stream&);
     ErrorOr<void> write_to_stream(Stream&) const;
+
+    u32 hash() const;
 
     static constexpr auto CACHE_MAGIC = 0xcafef00du;
 
     u32 magic { CACHE_MAGIC };
     u32 version { CACHE_VERSION };
+
+    u32 key_hash { 0 };
 
     u32 url_size { 0 };
     u32 url_hash { 0 };
@@ -35,12 +39,12 @@ struct [[gnu::packed]] CacheHeader {
     u32 reason_phrase_hash { 0 };
 };
 
-struct [[gnu::packed]] CacheFooter {
+struct CacheFooter {
     static ErrorOr<CacheFooter> read_from_stream(Stream&);
     ErrorOr<void> write_to_stream(Stream&) const;
 
     u64 data_size { 0 };
-    u32 crc32 { 0 };
+    u32 header_hash { 0 };
 };
 
 // A cache entry is an amalgamation of all information needed to reconstruct HTTP responses. It is created once we have
@@ -79,7 +83,7 @@ protected:
 
 class CacheEntryWriter : public CacheEntry {
 public:
-    static ErrorOr<NonnullOwnPtr<CacheEntryWriter>> create(DiskCache&, CacheIndex&, u64 cache_key, String url, UnixDateTime request_time);
+    static ErrorOr<NonnullOwnPtr<CacheEntryWriter>> create(DiskCache&, CacheIndex&, u64 cache_key, String url, UnixDateTime request_time, AK::Duration current_time_offset_for_testing);
     virtual ~CacheEntryWriter() override = default;
 
     ErrorOr<void> write_status_and_reason(u32 status_code, Optional<String> reason_phrase, HTTP::HeaderMap const&);
@@ -87,12 +91,14 @@ public:
     ErrorOr<void> flush(HTTP::HeaderMap);
 
 private:
-    CacheEntryWriter(DiskCache&, CacheIndex&, u64 cache_key, String url, LexicalPath, NonnullOwnPtr<Core::OutputBufferedFile>, CacheHeader, UnixDateTime request_time);
+    CacheEntryWriter(DiskCache&, CacheIndex&, u64 cache_key, String url, LexicalPath, NonnullOwnPtr<Core::OutputBufferedFile>, CacheHeader, UnixDateTime request_time, AK::Duration current_time_offset_for_testing);
 
     NonnullOwnPtr<Core::OutputBufferedFile> m_file;
 
     UnixDateTime m_request_time;
     UnixDateTime m_response_time;
+
+    AK::Duration m_current_time_offset_for_testing;
 };
 
 class CacheEntryReader : public CacheEntry {

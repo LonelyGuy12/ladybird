@@ -332,11 +332,20 @@ void PaintableBox::before_paint(DisplayListRecordingContext& context, PaintPhase
     if (!is_visible())
         return;
 
-    if (first_is_one_of(phase, PaintPhase::Background, PaintPhase::Foreground) && own_clip_frame()) {
-        context.display_list_recorder().push_clip_frame(own_clip_frame());
+    auto const& own_clip_frame = this->own_clip_frame();
+    bool apply_own_clip_frame = [&] {
+        if (phase == PaintPhase::Background)
+            return own_clip_frame && own_clip_frame->includes_rect_from_clip_property;
+        if (phase == PaintPhase::Foreground)
+            return !own_clip_frame.is_null();
+        return false;
+    }();
+    if (apply_own_clip_frame) {
+        context.display_list_recorder().push_clip_frame(own_clip_frame);
     } else if (!has_css_transform()) {
         apply_clip_overflow_rect(context, phase);
     }
+
     apply_scroll_offset(context);
 }
 
@@ -346,7 +355,16 @@ void PaintableBox::after_paint(DisplayListRecordingContext& context, PaintPhase 
         return;
 
     reset_scroll_offset(context);
-    if (first_is_one_of(phase, PaintPhase::Background, PaintPhase::Foreground) && own_clip_frame()) {
+
+    auto const& own_clip_frame = this->own_clip_frame();
+    bool reset_own_clip_frame = [&] {
+        if (phase == PaintPhase::Background)
+            return own_clip_frame && own_clip_frame->includes_rect_from_clip_property;
+        if (phase == PaintPhase::Foreground)
+            return !own_clip_frame.is_null();
+        return false;
+    }();
+    if (reset_own_clip_frame) {
         context.display_list_recorder().pop_clip_frame();
     } else if (!has_css_transform()) {
         clear_clip_overflow_rect(context, phase);
@@ -1415,8 +1433,8 @@ Optional<CSSPixelRect> PaintableBox::get_masking_area() const
     return absolute_border_box_rect();
 }
 
-// https://www.w3.org/TR/css-transforms-1/#transform-box
-CSSPixelRect PaintableBox::transform_box_rect() const
+// https://www.w3.org/TR/css-transforms-1/#reference-box
+CSSPixelRect PaintableBox::transform_reference_box() const
 {
     auto transform_box = computed_values().transform_box();
     // For SVG elements without associated CSS layout box, the used value for content-box is fill-box and for
@@ -1535,41 +1553,33 @@ void PaintableBox::resolve_paint_properties()
         matrix = matrix * transform.to_matrix(*this).release_value();
     set_transform(matrix);
 
-    // https://drafts.csswg.org/css-transforms-2/#perspective
-    auto const& perspective = computed_values.perspective();
-    if (perspective.has_value()) {
-        // The perspective matrix is computed as follows:
-
-        // 1. Start with the identity matrix.
-        m_perspective_matrix = Gfx::FloatMatrix4x4::identity();
-
-        // 2. Translate by the computed X and Y values of 'perspective-origin'
-        // FIXME: Implement this.
-
-        // 3. Multiply by the matrix that would be obtained from the 'perspective()' transform function, where the
-        //    length is provided by the value of the perspective property
-        auto perspective_value = perspective.value();
-
-        // https://drafts.csswg.org/css-transforms-2/#perspective-property
-        // As very small <length> values can produce bizarre rendering results and stress the numerical accuracy
-        // of transform calculations, values less than '1px' must be treated as '1px' for rendering purposes. (This
-        // clamping does not affect the underlying value, so 'perspective: 0;' in a stylesheet will still serialize back
-        // as '0'.)
-        if (perspective_value < 1)
-            perspective_value = 1;
-
-        m_perspective_matrix = m_perspective_matrix * CSS::Transformation(CSS::TransformFunction::Perspective, Vector<CSS::TransformValue>({ CSS::TransformValue(CSS::Length::make_px(perspective_value)) })).to_matrix(*this).release_value();
-
-        // 4. Translate by the negated computed X and Y values of 'perspective-origin'
-        // FIXME: Implement this.
-    }
-
     auto const& transform_origin = computed_values.transform_origin();
-    auto reference_box = transform_box_rect();
+    auto reference_box = transform_reference_box();
     auto x = reference_box.left() + transform_origin.x.to_px(layout_node, reference_box.width());
     auto y = reference_box.top() + transform_origin.y.to_px(layout_node, reference_box.height());
     set_transform_origin({ x, y });
-    set_transform_origin({ x, y });
+
+    // https://drafts.csswg.org/css-transforms-2/#perspective-matrix
+    if (auto perspective = computed_values.perspective(); perspective.has_value()) {
+        // The perspective matrix is computed as follows:
+
+        // 1. Start with the identity matrix.
+        // 2. Translate by the computed X and Y values of 'perspective-origin'
+        // https://drafts.csswg.org/css-transforms-2/#perspective-origin-property
+        // Percentages: refer to the size of the reference box
+        auto perspective_origin = computed_values.perspective_origin().resolved(layout_node, reference_box).to_type<float>();
+        auto computed_x = perspective_origin.x();
+        auto computed_y = perspective_origin.y();
+        m_perspective_matrix = Gfx::translation_matrix(Vector3<float>(computed_x, computed_y, 0));
+
+        // 3. Multiply by the matrix that would be obtained from the 'perspective()' transform function, where the
+        //    length is provided by the value of the perspective property
+        // NB: Length values less than 1px being clamped to 1px is handled by the perspective() function already.
+        m_perspective_matrix = m_perspective_matrix.value() * CSS::Transformation(CSS::TransformFunction::Perspective, Vector<CSS::TransformValue>({ CSS::TransformValue(CSS::Length::make_px(perspective.value())) })).to_matrix({}).release_value();
+
+        // 4. Translate by the negated computed X and Y values of 'perspective-origin'
+        m_perspective_matrix = m_perspective_matrix.value() * Gfx::translation_matrix(Vector3<float>(-computed_x, -computed_y, 0));
+    }
 
     // Outlines
     auto outline_data = borders_data_for_outline(layout_node, computed_values.outline_color(), computed_values.outline_style(), computed_values.outline_width());
@@ -1644,8 +1654,8 @@ void PaintableWithLines::resolve_paint_properties()
         fragment.set_text_decoration_thickness(css_line_thickness);
 
         auto const& text_shadow = text_node.computed_values().text_shadow();
+        Vector<ShadowData> resolved_shadow_data;
         if (!text_shadow.is_empty()) {
-            Vector<ShadowData> resolved_shadow_data;
             resolved_shadow_data.ensure_capacity(text_shadow.size());
             for (auto const& layer : text_shadow) {
                 resolved_shadow_data.empend(
@@ -1656,8 +1666,8 @@ void PaintableWithLines::resolve_paint_properties()
                     layer.spread_distance.to_px(layout_node),
                     ShadowPlacement::Outer);
             }
-            fragment.set_shadows(move(resolved_shadow_data));
         }
+        fragment.set_shadows(move(resolved_shadow_data));
     }
 }
 
@@ -1717,7 +1727,7 @@ Optional<Gfx::Filter> PaintableBox::resolve_filter(DisplayListRecordingContext& 
                     .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(layout_node_with_style_and_box_metrics()),
                 };
                 auto to_px = [&](CSS::LengthOrCalculated const& length) {
-                    return static_cast<float>(length.resolved(context).map([&](auto& it) { return it.to_px(layout_node_with_style_and_box_metrics()).to_double(); }).value_or(0.0));
+                    return static_cast<float>(length.resolved(context).map([&](auto&& it) { return it.to_px(layout_node_with_style_and_box_metrics()).to_double(); }).value_or(0.0));
                 };
                 // The default value for omitted values is missing length values set to 0
                 // and the missing used color is taken from the color property.

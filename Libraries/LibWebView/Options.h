@@ -19,6 +19,7 @@ enum class HeadlessMode {
     Screenshot,
     LayoutTree,
     Text,
+    Manual,
     Test,
 };
 
@@ -92,14 +93,15 @@ struct BrowserOptions {
     EnableContentFilter enable_content_filter { EnableContentFilter::Yes };
 };
 
-enum class EnableHTTPDiskCache {
-    No,
-    Yes,
+enum class HTTPDiskCacheMode {
+    Disabled,
+    Enabled,
+    Testing,
 };
 
 struct RequestServerOptions {
     Vector<ByteString> certificates;
-    EnableHTTPDiskCache enable_http_disk_cache { EnableHTTPDiskCache::No };
+    HTTPDiskCacheMode http_disk_cache_mode { HTTPDiskCacheMode::Disabled };
 };
 
 enum class IsLayoutTestMode {

@@ -622,9 +622,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_text_underline_offset(computed_style.text_underline_offset());
     computed_values.set_text_underline_position(computed_style.text_underline_position());
 
-    if (auto text_indent = computed_style.length_percentage(CSS::PropertyID::TextIndent, *this, CSS::ComputedProperties::ClampNegativeLengths::No); text_indent.has_value())
-        computed_values.set_text_indent(text_indent.release_value());
-
+    computed_values.set_text_indent(computed_style.text_indent());
     computed_values.set_text_wrap_mode(computed_style.text_wrap_mode());
     computed_values.set_tab_size(computed_style.tab_size());
 
@@ -700,8 +698,9 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_transformations(computed_style.transformations());
     computed_values.set_transform_box(computed_style.transform_box());
     computed_values.set_transform_origin(computed_style.transform_origin());
-    computed_values.set_perspective(computed_style.perspective());
     computed_values.set_transform_style(computed_style.transform_style());
+    computed_values.set_perspective(computed_style.perspective());
+    computed_values.set_perspective_origin(computed_style.perspective_origin());
 
     auto const& transition_delay_property = computed_style.property(CSS::PropertyID::TransitionDelay);
     if (transition_delay_property.is_time()) {
