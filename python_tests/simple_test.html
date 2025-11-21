@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Python Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-box {
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+        .pass {
+            background: #d4edda;
+            border: 2px solid #28a745;
+        }
+        .fail {
+            background: #f8d7da;
+            border: 2px solid #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Python DOM Test</h1>
+    
+    <div id="test1" class="test-box">Test 1: Waiting...</div>
+    <div id="test2" class="test-box">Test 2: Waiting...</div>
+    <div id="console"></div>
+
+    <script type="text/python">
+# Simple test 1: Basic calculation
+print("🐍 Python script is running!")
+result = 2 + 2
+print(f"2 + 2 = {result}")
+
+# Try to update DOM
+elem1 = document.find("#test1")
+if elem1:
+    print("✓ Found element #test1")
+    elem1.text = f"Test 1 PASSED: 2 + 2 = {result}"
+    elem1.set_attribute("class", "test-box pass")
+    print("✓ Updated element #test1")
+else:
+    print("✗ Could not find element #test1")
+    </script>
+
+    <script type="text/python">
+# Simple test 2: String operations
+text = "Ladybird"
+length = len(text)
+print(f"Length of '{text}' = {length}")
+
+elem2 = document.find("#test2")
+if elem2:
+    print("✓ Found element #test2")
+    elem2.text = f"Test 2 PASSED: len('{text}') = {length}"
+    elem2.set_attribute("class", "test-box pass")
+    print("✓ Updated element #test2")
+else:
+    print("✗ Could not find element #test2")
+
+print("🎉 All tests complete!")
+    </script>
+
+    <p style="margin-top: 30px; padding: 15px; background: #e7f3ff; border-radius: 5px;">
+        <strong>Note:</strong> Check the browser console (F12) to see Python print() output.
+        The tests should automatically update the boxes above if Python DOM integration is working.
+    </p>
+</body>
+</html>

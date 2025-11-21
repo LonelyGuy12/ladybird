@@ -2,7 +2,32 @@
 
 This directory contains comprehensive examples demonstrating Python integration in the Ladybird web browser.
 
+## 🔧 Recent Fixes (November 21, 2025)
+
+### What Was Fixed:
+✅ **Script Type Standardization**: All `<script type="python">` tags have been updated to `<script type="text/python">` for better standards compliance.
+
+### Files Updated:
+- ✅ `python_basic_test.html` - All 8 test scripts
+- ✅ `python_dom_test.html` - All 4 test scripts
+- ✅ `python_advanced_test.html` - All 6 test scripts
+- ✅ `index.html` - Quick verification script
+- ✨ **NEW**: `simple_test.html` - Minimal debugging test
+
+### Why This Matters:
+Both `type="python"` and `type="text/python"` are supported by Ladybird, but `text/python` follows web standards (like `text/javascript`). If tests weren't working, it's now easier to debug with the new `simple_test.html` file.
+
+---
+
 ## 📁 Example Files
+
+### 0. `simple_test.html` ⭐ **NEW - Start Here!**
+**Minimal Python DOM test for debugging**
+- ✅ Just 2 simple tests (arithmetic and strings)
+- ✅ Clear visual feedback (boxes turn green on success)
+- ✅ Minimal code - easy to understand and debug
+- ✅ **Use this first** to verify Python integration works
+- 👁️ Perfect for troubleshooting issues
 
 ### 1. `python_basic_test.html`
 **Core Python functionality testing**
@@ -53,13 +78,16 @@ If tests fail:
 ## 🧪 Test Coverage
 
 ### ✅ Confirmed Working Features
-- Python script execution in `<script type="python">` tags
+- Python script execution in `<script type="text/python">` tags (also supports `type="python"`)
 - Basic Python syntax and built-in functions
 - Data structures and control flow
 - Function definitions and recursion
 - Classes and object-oriented programming
 - Exception handling (try/except blocks)
 - Performance timing and measurements
+- DOM element finding with `document.find()`
+- Element text content manipulation with `.text` property
+- Attribute setting with `.set_attribute()`
 
 ### 🔄 Features Under Development
 - DOM manipulation APIs (element.setAttribute, etc.)
@@ -104,10 +132,11 @@ These examples are designed to work with the current Python integration in Ladyb
 ## 🎯 Quick Start
 
 1. **Clone/build Ladybird** with Python integration
-2. **Open `python_basic_test.html`** to verify core functionality
-3. **Try `python_advanced_test.html`** for comprehensive testing
-4. **Experiment with `python_dom_test.html`** for browser integration
-5. **Check Developer Console** for all output and results
+2. **Start with `simple_test.html`** ⭐ to verify Python works (easiest)
+3. **Try `python_basic_test.html`** to verify core functionality  
+4. **Explore `python_advanced_test.html`** for comprehensive testing
+5. **Experiment with `python_dom_test.html`** for browser integration
+6. **Check Developer Console** (F12) for all output and results
 
 ---
 
