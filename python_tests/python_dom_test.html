@@ -67,21 +67,23 @@
     </div>
 
     <!-- Python Scripts Testing DOM Integration -->
-    <script type="python">
+    <script type="text/python">
 # Test 1: Check if window and document are available
 print("🌐 Test 1: Checking Window and Document Objects")
 print("=" * 45)
 
 try:
     # Test if window object exists
-    if 'window' in globals():
+    try:
+        window
         print("✓ window object is available")
         print(f"  window type: {type(window)}")
-    else:
+    except NameError:
         print("✗ window object not found")
     
     # Test if document object exists  
-    if 'document' in globals():
+    try:
+        document
         print("✓ document object is available")
         print(f"  document type: {type(document)}")
         
@@ -91,7 +93,7 @@ try:
             print(f"  document.title: {title}")
         except Exception as e:
             print(f"  document.title error: {e}")
-    else:
+    except NameError:
         print("✗ document object not found")
         
 except Exception as e:
@@ -100,7 +102,7 @@ except Exception as e:
 print()
     </script>
 
-    <script type="python">
+    <script type="text/python">
 # Test 2: Try DOM manipulation if available
 print("🔧 Test 2: DOM Manipulation Test")
 print("=" * 35)
@@ -110,22 +112,17 @@ try:
     output_div = None
     
     # Check if we have DOM access
-    if 'document' in globals():
+    try:
+        document
         print("✓ Attempting DOM element access...")
         
-        # This depends on your actual Python DOM binding implementation
-        # Adjust based on your actual API
+        # Try to find element using document.find()
         try:
-            # Try different possible DOM access patterns
-            if hasattr(document, 'getElementById'):
-                output_div = document.getElementById('python-output')
-                print("✓ document.getElementById() works")
-            elif hasattr(document, 'find'):
-                output_div = document.find('#python-output')
+            output_div = document.find('#python-output')
+            if output_div:
                 print("✓ document.find() works")
             else:
-                print("ℹ️  DOM query methods not yet implemented")
-                
+                print("ℹ️  document.find() returned None")
         except Exception as e:
             print(f"ℹ️  DOM query error: {e}")
         
@@ -134,19 +131,13 @@ try:
             
             # Try to modify element content
             try:
-                if hasattr(output_div, 'innerHTML'):
-                    output_div.innerHTML = "<p><strong>✅ Modified by Python!</strong></p>"
-                    print("✓ innerHTML modification works")
-                elif hasattr(output_div, 'textContent'):
-                    output_div.textContent = "✅ Modified by Python!"
-                    print("✓ textContent modification works")
-                else:
-                    print("ℹ️  Element content modification methods not yet implemented")
+                output_div.text = "✅ Modified by Python!"
+                print("✓ text modification works")
             except Exception as e:
                 print(f"ℹ️  Element modification error: {e}")
         else:
             print("ℹ️  Element not found or DOM API not ready")
-    else:
+    except NameError:
         print("ℹ️  Document object not available")
         
 except Exception as e:
@@ -155,18 +146,18 @@ except Exception as e:
 print()
     </script>
 
-    <script type="python">
+    <script type="text/python">
 # Test 3: Test available Python globals
 print("📋 Test 3: Available Python Environment")
 print("=" * 40)
 
 print("Available global objects:")
-python_globals = list(globals().keys())
-important_globals = ['window', 'document', '__name__', '__file__']
+python_globals = list(dir())
+important_globals = ['window', 'document', '__name__']
 
 for name in important_globals:
     if name in python_globals:
-        print(f"✓ {name}: {type(globals()[name])}")
+        print(f"✓ {name}: available")
     else:
         print(f"✗ {name}: not available")
 
@@ -179,7 +170,7 @@ print(f"✓ 'hello'.upper() = {'hello'.upper()}")
 print()
     </script>
 
-    <script type="python">
+    <script type="text/python">
 # Test 4: Integration Status Report
 print("📊 Python-Ladybird Integration Status Report")
 print("=" * 50)
@@ -195,14 +186,16 @@ working_features.append("✓ Python data types")
 working_features.append("✓ Control flow")
 
 # DOM integration status
-if 'window' in globals():
+try:
+    window
     working_features.append("✓ Window object access")
-else:
+except NameError:
     todo_features.append("⏳ Window object binding")
     
-if 'document' in globals():
+try:
+    document
     working_features.append("✓ Document object access")
-else:
+except NameError:
     todo_features.append("⏳ Document object binding")
 
 print("WORKING FEATURES:")

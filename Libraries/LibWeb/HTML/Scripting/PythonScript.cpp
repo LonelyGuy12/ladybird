@@ -94,6 +94,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             return JS::normal_completion(JS::js_undefined());
 
         // 3. Prepare to run script given realm.
+        // Note: This must be called before any early returns to ensure cleanup happens
         prepare_to_run_script(realm);
 
         // 4. Let evaluationStatus be null.
@@ -117,10 +118,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             
             if (!m_execution_context) {
                 m_execution_context = PyDict_New();
-                // Provide minimal module-like globals
-                PyObject* builtins = PyEval_GetBuiltins();
-                if (builtins)
-                    PyDict_SetItemString(m_execution_context, "__builtins__", builtins);
+                // Set up module-like globals (without builtins yet - security model will add restricted ones)
                 PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
                 Py_INCREF(Py_None);
                 PyDict_SetItemString(m_execution_context, "__package__", Py_None);
@@ -131,12 +129,14 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
             }
 
             if (m_execution_context) {
-                // Set up security restrictions for this script execution
+                // Set up security restrictions for this script execution (this will add restricted __builtins__)
                 URL::URL origin = this->base_url().value_or(URL::URL {});
                 auto security_result = PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin);
                 if (security_result.is_error()) {
                     evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to set up secure execution environment"sv));
                     PyGILState_Release(gstate);
+                    // Clean up execution context before returning
+                    clean_up_after_running_script(realm);
                     return evaluation_status;
                 }
                 
@@ -182,6 +182,7 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                 }
                 
                 // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
+                // Note: Import sys module, but handle errors gracefully if it fails due to restricted builtins
                 PyObject* sys_module = PyImport_ImportModule("sys");
                 if (sys_module) {
                     // Flush stdout before execution
@@ -192,6 +193,10 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                         Py_DECREF(stdout_obj);
                     }
                     Py_DECREF(sys_module);
+                } else {
+                    // If sys import fails, clear the error and continue - it's not critical
+                    PyErr_Clear();
+                    dbgln("🐍 PythonScript::run() - ⚠️ Failed to import sys module (non-critical)");
                 }
                 
                 dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
@@ -253,6 +258,10 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
                 }
 
                 PyGILState_Release(gstate);
+            } else {
+                // No script record - this shouldn't happen, but handle it gracefully
+                dbgln("🐍 PythonScript::run() - ⚠️ No compiled script record available");
+                evaluation_status = JS::throw_completion(JS::Error::create(realm, "Python script compilation failed"sv));
             }
         }
         }

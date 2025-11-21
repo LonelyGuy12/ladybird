@@ -212,7 +212,7 @@
         <ul class="features-list">
             <li>Ensure Python integration is enabled in Ladybird build</li>
             <li>Check browser console (F12) for error messages</li>
-            <li>Verify `<script type="python">` tags are supported</li>
+            <li>Verify script tags with type="python" are supported</li>
             <li>Reload the page and try again</li>
         </ul>
         
@@ -225,15 +225,102 @@
         <a href="test_python_integration.py" class="btn">🐍 Python Test Script</a>
     </div>
 
+    <!-- Hidden storage for quick test -->
+    <div id="python-quick-test" style="display: none;" data-complete="false"></div>
+    
     <!-- Quick inline test to verify Python is working -->
-    <script type="python">
+    <script type="text/python">
 # Quick verification that Python is working on the index page
-print("🎯 Python Integration Index - Quick Verification")
-print("=" * 50)
-print("✓ Python execution is working!")
-print("✓ You can now run the comprehensive test suite")
-print("✓ Click on any test card above to begin")
-print("=" * 50)
+# Test 1: Simple arithmetic - 2+2=4
+result = 2 + 2
+storage = document.find("#python-quick-test")
+if storage:
+    if result == 4:
+        storage.set_attribute("data-arithmetic", "PASS")
+        print("✓ Arithmetic: 2 + 2 = 4")
+    else:
+        storage.set_attribute("data-arithmetic", "FAIL")
+        print(f"✗ Arithmetic: Expected 4, got {result}")
+    
+    # Test 2: String operations
+    text = "Hello"
+    if len(text) == 5:
+        storage.set_attribute("data-string", "PASS")
+        print("✓ String operations working")
+    else:
+        storage.set_attribute("data-string", "FAIL")
+        print(f"✗ String: Expected length 5, got {len(text)}")
+    
+    # Test 3: List operations
+    numbers = [1, 2, 3]
+    if sum(numbers) == 6:
+        storage.set_attribute("data-list", "PASS")
+        print("✓ List operations working")
+    else:
+        storage.set_attribute("data-list", "FAIL")
+        print(f"✗ List: Expected sum 6, got {sum(numbers)}")
+    
+    # Mark as complete
+    storage.set_attribute("data-complete", "true")
+    print("Quick verification complete!")
+    </script>
+    
+    <!-- Display verification results -->
+    <div id="quick-test-results" style="background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; margin: 30px 0; border: 2px solid rgba(255, 255, 255, 0.2);">
+        <h2 style="color: #fbbf24; margin-top: 0;">⚡ Quick Verification</h2>
+        <div id="quick-test-status" style="font-size: 1.1em;">Checking Python integration...</div>
+    </div>
+    
+    <script>
+        function checkQuickTest() {
+            const storage = document.getElementById('python-quick-test');
+            if (!storage) {
+                setTimeout(checkQuickTest, 100);
+                return;
+            }
+            
+            const isComplete = storage.getAttribute('data-complete') === 'true';
+            if (!isComplete) {
+                setTimeout(checkQuickTest, 200);
+                return;
+            }
+            
+            const arithmetic = storage.getAttribute('data-arithmetic');
+            const string = storage.getAttribute('data-string');
+            const list = storage.getAttribute('data-list');
+            
+            const statusDiv = document.getElementById('quick-test-status');
+            const allPassed = arithmetic === 'PASS' && string === 'PASS' && list === 'PASS';
+            
+            if (allPassed) {
+                statusDiv.innerHTML = `
+                    <div style="color: #4ade80; font-weight: bold; margin-bottom: 10px;">
+                        ✓ Python Integration Verified!
+                    </div>
+                    <div style="font-size: 0.9em; opacity: 0.9;">
+                        <div>✓ Arithmetic: 2 + 2 = 4</div>
+                        <div>✓ String operations working</div>
+                        <div>✓ List operations working</div>
+                    </div>
+                `;
+            } else {
+                statusDiv.innerHTML = `
+                    <div style="color: #f87171; font-weight: bold; margin-bottom: 10px;">
+                        ✗ Python Integration Issues Detected
+                    </div>
+                    <div style="font-size: 0.9em; opacity: 0.9;">
+                        <div>Arithmetic: ${arithmetic === 'PASS' ? '✓' : '✗'}</div>
+                        <div>String: ${string === 'PASS' ? '✓' : '✗'}</div>
+                        <div>List: ${list === 'PASS' ? '✓' : '✗'}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        window.addEventListener('load', function() {
+            setTimeout(checkQuickTest, 500);
+            setInterval(checkQuickTest, 1000);
+        });
     </script>
 
     <script>

@@ -179,6 +179,8 @@ void HTMLScriptElement::execute_script()
             dbgln("🐍 HTMLScriptElement: Running inline Python script");
 
         // 3. Run the Python script given by el's result.
+        // Note: PythonScript::run() handles prepare_to_run_script and clean_up_after_running_script internally,
+        // similar to ClassicScript, so we don't need TemporaryExecutionContext here.
         dbgln("🐍 HTMLScriptElement: About to call PythonScript::run()");
         (void)as<PythonScript>(*m_result.get<GC::Ref<Script>>()).run();
         dbgln("🐍 HTMLScriptElement: PythonScript::run() completed");

@@ -7,206 +7,300 @@
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
             background: #f8f9fa;
         }
         
-        .test-section {
+        .test-result {
+            margin: 10px 0;
+            padding: 12px;
+            border-radius: 6px;
+            font-weight: 500;
             background: white;
-            margin: 20px 0;
-            padding: 20px;
-            border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
-        .code-block {
-            background: #f1f3f4;
-            padding: 15px;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 14px;
-            margin: 10px 0;
-            border-left: 4px solid #1a73e8;
+        .test-pass {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
         }
         
-        .result {
-            background: #e8f5e8;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
-            border-left: 4px solid #34a853;
+        .test-fail {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
         }
         
-        h1 { color: #1a73e8; text-align: center; }
-        h2 { color: #34a853; }
+        .test-pending {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+        
+        h1 { 
+            color: #1a73e8; 
+            text-align: center; 
+            margin-bottom: 10px;
+        }
+        
+        .summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .summary h2 {
+            color: white;
+            margin: 0 0 15px 0;
+        }
+        
+        .summary-stats {
+            font-size: 1.5em;
+            margin: 15px 0;
+        }
     </style>
 </head>
 <body>
     <h1>🐍 Python Basic Functionality Test</h1>
-    <p>This page tests core Python functionality in Ladybird browser.</p>
+    <p style="text-align: center; color: #666;">Self-verifying tests - results appear below automatically</p>
 
-    <div class="test-section">
-        <h2>Test 1: Basic Python Operations</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-print("Hello from Python in Ladybird!")
-result = 2 + 2
-print(f"2 + 2 = {result}")
-print("Basic arithmetic works!")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> Python print statements appear in browser console</p>
+    <!-- Pre-created result elements for Python to fill in -->
+    <div id="test1" class="test-result test-pending">Test 1.1: 2 + 2 = 4 - Waiting...</div>
+    <div id="test2" class="test-result test-pending">Test 1.2: 10 * 5 = 50 - Waiting...</div>
+    <div id="test3" class="test-result test-pending">Test 1.3: 100 / 4 = 25 - Waiting...</div>
+    <div id="test4" class="test-result test-pending">Test 2.1: List operations - Waiting...</div>
+    <div id="test5" class="test-result test-pending">Test 2.2: List comprehension - Waiting...</div>
+    <div id="test6" class="test-result test-pending">Test 3.1: For loop - Waiting...</div>
+    <div id="test7" class="test-result test-pending">Test 4.1: Functions - Waiting...</div>
+    <div id="test8" class="test-result test-pending">Test 5.1: String operations - Waiting...</div>
+
+    <div class="summary" id="summary">
+        <h2>Test Summary</h2>
+        <div class="summary-stats" id="summary-stats">Running tests...</div>
     </div>
 
-    <div class="test-section">
-        <h2>Test 2: Python Data Structures</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-# Lists
-numbers = [1, 2, 3, 4, 5]
-squares = [x**2 for x in numbers]
-print(f"Numbers: {numbers}")
-print(f"Squares: {squares}")
-
-# Dictionary
-person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
-print(f"Dictionary: {person}")
-print(f"Name: {person['name']}")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> List and dictionary operations work correctly</p>
-    </div>
-
-    <div class="test-section">
-        <h2>Test 3: Control Flow</h2>
-        <div class="code-block">
-&lt;script type="python"&gt;
-# For loop
-total = 0
-for i in range(10):
-    if i % 2 == 0:
-        total += i
-
-print(f"Sum of even numbers 0-9: {total}")
-
-# Function definition
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
-
-fib_result = fibonacci(10)
-print(f"Fibonacci(10) = {fib_result}")
-&lt;/script&gt;
-        </div>
-        <p><strong>Expected Result:</strong> Loops, conditionals, and function calls work</p>
-    </div>
-
-    <!-- Actual Python Scripts -->
-    <script type="python">
-# Test 1: Basic Operations
-print("🔧 Test 1: Basic Python Operations")
-print("=" * 40)
-print("Hello from Python in Ladybird!")
-result = 2 + 2
-print(f"2 + 2 = {result}")
-print("✓ Basic arithmetic works!")
-print()
+    <!-- Python Scripts - Set text directly on elements -->
+    <script type="text/python">
+# Test 1: Basic Arithmetic - 2+2=4
+try:
+    result = 2 + 2
+    test_elem = document.find("#test1")
+    if test_elem:
+        if result == 4:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.1: 2 + 2 = 4 - PASSED! Result: " + str(result)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.1: 2 + 2 = 4 - FAILED! Expected 4, got " + str(result)
+except Exception as e:
+    test_elem = document.find("#test1")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.1: ERROR - " + str(e)
     </script>
 
-    <script type="python">
-# Test 2: Data Structures
-print("📊 Test 2: Python Data Structures")
-print("=" * 40)
-
-# Lists
-numbers = [1, 2, 3, 4, 5]
-squares = [x**2 for x in numbers]
-print(f"Numbers: {numbers}")
-print(f"Squares: {squares}")
-print("✓ List comprehensions work!")
-
-# Dictionary
-person = {"name": "Python", "version": "3.x", "browser": "Ladybird"}
-print(f"Dictionary: {person}")
-print(f"Name: {person['name']}")
-print("✓ Dictionary operations work!")
-print()
+    <script type="text/python">
+# Test 2: More arithmetic
+try:
+    result2 = 10 * 5
+    test_elem = document.find("#test2")
+    if test_elem:
+        if result2 == 50:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.2: 10 * 5 = 50 - PASSED! Result: " + str(result2)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.2: 10 * 5 = 50 - FAILED! Expected 50, got " + str(result2)
+except Exception as e:
+    test_elem = document.find("#test2")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.2: ERROR - " + str(e)
     </script>
 
-    <script type="python">
-# Test 3: Control Flow
-print("🔄 Test 3: Control Flow")
-print("=" * 40)
-
-# For loop with conditionals
-total = 0
-for i in range(10):
-    if i % 2 == 0:
-        total += i
-
-print(f"Sum of even numbers 0-9: {total}")
-print("✓ Loops and conditionals work!")
-
-# Function definition and recursion
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
-
-fib_result = fibonacci(10)
-print(f"Fibonacci(10) = {fib_result}")
-print("✓ Function definitions and recursion work!")
-print()
+    <script type="text/python">
+# Test 3: Division
+try:
+    result3 = 100 / 4
+    test_elem = document.find("#test3")
+    if test_elem:
+        if result3 == 25.0:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 1.3: 100 / 4 = 25 - PASSED! Result: " + str(result3)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 1.3: 100 / 4 = 25 - FAILED! Expected 25.0, got " + str(result3)
+except Exception as e:
+    test_elem = document.find("#test3")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 1.3: ERROR - " + str(e)
     </script>
 
-    <script type="python">
-# Test 4: String Operations
-print("📝 Test 4: String Operations")
-print("=" * 40)
-
-text = "Ladybird Python Integration"
-print(f"Original: {text}")
-print(f"Uppercase: {text.upper()}")
-print(f"Length: {len(text)}")
-print(f"Reversed: {text[::-1]}")
-print("✓ String operations work!")
-print()
+    <script type="text/python">
+# Test 4: Lists
+try:
+    numbers = [1, 2, 3, 4, 5]
+    test_elem = document.find("#test4")
+    if test_elem:
+        if len(numbers) == 5:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 2.1: List operations - PASSED! List has " + str(len(numbers)) + " items"
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 2.1: List operations - FAILED! Expected 5, got " + str(len(numbers))
+except Exception as e:
+    test_elem = document.find("#test4")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 2.1: ERROR - " + str(e)
     </script>
 
-    <script type="python">
-# Final Summary
-print("🎉 Python Integration Test Summary")
-print("=" * 50)
-print("✓ Basic operations: PASS")
-print("✓ Data structures: PASS") 
-print("✓ Control flow: PASS")
-print("✓ String operations: PASS")
-print("=" * 50)
-print("🚀 Python is fully functional in Ladybird!")
+    <script type="text/python">
+# Test 5: List comprehension
+try:
+    squares = [x**2 for x in [1, 2, 3, 4, 5]]
+    expected = [1, 4, 9, 16, 25]
+    test_elem = document.find("#test5")
+    if test_elem:
+        if squares == expected:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 2.2: List comprehension - PASSED!"
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 2.2: List comprehension - FAILED! Expected " + str(expected) + ", got " + str(squares)
+except Exception as e:
+    test_elem = document.find("#test5")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 2.2: ERROR - " + str(e)
     </script>
 
-    <div class="result">
-        <p><strong>✅ Success Indicators:</strong></p>
-        <ul>
-            <li>Open browser Developer Console (F12)</li>
-            <li>Look for Python print() output</li>
-            <li>All tests should show "PASS" status</li>
-            <li>No Python syntax or runtime errors</li>
-        </ul>
-    </div>
+    <script type="text/python">
+# Test 6: Control Flow - Loop
+try:
+    total = 0
+    for i in range(10):
+        if i % 2 == 0:
+            total += i
+    # Sum of even numbers 0-9: 0+2+4+6+8 = 20
+    test_elem = document.find("#test6")
+    if test_elem:
+        if total == 20:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 3.1: For loop with conditionals - PASSED! Sum = " + str(total)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 3.1: For loop - FAILED! Expected 20, got " + str(total)
+except Exception as e:
+    test_elem = document.find("#test6")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 3.1: ERROR - " + str(e)
+    </script>
 
-    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+    <script type="text/python">
+# Test 7: Functions
+try:
+    def add(a, b):
+        return a + b
+    
+    result = add(3, 4)
+    test_elem = document.find("#test7")
+    if test_elem:
+        if result == 7:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 4.1: Function definition & call - PASSED! add(3, 4) = " + str(result)
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 4.1: Function call - FAILED! Expected 7, got " + str(result)
+except Exception as e:
+    test_elem = document.find("#test7")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 4.1: ERROR - " + str(e)
+    </script>
+
+    <script type="text/python">
+# Test 8: String Operations
+try:
+    text = "Ladybird"
+    test_elem = document.find("#test8")
+    if test_elem:
+        if len(text) == 8:
+            test_elem.set_attribute("class", "test-result test-pass")
+            test_elem.text = "✓ Test 5.1: String operations - PASSED! Length = " + str(len(text))
+        else:
+            test_elem.set_attribute("class", "test-result test-fail")
+            test_elem.text = "✗ Test 5.1: String operations - FAILED! Expected length 8, got " + str(len(text))
+except Exception as e:
+    test_elem = document.find("#test8")
+    if test_elem:
+        test_elem.set_attribute("class", "test-result test-fail")
+        test_elem.text = "✗ Test 5.1: ERROR - " + str(e)
+    </script>
+
+    <!-- JavaScript to update summary -->
+    <script>
+        function updateSummary() {
+            const testElements = document.querySelectorAll('[id^="test"]');
+            let testCount = 0;
+            let passed = 0;
+            let failed = 0;
+            
+            testElements.forEach(elem => {
+                if (elem.classList.contains('test-pass') || elem.classList.contains('test-fail')) {
+                    testCount++;
+                    if (elem.classList.contains('test-pass')) {
+                        passed++;
+                    } else if (elem.classList.contains('test-fail')) {
+                        failed++;
+                    }
+                }
+            });
+            
+            const summaryStats = document.getElementById('summary-stats');
+            const summary = document.getElementById('summary');
+            
+            if (testCount > 0) {
+                const passRate = Math.round((passed / testCount) * 100);
+                summaryStats.innerHTML = `
+                    <div>Total: ${testCount} tests</div>
+                    <div style="color: #4ade80;">Passed: ${passed}</div>
+                    <div style="color: ${failed > 0 ? '#f87171' : '#4ade80'};">Failed: ${failed}</div>
+                    <div style="font-size: 1.2em; margin-top: 10px;">Success Rate: ${passRate}%</div>
+                `;
+                
+                // Update summary background
+                if (failed === 0) {
+                    summary.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                } else if (passed > failed) {
+                    summary.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                } else {
+                    summary.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                }
+            }
+        }
+        
+        // Update summary periodically
+        window.addEventListener('load', function() {
+            setTimeout(updateSummary, 1000);
+            setInterval(updateSummary, 2000);
+        });
+    </script>
+
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.05); border-radius: 8px;">
         <h3 style="color: #1a73e8;">🔗 Navigation</h3>
         <p style="margin: 15px 0;">
             <a href="index.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">← Back to Test Index</a> |
             <a href="python_dom_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">DOM Test →</a> |
             <a href="python_advanced_test.html" style="color: #1a73e8; text-decoration: none; margin: 0 10px;">Advanced Test →</a>
-        </p>
-        <p style="font-size: 0.9em; color: #666; margin: 10px 0;">
-            ✅ <strong>Next:</strong> Try the DOM Integration Test to verify browser API access
         </p>
     </div>
 

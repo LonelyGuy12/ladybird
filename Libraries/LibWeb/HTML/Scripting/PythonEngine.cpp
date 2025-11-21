@@ -87,6 +87,10 @@ void PythonEngine::initialize()
     dbgln("🐍 Initializing Python security model...");
     // Initialize Python security model
     (void)Web::HTML::PythonSecurityModel::initialize_security();
+    
+    // Set up restricted builtins in the global builtins module
+    // This must be done before any scripts run to prevent KeyError during imports
+    (void)Web::HTML::PythonSecurityModel::setup_global_restricted_builtins();
 
     s_initialized = true;
     

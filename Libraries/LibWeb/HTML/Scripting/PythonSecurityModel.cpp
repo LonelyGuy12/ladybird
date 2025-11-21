@@ -106,6 +106,15 @@ Vector<String> default_safe_builtins()
     return builtins;
 }
 
+// Restricted open function that raises PermissionError when called
+// This allows Python's internal code to check for 'open' without KeyError,
+// but prevents user code from actually using it
+static PyObject* restricted_open_func([[maybe_unused]] PyObject* self, [[maybe_unused]] PyObject* args)
+{
+    PyErr_SetString(PyExc_PermissionError, "open() is not allowed in browser environment for security reasons");
+    return nullptr;
+}
+
 Vector<String> dangerous_patterns()
 {
     Vector<String> patterns;
@@ -207,6 +216,39 @@ ErrorOr<void> PythonSecurityModel::initialize_security()
     return {};
 }
 
+ErrorOr<void> PythonSecurityModel::setup_global_restricted_builtins()
+{
+    // This function sets up the restricted 'open' in the global builtins module
+    // It should be called during Python initialization, before any scripts run
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    
+    PyObject* builtins_module = PyEval_GetBuiltins();
+    if (!builtins_module) {
+        PyGILState_Release(gstate);
+        return Error::from_string_literal("Failed to retrieve Python builtins");
+    }
+    
+    // Create a restricted 'open' function that raises an error when called
+    static PyMethodDef restricted_open_method = {
+        "open",
+        (PyCFunction)restricted_open_func,
+        METH_VARARGS,
+        "Restricted: open() is not allowed"
+    };
+    
+    PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
+    if (restricted_open) {
+        // Add to the global builtins module to prevent KeyError during imports
+        // Python's internal code (e.g., during module imports) checks the actual builtins module
+        Py_INCREF(restricted_open); // Need to keep a reference since we're adding it to builtins_module
+        PyDict_SetItemString(builtins_module, "open", restricted_open);
+        Py_DECREF(restricted_open); // Safe to decref, builtins_module now holds a reference
+    }
+    
+    PyGILState_Release(gstate);
+    return {};
+}
+
 ErrorOr<bool> PythonSecurityModel::should_allow_script_execution(String const& script_content, URL::URL const& origin)
 {
     (void)origin;
@@ -257,8 +299,29 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
     for (auto const& name : safe_names) {
         auto name_bytes = name.to_byte_string();
         PyObject* builtin = PyDict_GetItemString(builtins_module, name_bytes.characters());
-        if (builtin)
+        if (builtin) {
+            Py_INCREF(builtin);
             PyDict_SetItemString(safe_builtins, name_bytes.characters(), builtin);
+        }
+    }
+    
+    // Create a restricted 'open' function that raises an error when called
+    // This allows Python's internal code to check for 'open' without KeyError,
+    // but prevents user code from actually using it
+    static PyMethodDef restricted_open_method = {
+        "open",
+        (PyCFunction)restricted_open_func,
+        METH_VARARGS,
+        "Restricted: open() is not allowed"
+    };
+    
+    PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
+    if (restricted_open) {
+        // Add to the execution context's __builtins__
+        // Note: The global builtins module already has the restricted 'open' set up
+        // during Python initialization, so we just need to add it to the execution context
+        PyDict_SetItemString(safe_builtins, "open", restricted_open);
+        Py_DECREF(restricted_open);
     }
 
     PyDict_SetItemString(globals, "__builtins__", safe_builtins);
@@ -288,26 +351,16 @@ ErrorOr<void> PythonSecurityModel::setup_restricted_filesystem_access(void* inte
     if (!interpreter)
         return Error::from_string_literal("Invalid interpreter state");
 
-    PyObject* globals = static_cast<PyObject*>(interpreter);
-    PyDict_DelItemString(globals, "open");
+    // Don't delete 'open' from globals - the restricted version is already set up in __builtins__
+    // by restrict_builtins(). Deleting it would cause KeyError when Python's internal code
+    // tries to access it. The restricted version in __builtins__ will prevent actual file operations.
 
-    PyObject* os_module = PyImport_ImportModule("os");
-    if (os_module) {
-        PyObject* os_disabled = PyModule_New("os_disabled");
-        if (os_disabled)
-            PyDict_SetItemString(globals, "os", os_disabled);
-        Py_XDECREF(os_disabled);
-        Py_DECREF(os_module);
-    }
-
-    PyObject* sys_module = PyImport_ImportModule("sys");
-    if (sys_module) {
-        PyObject* modules_dict = PyObject_GetAttrString(sys_module, "modules");
-        if (modules_dict)
-            PyDict_SetItemString(modules_dict, "os", Py_None);
-        Py_XDECREF(modules_dict);
-        Py_DECREF(sys_module);
-    }
+    // FIXME: We eventually want to intercept module imports via a custom __import__ hook
+    //        so we can selectively allowlist modules. Until then, avoid mutating sys.modules
+    //        globally, as other parts of the Python runtime and standard library expect
+    //        modules like 'os' to remain importable for their own internal use.
+    //        For now we can still shadow the name inside the script's globals if needed,
+    //        but we must not corrupt sys.modules.
 
     return {};
 }
