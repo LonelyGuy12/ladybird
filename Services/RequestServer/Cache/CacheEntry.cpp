@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashFunctions.h>
 #include <AK/ScopeGuard.h>
 #include <LibCore/Notifier.h>
 #include <LibCore/System.h>
@@ -20,6 +21,7 @@ ErrorOr<CacheHeader> CacheHeader::read_from_stream(Stream& stream)
     CacheHeader header;
     header.magic = TRY(stream.read_value<u32>());
     header.version = TRY(stream.read_value<u32>());
+    header.key_hash = TRY(stream.read_value<u32>());
     header.url_size = TRY(stream.read_value<u32>());
     header.url_hash = TRY(stream.read_value<u32>());
     header.status_code = TRY(stream.read_value<u32>());
@@ -32,6 +34,7 @@ ErrorOr<void> CacheHeader::write_to_stream(Stream& stream) const
 {
     TRY(stream.write_value(magic));
     TRY(stream.write_value(version));
+    TRY(stream.write_value(key_hash));
     TRY(stream.write_value(url_size));
     TRY(stream.write_value(url_hash));
     TRY(stream.write_value(status_code));
@@ -40,10 +43,24 @@ ErrorOr<void> CacheHeader::write_to_stream(Stream& stream) const
     return {};
 }
 
+u32 CacheHeader::hash() const
+{
+    u32 hash = 0;
+    hash = pair_int_hash(hash, magic);
+    hash = pair_int_hash(hash, version);
+    hash = pair_int_hash(hash, key_hash);
+    hash = pair_int_hash(hash, url_size);
+    hash = pair_int_hash(hash, url_hash);
+    hash = pair_int_hash(hash, status_code);
+    hash = pair_int_hash(hash, reason_phrase_size);
+    hash = pair_int_hash(hash, reason_phrase_hash);
+    return hash;
+}
+
 ErrorOr<void> CacheFooter::write_to_stream(Stream& stream) const
 {
     TRY(stream.write_value(data_size));
-    TRY(stream.write_value(crc32));
+    TRY(stream.write_value(header_hash));
     return {};
 }
 
@@ -51,7 +68,7 @@ ErrorOr<CacheFooter> CacheFooter::read_from_stream(Stream& stream)
 {
     CacheFooter footer;
     footer.data_size = TRY(stream.read_value<u64>());
-    footer.crc32 = TRY(stream.read_value<u32>());
+    footer.header_hash = TRY(stream.read_value<u32>());
     return footer;
 }
 
@@ -76,7 +93,7 @@ void CacheEntry::close_and_destroy_cache_entry()
     m_disk_cache.cache_entry_closed({}, *this);
 }
 
-ErrorOr<NonnullOwnPtr<CacheEntryWriter>> CacheEntryWriter::create(DiskCache& disk_cache, CacheIndex& index, u64 cache_key, String url, UnixDateTime request_time)
+ErrorOr<NonnullOwnPtr<CacheEntryWriter>> CacheEntryWriter::create(DiskCache& disk_cache, CacheIndex& index, u64 cache_key, String url, UnixDateTime request_time, AK::Duration current_time_offset_for_testing)
 {
     auto path = path_for_cache_key(disk_cache.cache_directory(), cache_key);
 
@@ -84,17 +101,19 @@ ErrorOr<NonnullOwnPtr<CacheEntryWriter>> CacheEntryWriter::create(DiskCache& dis
     auto file = TRY(Core::OutputBufferedFile::create(move(unbuffered_file)));
 
     CacheHeader cache_header;
+    cache_header.key_hash = u64_hash(cache_key);
     cache_header.url_size = url.byte_count();
     cache_header.url_hash = url.hash();
 
-    return adopt_own(*new CacheEntryWriter { disk_cache, index, cache_key, move(url), move(path), move(file), cache_header, request_time });
+    return adopt_own(*new CacheEntryWriter { disk_cache, index, cache_key, move(url), move(path), move(file), cache_header, request_time, current_time_offset_for_testing });
 }
 
-CacheEntryWriter::CacheEntryWriter(DiskCache& disk_cache, CacheIndex& index, u64 cache_key, String url, LexicalPath path, NonnullOwnPtr<Core::OutputBufferedFile> file, CacheHeader cache_header, UnixDateTime request_time)
+CacheEntryWriter::CacheEntryWriter(DiskCache& disk_cache, CacheIndex& index, u64 cache_key, String url, LexicalPath path, NonnullOwnPtr<Core::OutputBufferedFile> file, CacheHeader cache_header, UnixDateTime request_time, AK::Duration current_time_offset_for_testing)
     : CacheEntry(disk_cache, index, cache_key, move(url), move(path), cache_header)
     , m_file(move(file))
     , m_request_time(request_time)
-    , m_response_time(UnixDateTime::now())
+    , m_response_time(UnixDateTime::now() + current_time_offset_for_testing)
+    , m_current_time_offset_for_testing(current_time_offset_for_testing)
 {
 }
 
@@ -116,8 +135,8 @@ ErrorOr<void> CacheEntryWriter::write_status_and_reason(u32 status_code, Optiona
         if (!is_cacheable(status_code, response_headers))
             return Error::from_string_literal("Response is not cacheable");
 
-        auto freshness_lifetime = calculate_freshness_lifetime(response_headers);
-        auto current_age = calculate_age(response_headers, m_request_time, m_response_time);
+        auto freshness_lifetime = calculate_freshness_lifetime(status_code, response_headers, m_current_time_offset_for_testing);
+        auto current_age = calculate_age(response_headers, m_request_time, m_response_time, m_current_time_offset_for_testing);
 
         // We can cache already-expired responses if there are other cache directives that allow us to revalidate the
         // response on subsequent requests. For example, `Cache-Control: max-age=0, must-revalidate`.
@@ -161,8 +180,6 @@ ErrorOr<void> CacheEntryWriter::write_data(ReadonlyBytes data)
     }
 
     m_cache_footer.data_size += data.size();
-
-    // FIXME: Update the crc.
     return {};
 }
 
@@ -172,6 +189,8 @@ ErrorOr<void> CacheEntryWriter::flush(HTTP::HeaderMap response_headers)
 
     if (m_marked_for_deletion)
         return Error::from_string_literal("Cache entry has been deleted");
+
+    m_cache_footer.header_hash = m_cache_header.hash();
 
     if (auto result = m_file->write_value(m_cache_footer); result.is_error()) {
         dbgln("\033[31;1mUnable to flush cache entry for\033[0m {}: {}", m_url, result.error());
@@ -194,17 +213,22 @@ ErrorOr<NonnullOwnPtr<CacheEntryReader>> CacheEntryReader::create(DiskCache& dis
     auto fd = file->fd();
 
     CacheHeader cache_header;
+    size_t cache_header_size { 0 };
 
     String url;
     Optional<String> reason_phrase;
 
     auto result = [&]() -> ErrorOr<void> {
         cache_header = TRY(file->read_value<CacheHeader>());
+        cache_header_size = TRY(file->tell());
 
         if (cache_header.magic != CacheHeader::CACHE_MAGIC)
             return Error::from_string_literal("Magic value mismatch");
         if (cache_header.version != CACHE_VERSION)
             return Error::from_string_literal("Version mismatch");
+
+        if (cache_header.key_hash != u64_hash(cache_key))
+            return Error::from_string_literal("Key hash mismatch");
 
         url = TRY(String::from_stream(*file, cache_header.url_size));
         if (url.hash() != cache_header.url_hash)
@@ -224,7 +248,7 @@ ErrorOr<NonnullOwnPtr<CacheEntryReader>> CacheEntryReader::create(DiskCache& dis
         return result.release_error();
     }
 
-    auto data_offset = sizeof(CacheHeader) + cache_header.url_size + cache_header.reason_phrase_size;
+    auto data_offset = cache_header_size + cache_header.url_size + cache_header.reason_phrase_size;
 
     return adopt_own(*new CacheEntryReader { disk_cache, index, cache_key, move(url), move(path), move(file), fd, cache_header, move(reason_phrase), move(response_headers), data_offset, data_size });
 }
@@ -347,8 +371,8 @@ ErrorOr<void> CacheEntryReader::read_and_validate_footer()
 
     if (m_cache_footer.data_size != m_data_size)
         return Error::from_string_literal("Invalid data size in footer");
-
-    // FIXME: Validate the crc.
+    if (m_cache_footer.header_hash != m_cache_header.hash())
+        return Error::from_string_literal("Invalid header hash in footer");
 
     return {};
 }

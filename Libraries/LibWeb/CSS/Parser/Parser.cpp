@@ -1229,7 +1229,7 @@ Optional<Rule> Parser::parse_a_rule(TokenStream<T>& input)
     //    Otherwise, if the next token from input is an <at-keyword-token>,
     //    consume an at-rule from input, and let rule be the return value.
     else if (input.next_token().is(Token::Type::AtKeyword)) {
-        rule = consume_an_at_rule(m_token_stream).map([](auto& it) { return Rule { it }; });
+        rule = consume_an_at_rule(m_token_stream).map([](auto&& it) { return Rule { it }; });
     }
     //    Otherwise, consume a qualified rule from input and let rule be the return value.
     //    If nothing or an invalid rule error was returned, return a syntax error.
@@ -1740,6 +1740,13 @@ RefPtr<StyleValue const> Parser::parse_as_descriptor_value(AtRuleID at_rule_id, 
     if (parsed_value.is_error())
         return nullptr;
     return parsed_value.release_value();
+}
+
+RefPtr<StyleValue const> Parser::parse_as_type(ValueType value_type)
+{
+    auto component_values = parse_a_list_of_component_values(m_token_stream);
+    TokenStream tokens { component_values };
+    return parse_value(value_type, tokens);
 }
 
 // https://html.spec.whatwg.org/multipage/images.html#parsing-a-sizes-attribute

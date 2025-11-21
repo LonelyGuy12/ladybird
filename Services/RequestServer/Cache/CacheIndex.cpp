@@ -18,9 +18,6 @@ static ByteString serialize_headers(HTTP::HeaderMap const& headers)
     StringBuilder builder;
 
     for (auto const& header : headers.headers()) {
-        if (is_header_exempted_from_storage(header.name))
-            continue;
-
         builder.append(header.name);
         builder.append(':');
         builder.append(header.value);
@@ -70,7 +67,8 @@ ErrorOr<CacheIndex> CacheIndex::create(Database::Database& database)
         CACHE_METADATA_KEY);
 
     if (cache_version != CACHE_VERSION) {
-        dbgln("\033[31;1mDisk cache version mismatch:\033[0m stored version = {}, new version = {}", cache_version, CACHE_VERSION);
+        if (cache_version != 0)
+            dbgln("\033[31;1mDisk cache version mismatch:\033[0m stored version = {}, new version = {}", cache_version, CACHE_VERSION);
 
         // FIXME: We should more elegantly handle minor changes, i.e. use ALTER TABLE to add fields to CacheIndex.
         auto delete_cache_index_table = TRY(database.prepare_statement("DROP TABLE IF EXISTS CacheIndex;"sv));
@@ -115,6 +113,15 @@ CacheIndex::CacheIndex(Database::Database& database, Statements statements)
 void CacheIndex::create_entry(u64 cache_key, String url, HTTP::HeaderMap response_headers, u64 data_size, UnixDateTime request_time, UnixDateTime response_time)
 {
     auto now = UnixDateTime::now();
+
+    for (size_t i = 0; i < response_headers.headers().size();) {
+        auto const& header = response_headers.headers()[i];
+
+        if (is_header_exempted_from_storage(header.name))
+            response_headers.remove(header.name);
+        else
+            ++i;
+    }
 
     Entry entry {
         .cache_key = cache_key,

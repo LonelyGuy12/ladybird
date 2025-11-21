@@ -151,6 +151,7 @@ public:
 
     RefPtr<StyleValue const> parse_as_css_value(PropertyID);
     RefPtr<StyleValue const> parse_as_descriptor_value(AtRuleID, DescriptorID);
+    RefPtr<StyleValue const> parse_as_type(ValueType);
 
     Optional<ComponentValue> parse_as_component_value();
 
@@ -505,6 +506,7 @@ private:
     RefPtr<StyleValue const> parse_shape_outside_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_decoration_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_decoration_line_value(TokenStream<ComponentValue>&);
+    RefPtr<StyleValue const> parse_text_indent_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_text_underline_position_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_rotate_value(TokenStream<ComponentValue>&);
     RefPtr<StyleValue const> parse_stroke_dasharray_value(TokenStream<ComponentValue>&);
@@ -604,6 +606,7 @@ GC::Ref<CSS::CSSStyleSheet> parse_css_stylesheet(CSS::Parser::ParsingParams cons
 CSS::Parser::Parser::PropertiesAndCustomProperties parse_css_property_declaration_block(CSS::Parser::ParsingParams const&, StringView);
 Vector<CSS::Descriptor> parse_css_descriptor_declaration_block(CSS::Parser::ParsingParams const&, CSS::AtRuleID, StringView);
 RefPtr<CSS::StyleValue const> parse_css_value(CSS::Parser::ParsingParams const&, StringView, CSS::PropertyID);
+RefPtr<CSS::StyleValue const> parse_css_type(CSS::Parser::ParsingParams const&, StringView, CSS::ValueType);
 RefPtr<CSS::StyleValue const> parse_css_descriptor(CSS::Parser::ParsingParams const&, CSS::AtRuleID, CSS::DescriptorID, StringView);
 Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingParams const&, StringView);
 Optional<CSS::SelectorList> parse_selector_for_nested_style_rule(CSS::Parser::ParsingParams const&, StringView);

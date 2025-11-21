@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/CSSPropertyRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/EnvironmentVariable.h>
+#include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/ParentNode.h>
@@ -266,7 +267,7 @@ public:
     CSS::StyleSheetList& style_sheets();
     CSS::StyleSheetList const& style_sheets() const;
 
-    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&, GC::Ptr<DOM::ShadowRoot>)>&& callback) const;
+    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
@@ -543,6 +544,9 @@ public:
     bool anything_is_delaying_the_load_event() const;
     void increment_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
     void decrement_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
+
+    void add_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule>);
+    void remove_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule>);
 
     bool page_showing() const { return m_page_showing; }
     void set_page_showing(bool);
@@ -934,11 +938,6 @@ public:
     void add_render_blocking_element(GC::Ref<Element>);
     void remove_render_blocking_element(GC::Ref<Element>);
 
-    void schedule_ancestors_style_invalidation_due_to_presence_of_has(Node& node)
-    {
-        m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node);
-    }
-
     ElementByIdMap& element_by_id() const;
 
     auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
@@ -956,6 +955,9 @@ public:
     OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
 
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
+
+    CSS::StyleScope const& style_scope() const { return m_style_scope; }
+    CSS::StyleScope& style_scope() { return m_style_scope; }
 
 protected:
     virtual void initialize(JS::Realm&) override;
@@ -1100,6 +1102,8 @@ private:
 
     // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-set
     HashTable<GC::Ref<DOM::Element>> m_script_blocking_style_sheet_set;
+
+    HashTable<GC::Ref<CSS::CSSImportRule>> m_pending_css_import_rules;
 
     GC::Ptr<HTML::History> m_history;
 
@@ -1347,12 +1351,12 @@ private:
     // https://drafts.csswg.org/css-view-transitions-1/#document-update-callback-queue
     Vector<GC::Ptr<ViewTransition::ViewTransition>> m_update_callback_queue = {};
 
-    HashTable<GC::Weak<Node>> m_pending_nodes_for_style_invalidation_due_to_presence_of_has;
-
     GC::Ref<StyleInvalidator> m_style_invalidator;
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>> m_registered_custom_properties;
+
+    CSS::StyleScope m_style_scope;
 };
 
 template<>

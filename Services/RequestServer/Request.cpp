@@ -6,6 +6,7 @@
  */
 
 #include <AK/Enumerate.h>
+#include <AK/GenericShorthands.h>
 #include <LibCore/Notifier.h>
 #include <LibTextCodec/Decoder.h>
 #include <RequestServer/CURL.h>
@@ -84,7 +85,9 @@ Request::Request(
     , m_request_body(move(request_body))
     , m_alt_svc_cache_path(move(alt_svc_cache_path))
     , m_proxy_data(proxy_data)
+    , m_current_time_offset_for_testing(compute_current_time_offset_for_testing(m_disk_cache, m_request_headers))
 {
+    m_request_start_time += m_current_time_offset_for_testing;
 }
 
 Request::Request(
@@ -99,7 +102,9 @@ Request::Request(
     , m_curl_multi_handle(curl_multi)
     , m_resolver(resolver)
     , m_url(move(url))
+    , m_current_time_offset_for_testing(compute_current_time_offset_for_testing(m_disk_cache, m_request_headers))
 {
+    m_request_start_time += m_current_time_offset_for_testing;
 }
 
 Request::~Request()
@@ -210,6 +215,9 @@ void Request::handle_initial_state()
         m_disk_cache->create_entry(*this).visit(
             [&](Optional<CacheEntryWriter&> cache_entry_writer) {
                 m_cache_entry_writer = cache_entry_writer;
+
+                if (!m_cache_entry_writer.has_value())
+                    m_cache_status = CacheStatus::NotCached;
             },
             [&](DiskCache::CacheHasOpenEntry) {
                 // If an existing entry is open for reading or writing, we must wait for it to complete. An entry being
@@ -227,15 +235,13 @@ void Request::handle_initial_state()
 
 void Request::handle_read_cache_state()
 {
-    m_status_code = m_cache_entry_reader->status_code();
     m_reason_phrase = m_cache_entry_reader->reason_phrase();
     m_response_headers = m_cache_entry_reader->response_headers();
+    m_cache_status = CacheStatus::ReadFromCache;
 
     if (inform_client_request_started().is_error())
         return;
-
-    m_client.async_headers_became_available(m_request_id, m_response_headers, m_status_code, m_reason_phrase);
-    m_sent_response_headers_to_client = true;
+    transfer_headers_to_client_if_needed();
 
     m_cache_entry_reader->pipe_to(
         m_client_request_pipe->writer_fd(),
@@ -246,11 +252,10 @@ void Request::handle_read_cache_state()
             transition_to_state(State::Complete);
         },
         [this](auto bytes_sent) {
-            // FIXME: We should also have a way to validate the data once CacheEntry is storing its crc.
-            m_start_offset_of_response_resumed_from_cache = bytes_sent;
-            m_disk_cache.clear();
+            m_bytes_transferred_to_client = bytes_sent;
+            m_network_error = Requests::NetworkError::CacheReadFailed;
 
-            transition_to_state(State::DNSLookup);
+            transition_to_state(State::Error);
         });
 }
 
@@ -315,7 +320,7 @@ void Request::handle_fetch_state()
 
     auto is_revalidation_request = m_cache_entry_reader.has_value() && m_cache_entry_reader->must_revalidate();
 
-    if (!m_start_offset_of_response_resumed_from_cache.has_value() && !is_revalidation_request) {
+    if (!is_revalidation_request) {
         if (inform_client_request_started().is_error())
             return;
     }
@@ -390,9 +395,6 @@ void Request::handle_fetch_state()
             set_option(CURLOPT_TIMECONDITION, CURL_TIMECOND_IFMODSINCE);
             set_option(CURLOPT_TIMEVALUE, revalidation_attributes.last_modified->seconds_since_epoch());
         }
-    } else if (m_start_offset_of_response_resumed_from_cache.has_value()) {
-        auto range = ByteString::formatted("{}-", *m_start_offset_of_response_resumed_from_cache);
-        set_option(CURLOPT_RANGE, range.characters());
     }
 
     if (curl_headers) {
@@ -555,13 +557,37 @@ void Request::transfer_headers_to_client_if_needed()
     if (exchange(m_sent_response_headers_to_client, true))
         return;
 
-    m_status_code = acquire_status_code();
-    m_client.async_headers_became_available(m_request_id, m_response_headers, m_status_code, m_reason_phrase);
+    if (m_cache_entry_reader.has_value())
+        m_status_code = m_cache_entry_reader->status_code();
+    else
+        m_status_code = acquire_status_code();
 
     if (m_cache_entry_writer.has_value()) {
-        if (m_cache_entry_writer->write_status_and_reason(m_status_code, m_reason_phrase, m_response_headers).is_error())
+        if (m_cache_entry_writer->write_status_and_reason(m_status_code, m_reason_phrase, m_response_headers).is_error()) {
+            m_cache_status = CacheStatus::NotCached;
             m_cache_entry_writer.clear();
+        } else {
+            m_cache_status = CacheStatus::WrittenToCache;
+        }
     }
+
+    if (m_disk_cache.has_value() && m_disk_cache->mode() == DiskCache::Mode::Testing) {
+        switch (m_cache_status) {
+        case CacheStatus::Unknown:
+            break;
+        case CacheStatus::NotCached:
+            m_response_headers.set(TEST_CACHE_STATUS_HEADER, "not-cached"sv);
+            break;
+        case CacheStatus::WrittenToCache:
+            m_response_headers.set(TEST_CACHE_STATUS_HEADER, "written-to-cache"sv);
+            break;
+        case CacheStatus::ReadFromCache:
+            m_response_headers.set(TEST_CACHE_STATUS_HEADER, "read-from-cache"sv);
+            break;
+        }
+    }
+
+    m_client.async_headers_became_available(m_request_id, m_response_headers, m_status_code, m_reason_phrase);
 }
 
 ErrorOr<void> Request::write_queued_bytes_without_blocking()
@@ -576,45 +602,13 @@ ErrorOr<void> Request::write_queued_bytes_without_blocking()
         };
     }
 
-    auto available_bytes = m_response_buffer.used_buffer_size();
-
-    // If we've received a response to a range request that is not the partial content (206) we requested, we must
-    // only transfer the subset of data that WebContent now needs. We discard all received bytes up to the expected
-    // start of the remaining data, and then transfer the remaining bytes.
-    if (m_start_offset_of_response_resumed_from_cache.has_value()) {
-        if (m_status_code == 206) {
-            m_start_offset_of_response_resumed_from_cache.clear();
-        } else if (m_status_code == 200) {
-            // All bytes currently available have already been transferred. Discard them entirely.
-            if (m_bytes_transferred_to_client + available_bytes <= *m_start_offset_of_response_resumed_from_cache) {
-                m_bytes_transferred_to_client += available_bytes;
-
-                MUST(m_response_buffer.discard(available_bytes));
-                return {};
-            }
-
-            // Some bytes currently available have already been transferred. Discard those bytes and transfer the rest.
-            if (m_bytes_transferred_to_client + available_bytes > *m_start_offset_of_response_resumed_from_cache) {
-                auto bytes_to_discard = *m_start_offset_of_response_resumed_from_cache - m_bytes_transferred_to_client;
-                m_bytes_transferred_to_client += bytes_to_discard;
-                available_bytes -= bytes_to_discard;
-
-                MUST(m_response_buffer.discard(bytes_to_discard));
-            }
-
-            m_start_offset_of_response_resumed_from_cache.clear();
-        } else {
-            return Error::from_string_literal("Unacceptable status code for resumed HTTP request");
-        }
-    }
-
     Vector<u8> bytes_to_send;
-    bytes_to_send.resize(available_bytes);
+    bytes_to_send.resize(m_response_buffer.used_buffer_size());
     m_response_buffer.peek_some(bytes_to_send);
 
     auto result = m_client_request_pipe->write(bytes_to_send);
     if (result.is_error()) {
-        if (result.error().code() != EAGAIN)
+        if (!first_is_one_of(result.error().code(), EAGAIN, EWOULDBLOCK))
             return result.release_error();
 
         m_client_writer_notifier->set_enabled(true);

@@ -57,6 +57,7 @@
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
+#include <LibWeb/CSS/StyleValues/TextIndentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
@@ -165,7 +166,7 @@ RefPtr<StyleValue const> Parser::parse_coordinating_value_list_shorthand(TokenSt
 RefPtr<StyleValue const> Parser::parse_css_value_for_property(PropertyID property_id, TokenStream<ComponentValue>& tokens)
 {
     return parse_css_value_for_properties({ &property_id, 1 }, tokens)
-        .map([](auto& it) { return it.style_value; })
+        .map([](auto&& it) { return it.style_value; })
         .value_or(nullptr);
 }
 
@@ -721,6 +722,8 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_text_decoration_value(tokens); });
     case PropertyID::TextDecorationLine:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_text_decoration_line_value(tokens); });
+    case PropertyID::TextIndent:
+        return parse_all_as(tokens, [this](auto& tokens) { return parse_text_indent_value(tokens); });
     case PropertyID::TextShadow:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_shadow_value(tokens, ShadowStyleValue::ShadowType::Text); });
     case PropertyID::TextUnderlinePosition:
@@ -2880,7 +2883,7 @@ RefPtr<StyleValue const> Parser::parse_font_language_override_value(TokenStream<
 {
     // https://drafts.csswg.org/css-fonts/#propdef-font-language-override
     // This is `normal | <string>` but with the constraint that the string has to be 4 characters long:
-    // Shorter strings are right-padded with spaces, and longer strings are invalid.
+    // Shorter strings are right-padded with spaces before use, and longer strings are invalid.
 
     if (auto normal = parse_all_as_single_keyword_value(tokens, Keyword::Normal))
         return normal;
@@ -2927,9 +2930,20 @@ RefPtr<StyleValue const> Parser::parse_font_language_override_value(TokenStream<
             });
             return nullptr;
         }
+        // We're expected to always serialize without any trailing spaces, so remove them now for convenience.
+        auto trimmed = string_value.bytes_as_string_view().trim_whitespace(TrimMode::Right);
+        if (trimmed.is_empty()) {
+            ErrorReporter::the().report(InvalidPropertyError {
+                .rule_name = "style"_fly_string,
+                .property_name = "font-language-override"_fly_string,
+                .value_string = tokens.dump_string(),
+                .description = MUST(String::formatted("<string> value \"{}\" is only whitespace", string_value)),
+            });
+            return nullptr;
+        }
         transaction.commit();
-        if (length < 4)
-            return StringStyleValue::create(MUST(String::formatted("{:<4}", string_value)));
+        if (trimmed != string_value.bytes_as_string_view())
+            return StringStyleValue::create(FlyString::from_utf8_without_validation(trimmed.bytes()));
         return string;
     }
 
@@ -4718,6 +4732,51 @@ RefPtr<StyleValue const> Parser::parse_text_decoration_line_value(TokenStream<Co
     });
 
     return StyleValueList::create(move(style_values), StyleValueList::Separator::Space);
+}
+
+// https://drafts.csswg.org/css-text-3/#text-indent-property
+RefPtr<StyleValue const> Parser::parse_text_indent_value(TokenStream<ComponentValue>& tokens)
+{
+    // [ <length-percentage> ] && hanging? && each-line?
+    auto transaction = tokens.begin_transaction();
+
+    RefPtr<StyleValue const> length_percentage;
+    bool has_hanging = false;
+    bool has_each_line = false;
+
+    tokens.discard_whitespace();
+
+    while (tokens.has_next_token()) {
+        if (!length_percentage) {
+            if (auto parsed = parse_length_percentage_value(tokens)) {
+                length_percentage = parsed.release_nonnull();
+                tokens.discard_whitespace();
+                continue;
+            }
+        }
+
+        if (auto keyword = parse_keyword_value(tokens)) {
+            if (!has_hanging && keyword->to_keyword() == Keyword::Hanging) {
+                has_hanging = true;
+                continue;
+            }
+            if (!has_each_line && keyword->to_keyword() == Keyword::EachLine) {
+                has_each_line = true;
+                continue;
+            }
+            return nullptr;
+        }
+
+        return nullptr;
+    }
+
+    if (!length_percentage)
+        return nullptr;
+
+    transaction.commit();
+    return TextIndentStyleValue::create(length_percentage.release_nonnull(),
+        has_hanging ? TextIndentStyleValue::Hanging::Yes : TextIndentStyleValue::Hanging::No,
+        has_each_line ? TextIndentStyleValue::EachLine::Yes : TextIndentStyleValue::EachLine::No);
 }
 
 // https://drafts.csswg.org/css-text-decor-4/#text-underline-position-property

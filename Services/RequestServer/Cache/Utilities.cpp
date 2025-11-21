@@ -6,6 +6,7 @@
 
 #include <LibCrypto/Hash/SHA1.h>
 #include <LibURL/URL.h>
+#include <RequestServer/Cache/DiskCache.h>
 #include <RequestServer/Cache/Utilities.h>
 
 namespace RequestServer {
@@ -84,6 +85,31 @@ bool is_cacheable(StringView method)
     return method.is_one_of("GET"sv, "HEAD"sv);
 }
 
+// https://datatracker.ietf.org/doc/html/rfc9110#name-overview-of-status-codes
+static bool is_heuristically_cacheable_status(u32 status_code)
+{
+    // Responses with status codes that are defined as heuristically cacheable
+    // (e.g., 200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, and 501)
+    // can be reused by a cache with heuristic expiration [...]
+    switch (status_code) {
+    case 200:
+    case 203:
+    case 204:
+    case 206:
+    case 300:
+    case 301:
+    case 308:
+    case 404:
+    case 405:
+    case 410:
+    case 414:
+    case 501:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // https://httpwg.org/specs/rfc9111.html#response.cacheability
 bool is_cacheable(u32 status_code, HTTP::HeaderMap const& headers)
 {
@@ -94,21 +120,27 @@ bool is_cacheable(u32 status_code, HTTP::HeaderMap const& headers)
         return false;
 
     auto cache_control = headers.get("Cache-Control"sv);
-    if (!cache_control.has_value() && !headers.contains("Expires"sv))
-        return false;
 
     // * if the response status code is 206 or 304, or the must-understand cache directive (see Section 5.2.2.3) is
     //   present: the cache understands the response status code;
+    //
+    // This cache implements the semantics of 206 and 304, so no check is needed here.
+    // FIXME: must-understand is not implemented.
 
     // * the no-store cache directive is not present in the response (see Section 5.2.2.5);
-    if (cache_control.has_value() && cache_control->contains("no-store"sv, CaseSensitivity::CaseInsensitive))
+    if (cache_control.has_value()
+        && cache_control->contains("no-store"sv, CaseSensitivity::CaseInsensitive))
         return false;
 
     // * if the cache is shared: the private response directive is either not present or allows a shared cache to store
     //   a modified response; see Section 5.2.2.7);
+    //
+    // Not applicable: this is a private UA cache.
 
     // * if the cache is shared: the Authorization header field is not present in the request (see Section 11.6.2 of
     //   [HTTP]) or a response directive is present that explicitly allows shared caching (see Section 3.5); and
+    //
+    // Not applicable: this is a private UA cache.
 
     // * the response contains at least one of the following:
     //     - a public response directive (see Section 5.2.2.9);
@@ -119,6 +151,32 @@ bool is_cacheable(u32 status_code, HTTP::HeaderMap const& headers)
     //     - a cache extension that allows it to be cached (see Section 5.2.3); or
     //     - a status code that is defined as heuristically cacheable (see Section 4.2.2).
 
+    bool has_expires = headers.contains("Expires"sv);
+    bool has_public = false;
+    bool has_private = false;
+    bool has_max_age = false;
+
+    if (cache_control.has_value()) {
+        has_public = cache_control->contains("public"sv, CaseSensitivity::CaseInsensitive);
+        has_private = cache_control->contains("private"sv, CaseSensitivity::CaseInsensitive);
+        has_max_age = cache_control->contains("max-age"sv, CaseSensitivity::CaseInsensitive);
+
+        // FIXME: cache extensions that explicitly allow caching are not interpreted.
+    }
+
+    if (!has_public
+        && !has_private
+        && !has_expires
+        && !has_max_age
+        && !is_heuristically_cacheable_status(status_code)) {
+        return false;
+    }
+
+    // Note that, in normal operation, some caches will not store a response that has neither
+    // a cache validator nor an explicit expiration time, as such responses are not usually
+    // useful to store. However, caches are not prohibited from storing such responses.
+    //
+    // This function only answers whether storage is permitted by the protocol.
     return true;
 }
 
@@ -135,7 +193,7 @@ bool is_header_exempted_from_storage(StringView name)
         "Proxy-Connection"sv,
         "TE"sv,
         "Transfer-Encoding"sv,
-        "Upgrade"sv
+        "Upgrade"sv,
 
         // * Likewise, some fields' semantics require them to be removed before forwarding the message, and this MAY be
         //   implemented by doing so before storage; see Section 7.6.1 of [HTTP] for some examples.
@@ -147,19 +205,59 @@ bool is_header_exempted_from_storage(StringView name)
         //   unless the cache incorporates the identity of the proxy into the cache key. Effectively, this is limited to
         //   Proxy-Authenticate (Section 11.7.1 of [HTTP]), Proxy-Authentication-Info (Section 11.7.3 of [HTTP]), and
         //   Proxy-Authorization (Section 11.7.2 of [HTTP]).
-    );
+
+        // AD-HOC: Exclude headers used only for testing.
+        TEST_CACHE_ENABLED_HEADER,
+        TEST_CACHE_STATUS_HEADER,
+        TEST_CACHE_REQUEST_TIME_OFFSET);
+}
+
+// https://httpwg.org/specs/rfc9111.html#heuristic.freshness
+static AK::Duration calculate_heuristic_freshness_lifetime(HTTP::HeaderMap const& headers, AK::Duration current_time_offset_for_testing)
+{
+    // Since origin servers do not always provide explicit expiration times, a cache MAY assign a heuristic expiration
+    // time when an explicit time is not specified, employing algorithms that use other field values (such as the
+    // Last-Modified time) to estimate a plausible expiration time. This specification does not provide specific
+    // algorithms, but it does impose worst-case constraints on their results.
+    //
+    // A cache MUST NOT use heuristics to determine freshness when an explicit expiration time is present in the stored
+    // response. Because of the requirements in Section 3, heuristics can only be used on responses without explicit
+    // freshness whose status codes are defined as heuristically cacheable and on responses without explicit freshness
+    // that have been marked as explicitly cacheable (e.g., with a public response directive).
+    //
+    // If the response has a Last-Modified header field, caches are encouraged to use a heuristic expiration value that
+    // is no more than some fraction of the interval since that time. A typical setting of this fraction might be 10%.
+
+    auto last_modified = parse_http_date(headers.get("Last-Modified"sv));
+    if (!last_modified.has_value())
+        return {};
+
+    auto now = UnixDateTime::now() + current_time_offset_for_testing;
+    auto since_last_modified = now - *last_modified;
+    auto seconds = since_last_modified.to_seconds();
+
+    if (seconds <= 0)
+        return {};
+
+    // 10% heuristic, clamped at >= 0.
+    auto heuristic_seconds = max<i64>(0, seconds / 10);
+    return AK::Duration::from_seconds(heuristic_seconds);
 }
 
 // https://httpwg.org/specs/rfc9111.html#calculating.freshness.lifetime
-AK::Duration calculate_freshness_lifetime(HTTP::HeaderMap const& headers)
+AK::Duration calculate_freshness_lifetime(u32 status_code, HTTP::HeaderMap const& headers, AK::Duration current_time_offset_for_testing)
 {
     // A cache can calculate the freshness lifetime (denoted as freshness_lifetime) of a response by evaluating the
     // following rules and using the first match:
 
+    auto cache_control = headers.get("Cache-Control"sv);
+
     // * If the cache is shared and the s-maxage response directive (Section 5.2.2.10) is present, use its value, or
+    //
+    // Not a shared cache; s-maxage is ignored here.
 
     // * If the max-age response directive (Section 5.2.2.1) is present, use its value, or
-    if (auto cache_control = headers.get("Cache-Control"sv); cache_control.has_value()) {
+    if (cache_control.has_value()) {
         if (auto max_age = extract_cache_control_directive(*cache_control, "max-age"sv); max_age.has_value()) {
             if (auto seconds = max_age->to_number<i64>(); seconds.has_value())
                 return AK::Duration::from_seconds(*seconds);
@@ -169,8 +267,8 @@ AK::Duration calculate_freshness_lifetime(HTTP::HeaderMap const& headers)
     // * If the Expires response header field (Section 5.3) is present, use its value minus the value of the Date response
     //   header field (using the time the message was received if it is not present, as per Section 6.6.1 of [HTTP]), or
     if (auto expires = parse_http_date(headers.get("Expires"sv)); expires.has_value()) {
-        auto date = parse_http_date(headers.get("Date"sv)).value_or_lazy_evaluated([]() {
-            return UnixDateTime::now();
+        auto date = parse_http_date(headers.get("Date"sv)).value_or_lazy_evaluated([&]() {
+            return UnixDateTime::now() + current_time_offset_for_testing;
         });
 
         return *expires - date;
@@ -179,11 +277,26 @@ AK::Duration calculate_freshness_lifetime(HTTP::HeaderMap const& headers)
     // * Otherwise, no explicit expiration time is present in the response. A heuristic freshness lifetime might be
     //   applicable; see Section 4.2.2.
 
+    bool heuristics_allowed = false;
+
+    // Because of the requirements in Section 3, heuristics can only be used on responses without explicit freshness
+    // whose status codes are defined as heuristically cacheable and on responses without explicit freshness that have
+    // been marked as explicitly cacheable (e.g., with a public response directive).
+    if (is_heuristically_cacheable_status(status_code)) {
+        heuristics_allowed = true;
+    } else if (cache_control.has_value() && cache_control->contains("public"sv, CaseSensitivity::CaseInsensitive)) {
+        heuristics_allowed = true;
+    }
+
+    if (heuristics_allowed)
+        return calculate_heuristic_freshness_lifetime(headers, current_time_offset_for_testing);
+
+    // No explicit expiration time, and heuristics not allowed or not applicable.
     return {};
 }
 
 // https://httpwg.org/specs/rfc9111.html#age.calculations
-AK::Duration calculate_age(HTTP::HeaderMap const& headers, UnixDateTime request_time, UnixDateTime response_time)
+AK::Duration calculate_age(HTTP::HeaderMap const& headers, UnixDateTime request_time, UnixDateTime response_time, AK::Duration current_time_offset_for_testing)
 {
     // The term "age_value" denotes the value of the Age header field (Section 5.1), in a form appropriate for arithmetic
     // operation; or 0, if not available.
@@ -195,24 +308,24 @@ AK::Duration calculate_age(HTTP::HeaderMap const& headers, UnixDateTime request_
     }
 
     // The term "now" means the current value of this implementation's clock (Section 5.6.7 of [HTTP]).
-    auto now = UnixDateTime::now();
+    auto now = UnixDateTime::now() + current_time_offset_for_testing;
 
     // The term "date_value" denotes the value of the Date header field, in a form appropriate for arithmetic operations.
     // See Section 6.6.1 of [HTTP] for the definition of the Date header field and for requirements regarding responses
     // without it.
     auto date_value = parse_http_date(headers.get("Date"sv)).value_or(now);
 
-    auto apparent_age = max(0LL, (response_time - date_value).to_seconds());
+    auto apparent_age = max(AK::Duration::zero(), (response_time - date_value));
 
     auto response_delay = response_time - request_time;
     auto corrected_age_value = age_value + response_delay;
 
-    auto corrected_initial_age = max(apparent_age, corrected_age_value.to_seconds());
+    auto corrected_initial_age = max(apparent_age, corrected_age_value);
 
-    auto resident_time = (now - response_time).to_seconds();
+    auto resident_time = now - response_time;
     auto current_age = corrected_initial_age + resident_time;
 
-    return AK::Duration::from_seconds(current_age);
+    return current_age;
 }
 
 CacheLifetimeStatus cache_lifetime_status(HTTP::HeaderMap const& headers, AK::Duration freshness_lifetime, AK::Duration current_age)
@@ -278,7 +391,7 @@ void update_header_fields(HTTP::HeaderMap& stored_headers, HTTP::HeaderMap const
         // * Header fields that are automatically processed and removed by the recipient, as described below, and
 
         // * The Content-Length header field.
-        if (name.equals_ignoring_ascii_case("Content-Type"sv))
+        if (name.equals_ignoring_ascii_case("Content-Length"sv))
             return true;
 
         return false;
@@ -293,6 +406,18 @@ void update_header_fields(HTTP::HeaderMap& stored_headers, HTTP::HeaderMap const
         if (!is_header_exempted_from_update(updated_header.name))
             stored_headers.set(updated_header.name, updated_header.value);
     }
+}
+
+AK::Duration compute_current_time_offset_for_testing(Optional<DiskCache&> disk_cache, HTTP::HeaderMap const& request_headers)
+{
+    if (disk_cache.has_value() && disk_cache->mode() == DiskCache::Mode::Testing) {
+        if (auto header = request_headers.get(TEST_CACHE_REQUEST_TIME_OFFSET); header.has_value()) {
+            if (auto offset = header->to_number<i64>(); offset.has_value())
+                return AK::Duration::from_seconds(*offset);
+        }
+    }
+
+    return {};
 }
 
 }
