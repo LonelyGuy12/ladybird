@@ -96,7 +96,10 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
             package_name_builder.append(lexer.consume());
         }
         
-        String package_name = TRY(package_name_builder.to_string()).trim_whitespace();
+        auto package_name_result = package_name_builder.to_string();
+        if (package_name_result.is_error())
+            return package_name_result.release_error();
+        String package_name = package_name_result.release_value().trim_whitespace();
         
         if (package_name.is_empty())
             continue;
@@ -112,7 +115,10 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
             while (!lexer.is_eof() && lexer.peek() != '\n' && lexer.peek() != '\r' && lexer.peek() != '#') {
                 version_spec_builder.append(lexer.consume());
             }
-            version = TRY(version_spec_builder.to_string()).trim_whitespace();
+            auto version_spec_result = version_spec_builder.to_string();
+            if (version_spec_result.is_error())
+                return version_spec_result.release_error();
+            version = version_spec_result.release_value().trim_whitespace();
         }
         
         // Skip to end of line
@@ -126,7 +132,7 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
         };
         
         packages.append(package);
-        dbgln("🐍 PythonPackageManager: Parsed package requirement: {}{}", package.name, version.has_value() ? String::formatted(" {}", *version) : ""sv);
+        dbgln("🐍 PythonPackageManager: Parsed package requirement: {}{}", package.name, version.has_value() ? String::formatted(" {}", *version) : String(""sv));
     }
     
     return packages;
@@ -195,7 +201,7 @@ String PythonPackageManager::get_package_install_path() const
 {
     // Return a path for package installation
     // In a real implementation, this would be a directory within the browser's data directory
-    return String("/tmp/ladybird_python_packages");
+    return String("/tmp/ladybird_python_packages"_string);
 }
 
 ErrorOr<void> PythonPackageManager::setup_python_path()
@@ -218,7 +224,7 @@ ErrorOr<void> PythonPackageManager::setup_python_path()
     
     // Add our package installation directory to the path
     String package_path = get_package_install_path();
-    PyObject* path_string = PyUnicode_FromString(package_path.to_deprecated_string().characters());
+    PyObject* path_string = PyUnicode_FromString(package_path.characters());
     if (path_string) {
         PyList_Append(path_list, path_string);
         Py_DECREF(path_string);
