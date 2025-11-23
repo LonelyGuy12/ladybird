@@ -96,7 +96,7 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
             package_name_builder.append(lexer.consume());
         }
         
-        String package_name = package_name_builder.to_string().trim_whitespace();
+        String package_name = TRY(package_name_builder.to_string()).trim_whitespace();
         
         if (package_name.is_empty())
             continue;
@@ -112,7 +112,7 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
             while (!lexer.is_eof() && lexer.peek() != '\n' && lexer.peek() != '\r' && lexer.peek() != '#') {
                 version_spec_builder.append(lexer.consume());
             }
-            version = version_spec_builder.to_string().trim_whitespace();
+            version = TRY(version_spec_builder.to_string()).trim_whitespace();
         }
         
         // Skip to end of line
@@ -126,7 +126,7 @@ ErrorOr<Vector<PythonPackage>> PythonPackageManager::parse_requirements(String c
         };
         
         packages.append(package);
-        dbgln("🐍 PythonPackageManager: Parsed package requirement: {}{}", package.name, version.has_value() ? " " + *version : "");
+        dbgln("🐍 PythonPackageManager: Parsed package requirement: {}{}", package.name, version.has_value() ? String::formatted(" {}", *version) : ""sv);
     }
     
     return packages;
@@ -195,7 +195,7 @@ String PythonPackageManager::get_package_install_path() const
 {
     // Return a path for package installation
     // In a real implementation, this would be a directory within the browser's data directory
-    return "/tmp/ladybird_python_packages";
+    return String("/tmp/ladybird_python_packages");
 }
 
 ErrorOr<void> PythonPackageManager::setup_python_path()
@@ -218,7 +218,7 @@ ErrorOr<void> PythonPackageManager::setup_python_path()
     
     // Add our package installation directory to the path
     String package_path = get_package_install_path();
-    PyObject* path_string = PyUnicode_FromString(package_path.characters());
+    PyObject* path_string = PyUnicode_FromString(package_path.to_deprecated_string().characters());
     if (path_string) {
         PyList_Append(path_list, path_string);
         Py_DECREF(path_string);
