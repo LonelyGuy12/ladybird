@@ -82,7 +82,7 @@ static PyObject* python_document_select(PythonDocumentObject* self, PyObject* ar
     auto node_list = elements.release_value();
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
@@ -192,7 +192,7 @@ static PyObject* python_document_get_elements_by_class_name(PythonDocumentObject
 
     for (size_t i = 0; i < elements->length(); ++i) {
         auto node = elements->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
@@ -229,7 +229,7 @@ static PyObject* python_document_get_elements_by_tag_name(PythonDocumentObject* 
 
     for (size_t i = 0; i < elements->length(); ++i) {
         auto node = elements->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
@@ -256,7 +256,7 @@ static PyObject* python_document_create_text_node(PythonDocumentObject* self, Py
 
     auto text_view = StringView { text, strlen(text) };
     auto text_utf16 = Utf16String::from_utf8(text_view);
-    auto text_node = self->document->create_text_node(text_utf16);
+    [[maybe_unused]] auto text_node = self->document->create_text_node(text_utf16);
     
     // For now, we'll return None since we don't have a Python wrapper for Text nodes
     // In a full implementation, we would create a PythonText wrapper similar to PythonElement
@@ -401,7 +401,7 @@ static PyObject* python_element_select(PythonElementObject* self, PyObject* args
     auto node_list = elements.release_value();
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
