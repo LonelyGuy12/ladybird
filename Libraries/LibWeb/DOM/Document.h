@@ -573,6 +573,10 @@ public:
         virtual ~ViewportClient() = default;
         virtual void did_set_viewport_rect(CSSPixelRect const&) = 0;
     };
+
+    // Python package management
+    bool has_python_packages_loaded() const { return m_python_packages_loaded; }
+    void set_python_packages_loaded(bool loaded) { m_python_packages_loaded = loaded; }
     void register_viewport_client(ViewportClient&);
     void unregister_viewport_client(ViewportClient&);
     void inform_all_viewport_clients_about_the_current_viewport_rect();
@@ -966,9 +970,14 @@ protected:
     Document(JS::Realm&, URL::URL const&, TemporaryDocumentForFragmentParsing = TemporaryDocumentForFragmentParsing::No);
 
 private:
+    // Python package management
+    bool m_python_packages_loaded { false };
+    
     // ^HTML::GlobalEventHandlers
     virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return *this; }
 
+    // Python package management
+    bool m_python_packages_loaded { false };
     virtual void finalize() override final;
 
     void invalidate_style_of_elements_affected_by_has();
