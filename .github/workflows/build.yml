@@ -19,7 +19,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           verbose: 1
-          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,vcpkg.json,vcpkg-configuration.json') }}
+          key: ladybird-ccache-${{ runner.os }}
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -27,17 +27,13 @@ jobs:
           path: |
             Build/vcpkg
             Build/release/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          key: vcpkg-${{ runner.os }}
 
       - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-bin-${{ runner.os }}-
+          key: vcpkg-bin-${{ runner.os }}
 
       - name: Install dependencies
         run: |
@@ -146,7 +142,7 @@ jobs:
         with:
           verbose: 1
           max-size: 2G
-          key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,vcpkg.json,vcpkg-configuration.json') }}
+          key: ladybird-ccache-clang20-v5-${{ runner.os }}
           restore-keys: |
             ladybird-ccache-clang20-v5-${{ runner.os }}-
 
@@ -154,17 +150,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Build/vcpkg
-          key: vcpkg-src-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-src-clang20-v5-${{ runner.os }}-
+          key: vcpkg-src-clang20-v5-${{ runner.os }}
 
       - name: Cache vcpkg binary archives (Clang 20)
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-bin-clang20-v5-${{ runner.os }}-
+          key: vcpkg-bin-clang20-v5-${{ runner.os }}
 
       - name: Setup build environment
         run: |
