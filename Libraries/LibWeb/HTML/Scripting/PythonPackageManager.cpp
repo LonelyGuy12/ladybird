@@ -230,7 +230,8 @@ ErrorOr<void> PythonPackageManager::setup_python_path()
     
     // Add our package installation directory to the path
     String package_path = get_package_install_path();
-    PyObject* path_string = PyUnicode_FromString(package_path.to_deprecated_string().characters());
+    auto package_path_byte_string = package_path.to_byte_string();
+    PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
     if (path_string) {
         PyList_Append(path_list, path_string);
         Py_DECREF(path_string);
