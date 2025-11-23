@@ -1,3 +1,146 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ladybird-build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
+      VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          verbose: 1
+          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,vcpkg.json,vcpkg-configuration.json') }}
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            Build/vcpkg
+            Build/release/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf autoconf-archive automake ccache cmake curl \
+            libgl1-mesa-dev libdrm-dev libtool nasm ninja-build pkg-config \
+            mesa-common-dev python3-venv python3-dev unzip zip \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-wayland \
+            qt6-multimedia-dev libpulse-dev
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+          
+          # Configure ccache for optimal performance
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=max_size=2G
+          ccache -z
+          echo "ccache configured"
+
+      - name: Configure timezone (workaround for some toolchain date issues)
+        run: |
+          sudo ln -snf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+          echo "Etc/UTC" | sudo tee /etc/timezone
+
+      - name: Build Ladybird
+        env:
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
+          MAKEFLAGS: "-j4"
+        run: |
+          echo "=== Starting Ladybird build ==="
+          ccache -s
+          python3 Meta/ladybird.py build
+          echo "=== ccache statistics after build ==="
+          ccache -s
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            Build/release/**/*.log
+            Build/release/**/*.txt
+
+      - name: Package Ladybird as .deb
+        if: success()
+        run: |
+          cd Build/release
+          cpack -G DEB
+
+      - name: Upload .deb package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-linux-deb
+          path: Build/release/*.deb
+
+      - name: Upload binaries (optional)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-build
+          path: |
+            Build/release/bin/**
+            Build/release/lib/**
+            Build/release/*.log
+
+  ladybird-build-macos:
+    runs-on: macos-14
+    timeout-minutes: 360
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg_cache
+      VCPKG_FEATURE_FLAGS: manifests,compilertracking,binarycaching
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies including Clang 19+
+        run: |
+          brew update
+          brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool
+          
+          # Ensure Python 3.14 is properly linked
+          brew link --overwrite python@3.14
+          
+          # Verify Python installation
+          echo "=== Python 3.14 verification ==="
+          which python3
+          python3 --version
+          ls -la /opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/ || echo "Python framework not at expected location"
+          
+          # Install LLVM 20 which includes Clang 20
+          brew install llvm@20
+          # Create symlinks so find_compiler.py can discover Clang 20
+          sudo mkdir -p /opt/homebrew/opt/llvm/bin
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang /opt/homebrew/opt/llvm/bin/clang-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang++ /opt/homebrew/opt/llvm/bin/clang++-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang /opt/homebrew/bin/clang-20
+          sudo ln -sf /opt/homebrew/opt/llvm@20/bin/clang++ /opt/homebrew/bin/clang++-20
+          ls -la /opt/homebrew/opt/llvm/bin/ || true
+          /opt/homebrew/opt/llvm@20/bin/clang --version
+
       - name: Cache ccache (Clang 20)
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -6,3 +149,426 @@
           key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             ladybird-ccache-clang20-v5-${{ runner.os }}-
+
+      - name: Cache vcpkg source
+        uses: actions/cache@v4
+        with:
+          path: Build/vcpkg
+          key: vcpkg-src-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-src-clang20-v5-${{ runner.os }}-
+
+      - name: Cache vcpkg binary archives (Clang 20)
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg_cache
+          key: vcpkg-bin-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-clang20-v5-${{ runner.os }}-
+
+      - name: Setup build environment
+        run: |
+          echo "=== Setting up build environment ==="
+          # Create vcpkg cache directory
+          mkdir -p ${{ github.workspace }}/.vcpkg_cache
+          echo "Created .vcpkg_cache directory"
+          
+          # Configure ccache for optimal performance
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=max_size=2G
+          ccache -z  # Zero statistics
+          echo "ccache configured"
+          
+          # Hide Homebrew GCC to prevent CMake from finding it
+          if [ -f /opt/homebrew/bin/gcc ]; then
+            sudo mv /opt/homebrew/bin/gcc /opt/homebrew/bin/gcc.hidden || true
+          fi
+          if [ -f /opt/homebrew/bin/g++ ]; then
+            sudo mv /opt/homebrew/bin/g++ /opt/homebrew/bin/g++.hidden || true
+          fi
+          if [ -f /opt/homebrew/bin/gcc-14 ]; then
+            sudo mv /opt/homebrew/bin/gcc-14 /opt/homebrew/bin/gcc-14.hidden || true
+          fi
+          if [ -f /opt/homebrew/bin/g++-14 ]; then
+            sudo mv /opt/homebrew/bin/g++-14 /opt/homebrew/bin/g++-14.hidden || true
+          fi
+          echo "GCC hidden - only Clang available"
+          
+          # Verify tools
+          which ninja
+          which clang-20 || which clang
+          echo "Build environment ready"
+
+      - name: Build Ladybird (macOS)
+        env:
+          CMAKE_MAKE_PROGRAM: /opt/homebrew/bin/ninja
+          CMAKE_GENERATOR: Ninja
+          VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
+          # Enable parallel builds
+          CMAKE_BUILD_PARALLEL_LEVEL: 8
+          MAKEFLAGS: "-j8"
+          # Ensure Python is found
+          Python3_ROOT_DIR: /opt/homebrew/opt/python@3.14
+        run: |
+          echo "=== Building Ladybird with Homebrew Clang 20 ==="
+          echo "Available compilers:"
+          which clang-20 || echo "clang-20 not found"
+          which clang || echo "clang not found"
+          /opt/homebrew/opt/llvm@20/bin/clang-20 --version || true
+          
+          # Check Python availability
+          echo ""
+          echo "=== Python configuration ==="
+          which python3
+          python3 --version
+          python3-config --includes || echo "python3-config not found"
+          ls -la /opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/ || echo "Python framework not found"
+          
+          # Show ccache stats before build
+          ccache -s
+          
+          # Build with automatic Python detection
+          echo ""
+          echo "=== Building Ladybird with Python support ==="
+          python3 Meta/ladybird.py build
+          
+          # Verify Python was enabled in the build
+          echo ""
+          echo "=== Checking if Python was enabled ==="
+          echo "Searching CMake output for Python detection..."
+          grep -i "python" Build/release/CMakeCache.txt | head -20 || echo "No Python entries in CMake cache"
+          echo ""
+          echo "Checking for ENABLE_PYTHON define..."
+          grep -r "ENABLE_PYTHON" Build/release/ 2>/dev/null | head -5 || echo "ENABLE_PYTHON not found"
+          
+          # Show ccache stats after build
+          echo "=== ccache statistics after build ==="
+          ccache -s
+
+      - name: Create DMG package
+        if: success()
+        run: |
+          echo "=== Inspecting build output ==="
+          find Build/release -name "*.app" -type d
+          
+          # Find the app bundle (it should already be built)
+          APP_BUNDLE=$(find Build/release -name "Ladybird.app" -type d | head -1)
+          
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "=== No app bundle found, checking bin directory ==="
+            if [ -d "Build/release/bin/Ladybird.app" ]; then
+              APP_BUNDLE="Build/release/bin/Ladybird.app"
+            else
+              echo "ERROR: Ladybird.app not found anywhere!"
+              echo "Directory structure:"
+              ls -la Build/release/bin/ || true
+              exit 1
+            fi
+          fi
+          
+          echo "Found app bundle: $APP_BUNDLE"
+          
+          # Verify app bundle structure and size
+          echo "=== Verifying app bundle contents ==="
+          echo "Bundle directory: $APP_BUNDLE"
+          ls -la "$APP_BUNDLE/Contents/" || echo "No Contents directory!"
+          
+          echo ""
+          echo "MacOS directory:"
+          ls -lh "$APP_BUNDLE/Contents/MacOS/" || echo "No MacOS directory!"
+          
+          echo ""
+          echo "Frameworks directory:"
+          if [ -d "$APP_BUNDLE/Contents/Frameworks/" ]; then
+            ls -lh "$APP_BUNDLE/Contents/Frameworks/" | head -20
+            echo "Framework count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.framework" | wc -l)"
+            echo "Dylib count: $(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)"
+          else
+            echo "⚠️  WARNING: No Frameworks directory! Qt libraries are missing!"
+          fi
+          
+          echo ""
+          echo "Resources directory:"
+          ls -lh "$APP_BUNDLE/Contents/Resources/" || echo "No Resources directory!"
+          
+          echo ""
+          echo "=== Bundle size analysis ==="
+          # Check bundle size
+          BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "Total app bundle size: $BUNDLE_SIZE"
+          
+          # Size breakdown
+          echo ""
+          echo "Size by directory:"
+          du -sh "$APP_BUNDLE/Contents/MacOS" 2>/dev/null || echo "MacOS: N/A"
+          du -sh "$APP_BUNDLE/Contents/Frameworks" 2>/dev/null || echo "Frameworks: N/A (⚠️  PROBLEM!)"
+          du -sh "$APP_BUNDLE/Contents/Resources" 2>/dev/null || echo "Resources: N/A"
+          
+          # Check if main executable exists in bundle
+          if [ ! -f "$APP_BUNDLE/Contents/MacOS/Ladybird" ]; then
+            echo ""
+            echo "ERROR: Main executable missing from app bundle!"
+            echo "Contents of MacOS directory:"
+            ls -la "$APP_BUNDLE/Contents/MacOS/" || echo "Directory doesn't exist"
+            exit 1
+          fi
+          
+          echo ""
+          EXEC_SIZE=$(ls -lh "$APP_BUNDLE/Contents/MacOS/Ladybird" | awk '{print $5}')
+          echo "Main executable size: $EXEC_SIZE"
+          file "$APP_BUNDLE/Contents/MacOS/Ladybird"
+          
+          # Check for required dylibs
+          echo ""
+          echo "=== Checking dynamic library dependencies ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | head -30
+          
+          # Check if Python is linked
+          echo ""
+          echo "=== Checking Python linkage ==="
+          if otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep -i python; then
+            echo "✅ Python is linked!"
+            PYTHON_FRAMEWORK=$(otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep Python.framework | awk '{print $1}')
+            echo "Python framework path: $PYTHON_FRAMEWORK"
+            
+            # Check if Python framework exists
+            if [ -n "$PYTHON_FRAMEWORK" ]; then
+              # Extract framework base path
+              FRAMEWORK_BASE=$(echo "$PYTHON_FRAMEWORK" | sed 's|/Python$||')
+              echo "Framework base: $FRAMEWORK_BASE"
+              
+              if [ -d "$FRAMEWORK_BASE" ]; then
+                echo "Python framework found at: $FRAMEWORK_BASE"
+                # Note: We don't bundle Python framework - it should be installed on user's system
+                echo "Note: Python framework is NOT bundled - users need Python installed"
+              fi
+            fi
+          else
+            echo "⚠️  WARNING: Python is NOT linked to Ladybird!"
+            echo "Python integration will not be available"
+          fi
+          
+          # Fix the broken symlink and copy actual libraries
+          echo ""
+          echo "=== Fixing library paths ==="
+          
+          # Remove the broken symlink
+          if [ -L "$APP_BUNDLE/Contents/lib" ]; then
+            echo "Removing broken symlink: $APP_BUNDLE/Contents/lib"
+            rm "$APP_BUNDLE/Contents/lib"
+          fi
+          
+          # Find all liblagom dylibs
+          echo "Searching for Ladybird libraries..."
+          DYLIB_DIR="Build/release/lib"
+          
+          if [ ! -d "$DYLIB_DIR" ]; then
+            echo "ERROR: Library directory not found: $DYLIB_DIR"
+            exit 1
+          fi
+          
+          echo "Found library directory: $DYLIB_DIR"
+          ls -lh "$DYLIB_DIR" | grep "\.dylib"
+          
+          # Copy all dylibs to Frameworks
+          echo ""
+          echo "Copying Ladybird libraries to Frameworks..."
+          cp -v "$DYLIB_DIR"/*.dylib "$APP_BUNDLE/Contents/Frameworks/" || echo "Warning: Some dylibs may not exist"
+          
+          # Copy vcpkg dependencies (like libsqlite3)
+          echo ""
+          echo "=== Copying vcpkg dependencies ==="
+          VCPKG_LIB_DIR="Build/release/vcpkg_installed/arm64-osx-dynamic/lib"
+          
+          if [ -d "$VCPKG_LIB_DIR" ]; then
+            echo "Found vcpkg libraries at: $VCPKG_LIB_DIR"
+            ls -lh "$VCPKG_LIB_DIR" | grep "\.dylib" | head -20
+            
+            # Copy all vcpkg dylibs
+            echo ""
+            echo "Copying vcpkg libraries..."
+            find "$VCPKG_LIB_DIR" -name "*.dylib" -exec cp -v {} "$APP_BUNDLE/Contents/Frameworks/" \;
+          else
+            echo "⚠️  WARNING: vcpkg lib directory not found at $VCPKG_LIB_DIR"
+            echo "Checking alternate locations..."
+            find Build/release -name "libsqlite3.dylib" | head -5
+          fi
+          
+          # Also copy any Qt libraries if they exist
+          echo ""
+          echo "=== Searching for Qt libraries ==="
+          
+          # Try multiple possible Qt locations
+          QT_PATHS=(
+            "/opt/homebrew/opt/qt@6/lib"
+            "/opt/homebrew/opt/qt/lib"
+            "/usr/local/opt/qt@6/lib"
+            "/usr/local/opt/qt/lib"
+          )
+          
+          QT_LIB_DIR=""
+          for qt_path in "${QT_PATHS[@]}"; do
+            if [ -d "$qt_path" ]; then
+              echo "Found Qt at: $qt_path"
+              QT_LIB_DIR="$qt_path"
+              break
+            fi
+          done
+          
+          if [ -z "$QT_LIB_DIR" ]; then
+            echo "⚠️  WARNING: Qt libraries not found in standard locations!"
+            echo "Checking if Qt is linked via vcpkg..."
+            # Qt might be built by vcpkg and already linked
+            otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep -i qt || echo "No Qt dependencies found"
+          else
+            echo "Copying Qt libraries from: $QT_LIB_DIR"
+            
+            # Copy essential Qt dylibs
+            for qtlib in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -f "$QT_LIB_DIR/lib${qtlib}.6.dylib" ]; then
+                echo "  Copying lib${qtlib}.6.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.6.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              elif [ -f "$QT_LIB_DIR/lib${qtlib}.dylib" ]; then
+                echo "  Copying lib${qtlib}.dylib"
+                cp "$QT_LIB_DIR/lib${qtlib}.dylib" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+            
+            # Also check for Qt frameworks (if using framework build)
+            for qtfw in QtCore QtGui QtWidgets QtNetwork QtMultimedia QtMultimediaWidgets QtDBus QtPrintSupport; do
+              if [ -d "$QT_LIB_DIR/${qtfw}.framework" ]; then
+                echo "  Copying ${qtfw}.framework"
+                cp -R "$QT_LIB_DIR/${qtfw}.framework" "$APP_BUNDLE/Contents/Frameworks/"
+              fi
+            done
+          fi
+          
+          echo ""
+          echo "=== Frameworks directory after copying ==="
+          ls -lh "$APP_BUNDLE/Contents/Frameworks/"
+          DYLIB_COUNT=$(find "$APP_BUNDLE/Contents/Frameworks/" -name "*.dylib" | wc -l)
+          echo "Total dylibs: $DYLIB_COUNT"
+          
+          # Fix rpaths in the executable
+          echo ""
+          echo "=== Fixing rpaths ==="
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/Ladybird" 2>/dev/null || echo "rpath already exists"
+          
+          # Fix rpaths in helper executables
+          for helper in WebContent WebWorker RequestServer ImageDecoder WebDriver; do
+            if [ -f "$APP_BUNDLE/Contents/MacOS/$helper" ]; then
+              echo "Fixing rpath for $helper"
+              install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$helper" 2>/dev/null || true
+            fi
+          done
+          
+          # Verify libraries can be found
+          echo ""
+          echo "=== Verifying library resolution ==="
+          otool -L "$APP_BUNDLE/Contents/MacOS/Ladybird" | grep "@rpath" | head -5
+          
+          # Check new bundle size
+          echo ""
+          NEW_BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
+          echo "Bundle size after adding libraries: $NEW_BUNDLE_SIZE"
+          
+          # Ad-hoc code sign the app bundle
+          echo ""
+          echo "=== Ad-hoc signing the app bundle ==="
+          codesign --force --deep --sign - "$APP_BUNDLE"
+          codesign --verify --verbose "$APP_BUNDLE"
+          
+          # Create DMG staging directory
+          DMG_DIR="Build/dmg_staging"
+          rm -rf "$DMG_DIR"
+          mkdir -p "$DMG_DIR"
+          
+          # Copy the app bundle
+          echo "=== Copying app bundle to DMG staging ==="
+          cp -R "$APP_BUNDLE" "$DMG_DIR/"
+          
+          # Verify copied bundle
+          COPIED_SIZE=$(du -sh "$DMG_DIR/Ladybird.app" | cut -f1)
+          echo "Copied bundle size: $COPIED_SIZE"
+          
+          # Create Applications symlink
+          ln -s /Applications "$DMG_DIR/Applications"
+          
+          # Create DMG
+          DMG_NAME="Ladybird-0.1.0-macOS-arm64.dmg"
+          echo "=== Creating DMG ==="
+          hdiutil create -volname "Ladybird" \
+            -srcfolder "$DMG_DIR" \
+            -ov -format UDZO \
+            "Build/release/$DMG_NAME"
+          
+          # Check DMG size
+          DMG_SIZE=$(ls -lh "Build/release/$DMG_NAME" | awk '{print $5}')
+          echo "=== DMG created ==="
+          echo "DMG size: $DMG_SIZE"
+          ls -lh "Build/release/$DMG_NAME"
+          
+          # Warn if DMG is suspiciously small
+          DMG_SIZE_BYTES=$(stat -f%z "Build/release/$DMG_NAME")
+          DMG_SIZE_MB=$(echo "scale=1; $DMG_SIZE_BYTES / 1024 / 1024" | bc)
+          
+          echo ""
+          echo "=== Final DMG Analysis ==="
+          echo "DMG size: ${DMG_SIZE_MB} MB"
+          
+          if [ "$DMG_SIZE_BYTES" -lt 30000000 ]; then
+            echo ""
+            echo "❌❌❌ CRITICAL ERROR ❌❌❌"
+            echo "DMG is only ${DMG_SIZE_MB} MB - this is NOT usable!"
+            echo "Expected size: 50+ MB minimum"
+            echo ""
+            echo "Most likely causes:"
+            echo "  1. Ladybird libraries not bundled"
+            echo "  2. Resources not included"
+            echo ""
+            echo "The app will CRASH immediately on launch!"
+            echo "DO NOT distribute this DMG!"
+            exit 1
+          elif [ "$DMG_SIZE_BYTES" -lt 100000000 ]; then
+            echo ""
+            echo "✅ DMG size: ${DMG_SIZE_MB} MB"
+            echo "Note: Ladybird uses system Qt frameworks on macOS (not bundled)"
+            echo "This is normal - the app will use Qt from /System/Library or Homebrew"
+            echo "Users need Qt installed via Homebrew: brew install qt@6"
+          else
+            echo ""
+            echo "✅ DMG size looks good: ${DMG_SIZE_MB} MB"
+            echo "All dependencies appear to be bundled"
+          fi
+          
+          # Sign the DMG
+          echo "=== Signing the DMG ==="
+          codesign --force --sign - "Build/release/$DMG_NAME"
+
+      - name: Upload DMG artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-macos-dmg
+          path: Build/release/*.dmg
+          if-no-files-found: warn
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-macos
+          path: |
+            Build/release/**/*.log
+            Build/release/**/*.txt
+
+      - name: Upload binaries (optional)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladybird-build-macos
+          path: |
+            Build/release/bin/**
+            Build/release/lib/**
+            Build/release/*.log
