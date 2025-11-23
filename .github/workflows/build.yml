@@ -19,7 +19,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           verbose: 1
-          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          key: ladybird-ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,**/*.cmake,vcpkg.json,vcpkg-configuration.json') }}
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -27,7 +27,7 @@ jobs:
           path: |
             Build/vcpkg
             Build/release/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
@@ -35,7 +35,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-bin-${{ runner.os }}-
 
@@ -146,7 +146,7 @@ jobs:
         with:
           verbose: 1
           max-size: 2G
-          key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'vcpkg.json', 'vcpkg-configuration.json') }}
+          key: ladybird-ccache-clang20-v5-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt,**/*.cmake,vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             ladybird-ccache-clang20-v5-${{ runner.os }}-
 
@@ -154,7 +154,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Build/vcpkg
-          key: vcpkg-src-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-src-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-src-clang20-v5-${{ runner.os }}-
 
@@ -162,7 +162,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .vcpkg_cache
-          key: vcpkg-bin-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-bin-clang20-v5-${{ runner.os }}-${{ hashFiles('vcpkg.json,vcpkg-configuration.json') }}
           restore-keys: |
             vcpkg-bin-clang20-v5-${{ runner.os }}-
 
@@ -215,7 +215,7 @@ jobs:
           echo "Available compilers:"
           which clang-20 || echo "clang-20 not found"
           which clang || echo "clang not found"
-          /opt/homebrew/opt/llvm/bin/clang-20 --version || true
+          /opt/homebrew/opt/llvm@20/bin/clang-20 --version || true
           
           # Check Python availability
           echo ""
