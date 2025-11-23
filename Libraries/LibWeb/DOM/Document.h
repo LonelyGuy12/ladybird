@@ -974,10 +974,7 @@ private:
     bool m_python_packages_loaded { false };
     
     // ^HTML::GlobalEventHandlers
-    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return *this; }
-
-    // Python package management
-    bool m_python_packages_loaded { false };
+    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return GC::Ptr<EventTarget>(static_cast<EventTarget&>(*this)); }
     virtual void finalize() override final;
 
     void invalidate_style_of_elements_affected_by_has();
