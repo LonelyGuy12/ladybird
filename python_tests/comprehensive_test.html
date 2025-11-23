@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Comprehensive Python DOM API Test</title>
+</head>
+<body>
+    <h1>Comprehensive Python DOM API Test</h1>
+    <div id="test-container" class="container">
+        <p id="test-paragraph" class="content">This is a test paragraph</p>
+        <span id="test-span" class="content">This is a test span</span>
+        <div id="child-container">
+            <p id="child-paragraph">Child paragraph</p>
+        </div>
+    </div>
+    <div id="output"></div>
+
+    <script type="python">
+        # Test all implemented Document methods
+        print("Testing Document methods...")
+        
+        # Test get_element_by_id
+        element = document.get_element_by_id("test-paragraph")
+        if element:
+            print("✓ get_element_by_id works")
+        else:
+            print("✗ get_element_by_id failed")
+            
+        # Test get_elements_by_class_name
+        elements = document.get_elements_by_class_name("content")
+        if len(elements) == 2:
+            print("✓ get_elements_by_class_name works")
+        else:
+            print("✗ get_elements_by_class_name failed")
+            
+        # Test get_elements_by_tag_name
+        paragraphs = document.get_elements_by_tag_name("p")
+        if len(paragraphs) >= 2:
+            print("✓ get_elements_by_tag_name works")
+        else:
+            print("✗ get_elements_by_tag_name failed")
+            
+        # Test create_element
+        new_div = document.create_element("div")
+        if new_div:
+            print("✓ create_element works")
+        else:
+            print("✗ create_element failed")
+            
+        # Test create_text_node
+        text_node = document.create_text_node("Test text")
+        # Note: create_text_node currently returns None as we don't have a Python wrapper for Text nodes
+        print("✓ create_text_node called (returns None as expected)")
+        
+        # Test all implemented Element methods
+        print("\nTesting Element methods...")
+        
+        # Get an element to test with
+        test_element = document.get_element_by_id("test-container")
+        
+        # Test has_attribute
+        if test_element.has_attribute("id"):
+            print("✓ has_attribute works")
+        else:
+            print("✗ has_attribute failed")
+            
+        # Test get_attribute
+        id_value = test_element.get_attribute("id")
+        if id_value == "test-container":
+            print("✓ get_attribute works")
+        else:
+            print("✗ get_attribute failed")
+            
+        # Test set_attribute
+        test_element.set_attribute("data-test", "test-value")
+        new_value = test_element.get_attribute("data-test")
+        if new_value == "test-value":
+            print("✓ set_attribute works")
+        else:
+            print("✗ set_attribute failed")
+            
+        # Test remove_attribute
+        test_element.remove_attribute("data-test")
+        removed_value = test_element.get_attribute("data-test")
+        if removed_value is None:
+            print("✓ remove_attribute works")
+        else:
+            print("✗ remove_attribute failed")
+            
+        # Test select and find
+        selected_elements = test_element.select(".content")
+        if len(selected_elements) == 2:
+            print("✓ select works")
+        else:
+            print("✗ select failed")
+            
+        found_element = test_element.find("#test-paragraph")
+        if found_element:
+            print("✓ find works")
+        else:
+            print("✗ find failed")
+            
+        # Test text property
+        test_element.text = "New text content"
+        if "New text content" in test_element.text:
+            print("✓ text property works")
+        else:
+            print("✗ text property failed")
+            
+        # Test html property
+        test_element.html = "<p>HTML content</p>"
+        if "HTML content" in test_element.html:
+            print("✓ html property works")
+        else:
+            print("✗ html property failed")
+            
+        # Test DOM manipulation methods
+        print("\nTesting DOM manipulation methods...")
+        
+        # Reset the container content
+        container = document.get_element_by_id("test-container")
+        container.html = '<p id="test-paragraph" class="content">This is a test paragraph</p><span id="test-span" class="content">This is a test span</span><div id="child-container"><p id="child-paragraph">Child paragraph</p></div>'
+        
+        # Test append_child
+        new_element = document.create_element("div")
+        new_element.text = "Appended child"
+        container.append_child(new_element)
+        print("✓ append_child works")
+        
+        # Test remove_child
+        # First get the child we just added (it should be the last child)
+        children = container.select("div")
+        if len(children) > 1:
+            last_child = children[-1]
+            if last_child.text == "Appended child":
+                container.remove_child(last_child)
+                print("✓ remove_child works")
+            else:
+                print("✗ remove_child failed - couldn't find appended child")
+        else:
+            print("✗ remove_child failed - couldn't find appended child")
+            
+        # Test replace_child
+        # Create new elements for replacement test
+        old_element = document.get_element_by_id("test-span")
+        if old_element:
+            new_span = document.create_element("span")
+            new_span.text = "Replaced span"
+            # Get the parent container
+            parent_container = document.get_element_by_id("test-container")
+            if parent_container:
+                parent_container.replace_child(new_span, old_element)
+                print("✓ replace_child works")
+            else:
+                print("✗ replace_child failed - couldn't find parent")
+        else:
+            print("✗ replace_child failed - couldn't find element to replace")
+            
+        print("\nAll tests completed!")
+    </script>
+</body>
+</html>

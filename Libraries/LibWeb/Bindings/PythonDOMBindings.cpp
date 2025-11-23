@@ -82,7 +82,7 @@ static PyObject* python_document_select(PythonDocumentObject* self, PyObject* ar
     auto node_list = elements.release_value();
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
@@ -146,10 +146,131 @@ static PyObject* python_document_create_element(PythonDocumentObject* self, PyOb
     return PythonElement::create_from_cpp_element(*element.release_value());
 }
 
+static PyObject* python_document_get_element_by_id(PythonDocumentObject* self, PyObject* args)
+{
+    if (!self->document) {
+        PyErr_SetString(PyExc_RuntimeError, "Document object is invalid");
+        return nullptr;
+    }
+
+    char const* id = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &id)) {
+        return nullptr;
+    }
+
+    auto id_view = StringView { id, strlen(id) };
+    auto id_str = MUST(String::from_utf8(id_view));
+    auto id_fly = FlyString(id_str);
+    auto element = self->document->get_element_by_id(id_fly);
+    if (element) {
+        return PythonElement::create_from_cpp_element(const_cast<Web::DOM::Element&>(*element));
+    }
+
+    Py_RETURN_NONE;
+}
+
+static PyObject* python_document_get_elements_by_class_name(PythonDocumentObject* self, PyObject* args)
+{
+    if (!self->document) {
+        PyErr_SetString(PyExc_RuntimeError, "Document object is invalid");
+        return nullptr;
+    }
+
+    char const* class_name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &class_name)) {
+        return nullptr;
+    }
+
+    auto class_name_view = StringView { class_name, strlen(class_name) };
+    auto class_name_str = MUST(String::from_utf8(class_name_view));
+    auto elements = self->document->get_elements_by_class_name(class_name_str);
+    
+    // Create a Python list to hold the results
+    PyObject* result = PyList_New(0);
+    if (!result)
+        return nullptr;
+
+    for (size_t i = 0; i < elements->length(); ++i) {
+        auto node = elements->item(i);
+        if (node) {
+            auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
+            PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
+            if (element_wrapper) {
+                PyList_Append(result, element_wrapper);
+                Py_DECREF(element_wrapper);
+            }
+        }
+    }
+
+    return result;
+}
+
+static PyObject* python_document_get_elements_by_tag_name(PythonDocumentObject* self, PyObject* args)
+{
+    if (!self->document) {
+        PyErr_SetString(PyExc_RuntimeError, "Document object is invalid");
+        return nullptr;
+    }
+
+    char const* tag_name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &tag_name)) {
+        return nullptr;
+    }
+
+    auto tag_name_view = StringView { tag_name, strlen(tag_name) };
+    auto tag_name_str = MUST(String::from_utf8(tag_name_view));
+    auto tag_name_fly = FlyString(tag_name_str);
+    auto elements = self->document->get_elements_by_tag_name(tag_name_fly);
+    
+    // Create a Python list to hold the results
+    PyObject* result = PyList_New(0);
+    if (!result)
+        return nullptr;
+
+    for (size_t i = 0; i < elements->length(); ++i) {
+        auto node = elements->item(i);
+        if (node) {
+            auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
+            PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
+            if (element_wrapper) {
+                PyList_Append(result, element_wrapper);
+                Py_DECREF(element_wrapper);
+            }
+        }
+    }
+
+    return result;
+}
+
+static PyObject* python_document_create_text_node(PythonDocumentObject* self, PyObject* args)
+{
+    if (!self->document) {
+        PyErr_SetString(PyExc_RuntimeError, "Document object is invalid");
+        return nullptr;
+    }
+
+    char const* text = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &text)) {
+        return nullptr;
+    }
+
+    auto text_view = StringView { text, strlen(text) };
+    auto text_utf16 = Utf16String::from_utf8(text_view);
+    [[maybe_unused]] auto text_node = self->document->create_text_node(text_utf16);
+    
+    // For now, we'll return None since we don't have a Python wrapper for Text nodes
+    // In a full implementation, we would create a PythonText wrapper similar to PythonElement
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef python_document_methods[] = {
     { "select", (PyCFunction)python_document_select, METH_VARARGS, "Select elements using CSS selector" },
     { "find", (PyCFunction)python_document_find, METH_VARARGS, "Find first element using CSS selector" },
     { "create_element", (PyCFunction)python_document_create_element, METH_VARARGS, "Create a new element" },
+    { "get_element_by_id", (PyCFunction)python_document_get_element_by_id, METH_VARARGS, "Get element by its ID" },
+    { "get_elements_by_class_name", (PyCFunction)python_document_get_elements_by_class_name, METH_VARARGS, "Get elements by class name" },
+    { "get_elements_by_tag_name", (PyCFunction)python_document_get_elements_by_tag_name, METH_VARARGS, "Get elements by tag name" },
+    { "create_text_node", (PyCFunction)python_document_create_text_node, METH_VARARGS, "Create a text node" },
     { NULL, NULL, 0, NULL } // Sentinel
 };
 
@@ -280,7 +401,7 @@ static PyObject* python_element_select(PythonElementObject* self, PyObject* args
     auto node_list = elements.release_value();
     for (size_t i = 0; i < node_list->length(); ++i) {
         auto node = node_list->item(i);
-        if (node && is<Web::DOM::Element>(*node)) {
+        if (node) {
             auto& element = const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*node));
             PyObject* element_wrapper = PythonElement::create_from_cpp_element(element);
             if (element_wrapper) {
@@ -365,6 +486,159 @@ static PyObject* python_element_set_attribute(PythonElementObject* self, PyObjec
     self->element->set_attribute_value(name_fly, value_str);
 
     Py_RETURN_NONE;
+}
+
+static PyObject* python_element_has_attribute(PythonElementObject* self, PyObject* args)
+{
+    if (!self->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
+        return nullptr;
+    }
+
+    char const* name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name)) {
+        return nullptr;
+    }
+
+    auto name_view = StringView { name, strlen(name) };
+    auto name_str = MUST(String::from_utf8(name_view));
+    auto name_fly = FlyString(name_str);
+    bool has_attr = self->element->has_attribute(name_fly);
+    
+    if (has_attr) {
+        Py_RETURN_TRUE;
+    } else {
+        Py_RETURN_FALSE;
+    }
+}
+
+static PyObject* python_element_remove_attribute(PythonElementObject* self, PyObject* args)
+{
+    if (!self->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
+        return nullptr;
+    }
+
+    char const* name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name)) {
+        return nullptr;
+    }
+
+    auto name_view = StringView { name, strlen(name) };
+    auto name_str = MUST(String::from_utf8(name_view));
+    auto name_fly = FlyString(name_str);
+    self->element->remove_attribute(name_fly);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject* python_element_append_child(PythonElementObject* self, PyObject* args)
+{
+    if (!self->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
+        return nullptr;
+    }
+
+    PyObject* child_obj = nullptr;
+    if (!PyArg_ParseTuple(args, "O", &child_obj)) {
+        return nullptr;
+    }
+
+    // Check if the child is a PythonElementObject
+    if (!PyObject_TypeCheck(child_obj, &PythonElement::s_type)) {
+        PyErr_SetString(PyExc_TypeError, "Child must be an Element");
+        return nullptr;
+    }
+
+    PythonElementObject* child_element_obj = (PythonElementObject*)child_obj;
+    if (!child_element_obj->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Child element is invalid");
+        return nullptr;
+    }
+
+    // Call the C++ append_child method
+    auto result = self->element->append_child(*child_element_obj->element);
+    if (result.is_error()) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to append child");
+        return nullptr;
+    }
+
+    // Return the appended child element
+    return PythonElement::create_from_cpp_element(const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*result.value())));
+}
+
+static PyObject* python_element_remove_child(PythonElementObject* self, PyObject* args)
+{
+    if (!self->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
+        return nullptr;
+    }
+
+    PyObject* child_obj = nullptr;
+    if (!PyArg_ParseTuple(args, "O", &child_obj)) {
+        return nullptr;
+    }
+
+    // Check if the child is a PythonElementObject
+    if (!PyObject_TypeCheck(child_obj, &PythonElement::s_type)) {
+        PyErr_SetString(PyExc_TypeError, "Child must be an Element");
+        return nullptr;
+    }
+
+    PythonElementObject* child_element_obj = (PythonElementObject*)child_obj;
+    if (!child_element_obj->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Child element is invalid");
+        return nullptr;
+    }
+
+    // Call the C++ remove_child method
+    auto result = self->element->remove_child(*child_element_obj->element);
+    if (result.is_error()) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to remove child");
+        return nullptr;
+    }
+
+    // Return the removed child element
+    return PythonElement::create_from_cpp_element(const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*result.value())));
+}
+
+static PyObject* python_element_replace_child(PythonElementObject* self, PyObject* args)
+{
+    if (!self->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element object is invalid");
+        return nullptr;
+    }
+
+    PyObject* new_child_obj = nullptr;
+    PyObject* old_child_obj = nullptr;
+    if (!PyArg_ParseTuple(args, "OO", &new_child_obj, &old_child_obj)) {
+        return nullptr;
+    }
+
+    // Check if both objects are PythonElementObjects
+    if (!PyObject_TypeCheck(new_child_obj, &PythonElement::s_type) || 
+        !PyObject_TypeCheck(old_child_obj, &PythonElement::s_type)) {
+        PyErr_SetString(PyExc_TypeError, "Both arguments must be Elements");
+        return nullptr;
+    }
+
+    PythonElementObject* new_child_element_obj = (PythonElementObject*)new_child_obj;
+    PythonElementObject* old_child_element_obj = (PythonElementObject*)old_child_obj;
+    
+    if (!new_child_element_obj->element || !old_child_element_obj->element) {
+        PyErr_SetString(PyExc_RuntimeError, "Element objects are invalid");
+        return nullptr;
+    }
+
+    // Call the C++ replace_child method
+    auto result = self->element->replace_child(*new_child_element_obj->element, *old_child_element_obj->element);
+    if (result.is_error()) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to replace child");
+        return nullptr;
+    }
+
+    // Return the replaced child element
+    return PythonElement::create_from_cpp_element(const_cast<Web::DOM::Element&>(static_cast<Web::DOM::Element const&>(*result.value())));
 }
 
 static PyObject* python_element_get_text_content(PythonElementObject* self, void*)
@@ -468,6 +742,11 @@ static PyMethodDef python_element_methods[] = {
     { "find", (PyCFunction)python_element_find, METH_VARARGS, "Find first child element using CSS selector" },
     { "get_attribute", (PyCFunction)python_element_get_attribute, METH_VARARGS, "Get an attribute value" },
     { "set_attribute", (PyCFunction)python_element_set_attribute, METH_VARARGS, "Set an attribute value" },
+    { "has_attribute", (PyCFunction)python_element_has_attribute, METH_VARARGS, "Check if an attribute exists" },
+    { "remove_attribute", (PyCFunction)python_element_remove_attribute, METH_VARARGS, "Remove an attribute" },
+    { "append_child", (PyCFunction)python_element_append_child, METH_VARARGS, "Append a child element" },
+    { "remove_child", (PyCFunction)python_element_remove_child, METH_VARARGS, "Remove a child element" },
+    { "replace_child", (PyCFunction)python_element_replace_child, METH_VARARGS, "Replace a child element" },
     { NULL, NULL, 0, NULL } // Sentinel
 };
 
