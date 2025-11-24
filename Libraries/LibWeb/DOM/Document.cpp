@@ -2983,6 +2983,11 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
                     dbgln("🐍 Document: Failed to install packages: {}", install_result.error());
                 } else {
                     dbgln("🐍 Document: Successfully installed packages from requirements.txt");
+                    // Set up Python path after installing packages
+                    auto setup_result = package_manager.setup_python_path();
+                    if (setup_result.is_error()) {
+                        dbgln("🐍 Document: Failed to set up Python path: {}", setup_result.error());
+                    }
                 }
             } else {
                 dbgln("🐍 Document: Failed to parse requirements.txt: {}", packages_result.error());
