@@ -258,10 +258,10 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
             auto trimmed_version = version.trim_whitespace();
             if (!trimmed_version.is_error() && !trimmed_version.value().is_empty()) {
                 // Check if version already has an operator
-                if (!trimmed_version.value().starts_with("=") && 
-                    !trimmed_version.value().starts_with(">") && 
-                    !trimmed_version.value().starts_with("<") && 
-                    !trimmed_version.value().starts_with("~")) {
+                if (!trimmed_version.value().starts_with_bytes("=") && 
+                    !trimmed_version.value().starts_with_bytes(">") && 
+                    !trimmed_version.value().starts_with_bytes("<") && 
+                    !trimmed_version.value().starts_with_bytes("~")) {
                     command_builder.append("=="sv);
                 }
                 command_builder.append(trimmed_version.value());
@@ -329,12 +329,7 @@ ErrorOr<void> PythonPackageManager::setup_python_path()
     dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
     
     // Convert to ByteString for Python C API
-    auto package_path_result = package_path.to_byte_string();
-    if (package_path_result.is_error()) {
-        dbgln("🐍 PythonPackageManager: Failed to convert package path to byte string");
-        return package_path_result.release_error();
-    }
-    ByteString package_path_byte_string = package_path_result.release_value();
+    ByteString package_path_byte_string = package_path.to_byte_string();
     
     // Get the current Python path
     PyObject* sys_path = PySys_GetObject("path");
