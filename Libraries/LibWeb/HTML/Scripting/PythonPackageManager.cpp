@@ -78,6 +78,17 @@ ErrorOr<void> PythonPackageManager::initialize()
         dbgln("🐍 PythonPackageManager: Using existing virtual environment at {}", venv_path);
     }
     
+    // Upgrade pip in the virtual environment to ensure we have the latest version
+    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
+    auto upgrade_command_result = String::formatted("{} install --upgrade pip", venv_pip);
+    if (upgrade_command_result.is_error()) {
+        dbgln("🐍 PythonPackageManager: Failed to format pip upgrade command");
+        return upgrade_command_result.release_error();
+    }
+    String upgrade_command = upgrade_command_result.release_value();
+    auto upgrade_command_byte_string = upgrade_command.to_byte_string();
+    system(upgrade_command_byte_string.characters());
+    
     // Set up Python path to include our virtual environment
     TRY(setup_python_path());
     
@@ -339,6 +350,8 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
         if (package.name == "numpy"_string) {
             // Add --no-cache-dir to avoid potential cache issues
             command_builder.append(" --no-cache-dir"_string);
+            // Also add --force-reinstall to ensure a clean installation
+            command_builder.append(" --force-reinstall"_string);
         }
         
         auto command_result = command_builder.to_string();
