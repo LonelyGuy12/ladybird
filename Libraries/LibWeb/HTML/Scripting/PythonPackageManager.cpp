@@ -65,8 +65,14 @@ ErrorOr<Optional<String>> PythonPackageManager::find_requirements_file(URL::URL 
         auto path = document_origin.file_path();
         auto lexical_path = LexicalPath(path);
         auto dir_path = lexical_path.dirname();
-        auto requirements_path = String::formatted("{}/requirements.txt", dir_path);
+        auto requirements_path_result = String::formatted("{}/requirements.txt", dir_path);
         
+        if (requirements_path_result.is_error()) {
+            dbgln("🐍 PythonPackageManager: Failed to format requirements path");
+            return requirements_path_result.release_error();
+        }
+        
+        String requirements_path = requirements_path_result.release_value();
         dbgln("🐍 PythonPackageManager: Checking for local requirements.txt at: {}", requirements_path);
         
         auto requirements_path_byte_string = requirements_path.to_byte_string();
