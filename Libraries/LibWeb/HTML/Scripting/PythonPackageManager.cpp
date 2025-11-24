@@ -335,6 +335,12 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
             }
         }
         
+        // Special handling for numpy to avoid installation issues
+        if (package.name == "numpy"_string) {
+            // Add --no-cache-dir to avoid potential cache issues
+            command_builder.append(" --no-cache-dir"_string);
+        }
+        
         auto command_result = command_builder.to_string();
         if (command_result.is_error()) {
             dbgln("🐍 PythonPackageManager: Failed to build command string");
