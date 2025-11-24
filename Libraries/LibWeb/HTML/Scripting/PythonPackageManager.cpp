@@ -37,6 +37,13 @@ PythonPackageManager& PythonPackageManager::the()
     return *s_the;
 }
 
+String PythonPackageManager::get_package_install_path() const
+{
+    // Return a path for package installation
+    // Use a virtual environment directory instead of a simple target directory
+    return String("/tmp/ladybird_python_venv/lib/python3.12/site-packages"_string);
+}
+
 ErrorOr<void> PythonPackageManager::initialize()
 {
     if (m_initialized)
@@ -44,11 +51,28 @@ ErrorOr<void> PythonPackageManager::initialize()
     
     dbgln("🐍 PythonPackageManager: Initializing package manager");
     
-    // Initialize the package installation directory
-    auto package_path = get_package_install_path();
-    dbgln("🐍 PythonPackageManager: Package installation path: {}", package_path);
+    // Create a virtual environment for package isolation
+    String venv_path = "/tmp/ladybird_python_venv";
+    auto venv_path_byte_string = venv_path.to_byte_string();
     
-    // Set up Python path to include our package directory
+    // Check if virtual environment already exists
+    struct stat buffer;
+    if (stat(venv_path_byte_string.characters(), &buffer) != 0) {
+        // Virtual environment doesn't exist, create it
+        dbgln("🐍 PythonPackageManager: Creating virtual environment at {}", venv_path);
+        auto command = String::formatted("python3 -m venv {}", venv_path);
+        auto command_byte_string = command.to_byte_string();
+        int result = system(command_byte_string.characters());
+        
+        if (result != 0) {
+            dbgln("🐍 PythonPackageManager: Failed to create virtual environment");
+            return Error::from_string_literal("Failed to create virtual environment");
+        }
+    } else {
+        dbgln("🐍 PythonPackageManager: Using existing virtual environment at {}", venv_path);
+    }
+    
+    // Set up Python path to include our virtual environment
     TRY(setup_python_path());
     
     m_initialized = true;
@@ -235,20 +259,10 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
         return Error::from_string_literal("pip is not available");
     }
     
-    // Create the package installation directory if it doesn't exist
-    String package_install_path = get_package_install_path();
-    auto package_install_path_byte_string = package_install_path.to_byte_string();
-    if (mkdir(package_install_path_byte_string.characters(), 0755) == -1 && errno != EEXIST) {
-        dbgln("🐍 PythonPackageManager: Failed to create package installation directory: {}", strerror(errno));
-        return Error::from_string_literal("Failed to create package installation directory");
-    }
-    
-    // Install each package using pip
+    // Install each package using pip in our virtual environment
     for (auto const& package : packages_to_install) {
         StringBuilder command_builder;
-        command_builder.append("python3 -m pip install --target "sv);
-        command_builder.append(package_install_path);
-        command_builder.append(" "sv);
+        command_builder.append("python3 -m pip install --upgrade "sv);
         command_builder.append(package.name);
         
         if (package.version.has_value()) {
@@ -315,16 +329,9 @@ bool PythonPackageManager::is_package_installed(PythonPackage const& package) co
     return false;
 }
 
-String PythonPackageManager::get_package_install_path() const
-{
-    // Return a path for package installation
-    // In a real implementation, this would be a directory within the browser's data directory
-    return String("/tmp/ladybird_python_packages"_string);
-}
-
 ErrorOr<void> PythonPackageManager::setup_python_path()
 {
-    // Add our package installation directory to Python's sys.path
+    // Add our virtual environment's site-packages directory to Python's sys.path
     String package_path = get_package_install_path();
     dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
     
