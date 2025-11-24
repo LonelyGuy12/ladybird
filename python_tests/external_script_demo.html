@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>External Python Script Demo</title>
+</head>
+<body>
+    <h1>External Python Script Demo</h1>
+    <div id="output">Loading...</div>
+    
+    <!-- This loads an external Python file -->
+    <script type="python" src="demo_script.py"></script>
+    
+    <!-- This uses functions from the external script -->
+    <script type="python">
+# Use functions from the external script
+try:
+    # These functions would be available from demo_script.py
+    result = calculate_sum(5, 3)
+    message = greet("Ladybird User")
+    
+    output = document.find("#output")
+    output.text = f"{message}\n5 + 3 = {result}"
+    
+except Exception as e:
+    output = document.find("#output")
+    output.text = f"Error: {e}"
+    print(f"Script execution error: {e}")
+</script>
+</body>
+</html>

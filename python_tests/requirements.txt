@@ -1,0 +1,7 @@
+# Sample requirements.txt for Python external library support
+# This file would be automatically detected and processed by Ladybird
+
+requests>=2.25.0
+numpy>=1.20.0
+matplotlib>=3.3.0
+pandas>=1.2.0

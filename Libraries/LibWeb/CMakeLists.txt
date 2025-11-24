@@ -623,6 +623,9 @@ set(SOURCES
     HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/IndependentPythonEngine.cpp
     HTML/Scripting/PythonEngine.cpp
+    HTML/Scripting/PythonEngine.h
+    HTML/Scripting/PythonPackageManager.cpp
+    HTML/Scripting/PythonPackageManager.h
     HTML/Scripting/PythonScript.cpp
     HTML/Scripting/PythonSecurityModel.cpp
     HTML/Scripting/Script.cpp

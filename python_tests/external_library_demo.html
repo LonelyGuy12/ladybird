@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python External Library Demo</title>
+</head>
+<body>
+    <h1>Python External Library Demo</h1>
+    <div id="output"></div>
+    
+    <!-- This script will automatically look for requirements.txt and install packages -->
+    <script type="python">
+# Example using external libraries that would be specified in requirements.txt
+try:
+    # These would be available after installation from requirements.txt
+    import requests
+    import numpy as np
+    
+    # Simple demonstration
+    output = document.find("#output")
+    output.text = "External libraries loaded successfully!"
+    
+    # Example usage (commented out since these packages aren't actually installed in this demo)
+    # response = requests.get("https://httpbin.org/json")
+    # data = response.json()
+    # output.text += f"\nFetched data: {data}"
+    
+except ImportError as e:
+    output = document.find("#output")
+    output.text = f"Library not available: {e}"
+    print(f"Library import error: {e}")
+</script>
+</body>
+</html>

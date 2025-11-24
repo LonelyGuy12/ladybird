@@ -137,6 +137,9 @@
 #include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/PythonEngine.h>
+#include <LibWeb/HTML/Scripting/PythonPackageManager.h>
+
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
@@ -2957,6 +2960,26 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
 
     // 2. Set document's current document readiness to readinessValue.
     m_readiness = readiness_value;
+
+    // Check for Python requirements when document becomes interactive
+    if (readiness_value == HTML::DocumentReadyState::Interactive && !has_python_packages_loaded()) {
+        // Initialize Python package manager
+        auto& package_manager = HTML::PythonPackageManager::the();
+        (void)package_manager.initialize();
+        
+        // Check if we have a requirements.txt for this origin
+        auto requirements_result = package_manager.find_requirements_file(url());
+        if (!requirements_result.is_error() && requirements_result.value().has_value()) {
+            // Parse and install required packages
+            auto packages_result = package_manager.parse_requirements(requirements_result.value().value(), url());
+            if (!packages_result.is_error()) {
+                (void)package_manager.install_packages(packages_result.value());
+            }
+        }
+        
+        // Mark packages as loaded
+        set_python_packages_loaded(true);
+    }
 
     // 3. If document is associated with an HTML parser, then:
     if (m_parser) {
