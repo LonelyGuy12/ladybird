@@ -228,6 +228,13 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     
     dbgln("🐍 PythonPackageManager: Installing {} new packages", packages_to_install.size());
     
+    // Check if pip is available
+    int pip_check = system("python3 -m pip --version > /dev/null 2>&1");
+    if (pip_check != 0) {
+        dbgln("🐍 PythonPackageManager: pip is not available. Please install pip to use external Python packages.");
+        return Error::from_string_literal("pip is not available");
+    }
+    
     // Create the package installation directory if it doesn't exist
     String package_install_path = get_package_install_path();
     auto package_install_path_byte_string = package_install_path.to_byte_string();
@@ -239,14 +246,26 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     // Install each package using pip
     for (auto const& package : packages_to_install) {
         StringBuilder command_builder;
-        command_builder.append("pip install --target "sv);
+        command_builder.append("python3 -m pip install --target "sv);
         command_builder.append(package_install_path);
         command_builder.append(" "sv);
         command_builder.append(package.name);
         
         if (package.version.has_value()) {
-            command_builder.append("=="sv);
-            command_builder.append(*package.version);
+            // Fix the version specifier - remove any spaces or extra characters
+            String version = *package.version;
+            // Remove leading/trailing whitespace
+            auto trimmed_version = version.trim_whitespace();
+            if (!trimmed_version.is_error() && !trimmed_version.value().is_empty()) {
+                // Check if version already has an operator
+                if (!trimmed_version.value().starts_with("=") && 
+                    !trimmed_version.value().starts_with(">") && 
+                    !trimmed_version.value().starts_with("<") && 
+                    !trimmed_version.value().starts_with("~")) {
+                    command_builder.append("=="sv);
+                }
+                command_builder.append(trimmed_version.value());
+            }
         }
         
         auto command_result = command_builder.to_string();
@@ -305,35 +324,41 @@ String PythonPackageManager::get_package_install_path() const
 
 ErrorOr<void> PythonPackageManager::setup_python_path()
 {
-    dbgln("🐍 PythonPackageManager: Setting up Python path");
+    // Add our package installation directory to Python's sys.path
+    String package_path = get_package_install_path();
+    dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
+    
+    // Convert to ByteString for Python C API
+    auto package_path_result = package_path.to_byte_string();
+    if (package_path_result.is_error()) {
+        dbgln("🐍 PythonPackageManager: Failed to convert package path to byte string");
+        return package_path_result.release_error();
+    }
+    ByteString package_path_byte_string = package_path_result.release_value();
     
     // Get the current Python path
-    PyObject* sys_module = PyImport_ImportModule("sys");
-    if (!sys_module) {
-        dbgln("🐍 PythonPackageManager: Failed to import sys module");
-        return Error::from_string_literal("Failed to import sys module");
+    PyObject* sys_path = PySys_GetObject("path");
+    if (!sys_path) {
+        dbgln("🐍 PythonPackageManager: Failed to get Python sys.path");
+        return Error::from_string_literal("Failed to get Python sys.path");
     }
     
-    PyObject* path_list = PyObject_GetAttrString(sys_module, "path");
-    if (!path_list) {
-        Py_DECREF(sys_module);
-        dbgln("🐍 PythonPackageManager: Failed to get sys.path");
-        return Error::from_string_literal("Failed to get sys.path");
-    }
-    
-    // Add our package installation directory to the path
-    String package_path = get_package_install_path();
-    auto package_path_byte_string = package_path.to_byte_string();
+    // Add our package directory to the path
     PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
-    if (path_string) {
-        PyList_Append(path_list, path_string);
-        Py_DECREF(path_string);
-        dbgln("🐍 PythonPackageManager: Added {} to Python path", package_path);
+    if (!path_string) {
+        dbgln("🐍 PythonPackageManager: Failed to create Python string for package path");
+        return Error::from_string_literal("Failed to create Python string for package path");
     }
     
-    Py_DECREF(path_list);
-    Py_DECREF(sys_module);
+    int result = PyList_Insert(sys_path, 0, path_string);
+    Py_DECREF(path_string);
     
+    if (result == -1) {
+        dbgln("🐍 PythonPackageManager: Failed to insert package path into Python sys.path");
+        return Error::from_string_literal("Failed to insert package path into Python sys.path");
+    }
+    
+    dbgln("🐍 PythonPackageManager: Successfully added package path to Python sys.path");
     return {};
 }
 
