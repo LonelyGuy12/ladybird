@@ -354,6 +354,8 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
             command_builder.append(" --no-cache-dir"_string);
             // Also add --force-reinstall to ensure a clean installation
             command_builder.append(" --force-reinstall"_string);
+            // Add --no-deps to avoid dependency conflicts
+            command_builder.append(" --no-deps"_string);
         }
         
         auto command_result = command_builder.to_string();
