@@ -84,6 +84,41 @@ ErrorOr<void> PythonPackageManager::initialize()
     return {};
 }
 
+ErrorOr<void> PythonPackageManager::setup_python_path()
+{
+    // Add our virtual environment's site-packages directory to Python's sys.path
+    String package_path = get_package_install_path();
+    dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
+    
+    // Convert to ByteString for Python C API
+    ByteString package_path_byte_string = package_path.to_byte_string();
+    
+    // Get the current Python path
+    PyObject* sys_path = PySys_GetObject("path");
+    if (!sys_path) {
+        dbgln("🐍 PythonPackageManager: Failed to get Python sys.path");
+        return Error::from_string_literal("Failed to get Python sys.path");
+    }
+    
+    // Add our package directory to the beginning of the path for highest priority
+    PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
+    if (!path_string) {
+        dbgln("🐍 PythonPackageManager: Failed to create Python string for package path");
+        return Error::from_string_literal("Failed to create Python string for package path");
+    }
+    
+    int result = PyList_Insert(sys_path, 0, path_string);
+    Py_DECREF(path_string);
+    
+    if (result == -1) {
+        dbgln("🐍 PythonPackageManager: Failed to insert package path into Python sys.path");
+        return Error::from_string_literal("Failed to insert package path into Python sys.path");
+    }
+    
+    dbgln("🐍 PythonPackageManager: Successfully added package path to Python sys.path");
+    return {};
+}
+
 ErrorOr<Optional<String>> PythonPackageManager::find_requirements_file(URL::URL const& document_origin)
 {
     dbgln("🐍 PythonPackageManager: Looking for requirements.txt at origin: {}", document_origin.serialize());
@@ -257,17 +292,30 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     
     dbgln("🐍 PythonPackageManager: Installing {} new packages", packages_to_install.size());
     
-    // Check if pip is available
-    int pip_check = system("python3 -m pip --version > /dev/null 2>&1");
+    // Use the virtual environment's pip directly
+    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
+    auto venv_pip_byte_string = venv_pip.to_byte_string();
+    
+    // Check if pip is available in the virtual environment
+    auto check_command = String::formatted("{} --version > /dev/null 2>&1", venv_pip);
+    if (check_command.is_error()) {
+        dbgln("🐍 PythonPackageManager: Failed to format check command");
+        return check_command.release_error();
+    }
+    String check_command_str = check_command.release_value();
+    auto check_command_byte_string = check_command_str.to_byte_string();
+    int pip_check = system(check_command_byte_string.characters());
+    
     if (pip_check != 0) {
-        dbgln("🐍 PythonPackageManager: pip is not available. Please install pip to use external Python packages.");
-        return Error::from_string_literal("pip is not available");
+        dbgln("🐍 PythonPackageManager: pip is not available in virtual environment. Please ensure the virtual environment is properly created.");
+        return Error::from_string_literal("pip is not available in virtual environment");
     }
     
     // Install each package using pip in our virtual environment
     for (auto const& package : packages_to_install) {
         StringBuilder command_builder;
-        command_builder.append("python3 -m pip install --upgrade "sv);
+        command_builder.append(venv_pip);
+        command_builder.append(" install --upgrade "_sv);
         command_builder.append(package.name);
         
         if (package.version.has_value()) {
@@ -332,41 +380,6 @@ bool PythonPackageManager::is_package_installed(PythonPackage const& package) co
     }
     
     return false;
-}
-
-ErrorOr<void> PythonPackageManager::setup_python_path()
-{
-    // Add our virtual environment's site-packages directory to Python's sys.path
-    String package_path = get_package_install_path();
-    dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
-    
-    // Convert to ByteString for Python C API
-    ByteString package_path_byte_string = package_path.to_byte_string();
-    
-    // Get the current Python path
-    PyObject* sys_path = PySys_GetObject("path");
-    if (!sys_path) {
-        dbgln("🐍 PythonPackageManager: Failed to get Python sys.path");
-        return Error::from_string_literal("Failed to get Python sys.path");
-    }
-    
-    // Add our package directory to the path
-    PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
-    if (!path_string) {
-        dbgln("🐍 PythonPackageManager: Failed to create Python string for package path");
-        return Error::from_string_literal("Failed to create Python string for package path");
-    }
-    
-    int result = PyList_Insert(sys_path, 0, path_string);
-    Py_DECREF(path_string);
-    
-    if (result == -1) {
-        dbgln("🐍 PythonPackageManager: Failed to insert package path into Python sys.path");
-        return Error::from_string_literal("Failed to insert package path into Python sys.path");
-    }
-    
-    dbgln("🐍 PythonPackageManager: Successfully added package path to Python sys.path");
-    return {};
 }
 
 void PythonPackageManager::clear_cache_for_origin(URL::URL const& origin)
