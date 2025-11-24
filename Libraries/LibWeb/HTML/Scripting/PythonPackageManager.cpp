@@ -60,7 +60,12 @@ ErrorOr<void> PythonPackageManager::initialize()
     if (stat(venv_path_byte_string.characters(), &buffer) != 0) {
         // Virtual environment doesn't exist, create it
         dbgln("🐍 PythonPackageManager: Creating virtual environment at {}", venv_path);
-        auto command = String::formatted("python3 -m venv {}", venv_path);
+        auto command_result = String::formatted("python3 -m venv {}", venv_path);
+        if (command_result.is_error()) {
+            dbgln("🐍 PythonPackageManager: Failed to format command string");
+            return command_result.release_error();
+        }
+        String command = command_result.release_value();
         auto command_byte_string = command.to_byte_string();
         int result = system(command_byte_string.characters());
         
