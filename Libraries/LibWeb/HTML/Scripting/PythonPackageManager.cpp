@@ -19,6 +19,13 @@
 #include <AK/GenericLexer.h>
 #include <Python.h>
 
+// System includes for package installation
+#include <sys/stat.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 namespace Web::HTML {
 
 static PythonPackageManager* s_the = nullptr;
@@ -52,12 +59,49 @@ ErrorOr<Optional<String>> PythonPackageManager::find_requirements_file(URL::URL 
 {
     dbgln("🐍 PythonPackageManager: Looking for requirements.txt at origin: {}", document_origin.serialize());
     
-    // In a real implementation, we would fetch the requirements.txt file from the server
-    // For now, we'll return an empty optional to indicate no requirements file found
-    // A full implementation would:
-    // 1. Construct the URL for /requirements.txt relative to the document origin
-    // 2. Make an HTTP request to fetch the file
-    // 3. Return the content if found, or empty optional if not found
+    // For local files, we can check if the file exists and read it
+    if (document_origin.scheme() == "file"sv) {
+        // For local files, construct the path to requirements.txt in the same directory
+        auto path = document_origin.path();
+        auto dir_path = LexicalPath::dirname(path);
+        auto requirements_path = String::formatted("{}/requirements.txt", dir_path);
+        
+        dbgln("🐍 PythonPackageManager: Checking for local requirements.txt at: {}", requirements_path);
+        
+        auto requirements_path_byte_string = requirements_path.to_byte_string();
+        struct stat buffer;
+        if (stat(requirements_path_byte_string.characters(), &buffer) == 0) {
+            // File exists, read it
+            FILE* file = fopen(requirements_path_byte_string.characters(), "r");
+            if (file) {
+                // Get file size
+                fseek(file, 0, SEEK_END);
+                long file_size = ftell(file);
+                fseek(file, 0, SEEK_SET);
+                
+                // Allocate buffer and read file
+                char* buffer = (char*)malloc(file_size + 1);
+                if (buffer) {
+                    size_t bytes_read = fread(buffer, 1, file_size, file);
+                    buffer[bytes_read] = '\0';
+                    
+                    String content(buffer, bytes_read);
+                    free(buffer);
+                    fclose(file);
+                    
+                    dbgln("🐍 PythonPackageManager: Successfully read local requirements.txt ({} bytes)", bytes_read);
+                    dbgln("🐍 PythonPackageManager: Content: {}", content);
+                    return Optional<String>(content);
+                }
+                fclose(file);
+            }
+        } else {
+            dbgln("🐍 PythonPackageManager: No local requirements.txt found at: {}", requirements_path);
+        }
+    }
+    
+    // For HTTP origins, we would need to fetch the file
+    // TODO: Implement HTTP fetching for remote requirements.txt files
     
     return Optional<String> {};
 }
@@ -171,12 +215,43 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     
     dbgln("🐍 PythonPackageManager: Installing {} new packages", packages_to_install.size());
     
-    // In a real implementation, we would:
-    // 1. Download the packages using pip or a similar mechanism
-    // 2. Install them to the package installation directory
-    // 3. Update our cache of installed packages
+    // Create the package installation directory if it doesn't exist
+    String package_install_path = get_package_install_path();
+    auto package_install_path_byte_string = package_install_path.to_byte_string();
+    if (mkdir(package_install_path_byte_string.characters(), 0755) == -1 && errno != EEXIST) {
+        dbgln("🐍 PythonPackageManager: Failed to create package installation directory: {}", strerror(errno));
+        return Error::from_string_literal("Failed to create package installation directory");
+    }
     
-    // For now, we'll just update our cache to simulate installation
+    // Install each package using pip
+    for (auto const& package : packages_to_install) {
+        StringBuilder command_builder;
+        command_builder.append("pip install --target "sv);
+        command_builder.append(package_install_path);
+        command_builder.append(" "sv);
+        command_builder.append(package.name);
+        
+        if (package.version.has_value()) {
+            command_builder.append("=="sv);
+            command_builder.append(*package.version);
+        }
+        
+        String command = command_builder.to_string();
+        dbgln("🐍 PythonPackageManager: Running command: {}", command);
+        
+        // Execute the pip install command
+        auto command_byte_string = command.to_byte_string();
+        int result = system(command_byte_string.characters());
+        
+        if (result == 0) {
+            dbgln("🐍 PythonPackageManager: Successfully installed package {}", package.name);
+        } else {
+            dbgln("🐍 PythonPackageManager: Failed to install package {} (exit code: {})", package.name, result);
+            // Continue with other packages even if one fails
+        }
+    }
+    
+    // Update our cache of installed packages
     m_installed_packages.set(origin, packages);
     
     return {};
