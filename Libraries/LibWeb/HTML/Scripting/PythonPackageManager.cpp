@@ -62,8 +62,9 @@ ErrorOr<Optional<String>> PythonPackageManager::find_requirements_file(URL::URL 
     // For local files, we can check if the file exists and read it
     if (document_origin.scheme() == "file"sv) {
         // For local files, construct the path to requirements.txt in the same directory
-        auto path = document_origin.path();
-        auto dir_path = LexicalPath::dirname(path);
+        auto path = document_origin.file_path();
+        auto lexical_path = LexicalPath(path);
+        auto dir_path = lexical_path.dirname();
         auto requirements_path = String::formatted("{}/requirements.txt", dir_path);
         
         dbgln("🐍 PythonPackageManager: Checking for local requirements.txt at: {}", requirements_path);
@@ -85,10 +86,16 @@ ErrorOr<Optional<String>> PythonPackageManager::find_requirements_file(URL::URL 
                     size_t bytes_read = fread(buffer, 1, file_size, file);
                     buffer[bytes_read] = '\0';
                     
-                    String content(buffer, bytes_read);
+                    auto content_result = String::from_utf8({ buffer, bytes_read });
                     free(buffer);
                     fclose(file);
                     
+                    if (content_result.is_error()) {
+                        dbgln("🐍 PythonPackageManager: Failed to create string from file content");
+                        return content_result.release_error();
+                    }
+                    
+                    String content = content_result.release_value();
                     dbgln("🐍 PythonPackageManager: Successfully read local requirements.txt ({} bytes)", bytes_read);
                     dbgln("🐍 PythonPackageManager: Content: {}", content);
                     return Optional<String>(content);
@@ -236,7 +243,12 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
             command_builder.append(*package.version);
         }
         
-        String command = command_builder.to_string();
+        auto command_result = command_builder.to_string();
+        if (command_result.is_error()) {
+            dbgln("🐍 PythonPackageManager: Failed to build command string");
+            return command_result.release_error();
+        }
+        String command = command_result.release_value();
         dbgln("🐍 PythonPackageManager: Running command: {}", command);
         
         // Execute the pip install command
