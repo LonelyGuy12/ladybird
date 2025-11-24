@@ -294,7 +294,6 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     
     // Use the virtual environment's pip directly
     String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
-    auto venv_pip_byte_string = venv_pip.to_byte_string();
     
     // Check if pip is available in the virtual environment
     auto check_command = String::formatted("{} --version > /dev/null 2>&1", venv_pip);
@@ -315,7 +314,7 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     for (auto const& package : packages_to_install) {
         StringBuilder command_builder;
         command_builder.append(venv_pip);
-        command_builder.append(" install --upgrade "_sv);
+        command_builder.append(" install --upgrade "_string);
         command_builder.append(package.name);
         
         if (package.version.has_value()) {
