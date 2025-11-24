@@ -87,8 +87,9 @@ ErrorOr<void> PythonPackageManager::initialize()
     }
     String upgrade_command = upgrade_command_result.release_value();
     auto upgrade_command_byte_string = upgrade_command.to_byte_string();
-    // Ignore the return value as this is not critical for functionality
-    (void)system(upgrade_command_byte_string.characters());
+    // We don't care about the result of this command as it's not critical
+    // But we need to handle the return value to avoid compiler warnings
+    [[maybe_unused]] auto unused_result = system(upgrade_command_byte_string.characters());
     
     // Set up Python path to include our virtual environment
     TRY(setup_python_path());
