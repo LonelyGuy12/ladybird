@@ -258,10 +258,10 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
             auto trimmed_version = version.trim_whitespace();
             if (!trimmed_version.is_error() && !trimmed_version.value().is_empty()) {
                 // Check if version already has an operator
-                if (!trimmed_version.value().starts_with_bytes("=") && 
-                    !trimmed_version.value().starts_with_bytes(">") && 
-                    !trimmed_version.value().starts_with_bytes("<") && 
-                    !trimmed_version.value().starts_with_bytes("~")) {
+                if (!trimmed_version.value().starts_with_bytes("="sv) && 
+                    !trimmed_version.value().starts_with_bytes(">"sv) && 
+                    !trimmed_version.value().starts_with_bytes("<"sv) && 
+                    !trimmed_version.value().starts_with_bytes("~"sv)) {
                     command_builder.append("=="sv);
                 }
                 command_builder.append(trimmed_version.value());
