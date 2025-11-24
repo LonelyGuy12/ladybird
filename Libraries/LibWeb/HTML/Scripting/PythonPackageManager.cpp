@@ -52,7 +52,7 @@ ErrorOr<void> PythonPackageManager::initialize()
     dbgln("🐍 PythonPackageManager: Initializing package manager");
     
     // Create a virtual environment for package isolation
-    String venv_path = "/tmp/ladybird_python_venv";
+    String venv_path = "/tmp/ladybird_python_venv"_string;
     auto venv_path_byte_string = venv_path.to_byte_string();
     
     // Check if virtual environment already exists
