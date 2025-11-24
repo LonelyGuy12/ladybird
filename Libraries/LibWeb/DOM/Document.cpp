@@ -2965,16 +2965,32 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
     if (readiness_value == HTML::DocumentReadyState::Interactive && !has_python_packages_loaded()) {
         // Initialize Python package manager
         auto& package_manager = HTML::PythonPackageManager::the();
-        (void)package_manager.initialize();
+        auto init_result = package_manager.initialize();
+        if (init_result.is_error()) {
+            dbgln("🐍 Document: Failed to initialize Python package manager: {}", init_result.error());
+        }
         
         // Check if we have a requirements.txt for this origin
         auto requirements_result = package_manager.find_requirements_file(url());
         if (!requirements_result.is_error() && requirements_result.value().has_value()) {
+            dbgln("🐍 Document: Found requirements.txt, parsing and installing packages...");
+            
             // Parse and install required packages
             auto packages_result = package_manager.parse_requirements(requirements_result.value().value(), url());
             if (!packages_result.is_error()) {
-                (void)package_manager.install_packages(packages_result.value());
+                auto install_result = package_manager.install_packages(packages_result.value());
+                if (install_result.is_error()) {
+                    dbgln("🐍 Document: Failed to install packages: {}", install_result.error());
+                } else {
+                    dbgln("🐍 Document: Successfully installed packages from requirements.txt");
+                }
+            } else {
+                dbgln("🐍 Document: Failed to parse requirements.txt: {}", packages_result.error());
             }
+        } else if (requirements_result.is_error()) {
+            dbgln("🐍 Document: Error while looking for requirements.txt: {}", requirements_result.error());
+        } else {
+            dbgln("🐍 Document: No requirements.txt found for this origin");
         }
         
         // Mark packages as loaded

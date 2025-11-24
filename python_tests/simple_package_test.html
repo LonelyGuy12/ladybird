@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Python Package Test</title>
+</head>
+<body>
+    <h1>Simple Python Package Test</h1>
+    <p>This test demonstrates importing and using common Python packages.</p>
+    
+    <script type="text/python">
+# Import necessary exception classes
+from builtins import ImportError, Exception
+
+# Test importing and using the 'json' package (built-in)
+try:
+    import json
+    print("Successfully imported json package")
+    
+    # Create a simple dictionary and serialize it
+    data = {"name": "Ladybird", "version": "1.0", "features": ["Python", "Web", "Browser"]}
+    json_string = json.dumps(data)
+    print(f"Serialized JSON: {json_string}")
+    
+    # Parse the JSON back
+    parsed_data = json.loads(json_string)
+    print(f"Parsed data name: {parsed_data['name']}")
+    print(f"Features count: {len(parsed_data['features'])}")
+    
+except ImportError as e:
+    print(f"Failed to import json: {e}")
+except Exception as e:
+    print(f"Error during json operations: {e}")
+
+# Test importing and using the 'urllib' package (built-in)
+try:
+    import urllib.parse
+    print("Successfully imported urllib.parse package")
+    
+    # Parse a URL
+    url = "https://example.com/path?param1=value1&param2=value2"
+    parsed = urllib.parse.urlparse(url)
+    print(f"URL scheme: {parsed.scheme}")
+    print(f"URL netloc: {parsed.netloc}")
+    print(f"URL path: {parsed.path}")
+    
+    # Parse query parameters
+    query_params = urllib.parse.parse_qs(parsed.query)
+    print(f"Query parameters: {query_params}")
+    
+except ImportError as e:
+    print(f"Failed to import urllib.parse: {e}")
+except Exception as e:
+    print(f"Error during urllib operations: {e}")
+
+# Test importing and using the 'base64' package (built-in)
+try:
+    import base64
+    print("Successfully imported base64 package")
+    
+    # Encode a string
+    original_string = "Hello, Ladybird Python!"
+    encoded_bytes = base64.b64encode(original_string.encode('utf-8'))
+    encoded_string = encoded_bytes.decode('ascii')
+    print(f"Original string: {original_string}")
+    print(f"Base64 encoded: {encoded_string}")
+    
+    # Decode the string
+    decoded_bytes = base64.b64decode(encoded_string)
+    decoded_string = decoded_bytes.decode('utf-8')
+    print(f"Base64 decoded: {decoded_string}")
+    
+except ImportError as e:
+    print(f"Failed to import base64: {e}")
+except Exception as e:
+    print(f"Error during base64 operations: {e}")
+
+# Test importing and using the 'datetime' package (built-in)
+try:
+    import datetime
+    print("Successfully imported datetime package")
+    
+    # Get current time
+    now = datetime.datetime.now()
+    print(f"Current time: {now}")
+    print(f"Current year: {now.year}")
+    print(f"Current month: {now.month}")
+    print(f"Current day: {now.day}")
+    
+    # Create a specific date
+    specific_date = datetime.datetime(2025, 12, 25)
+    print(f"Christmas 2025: {specific_date}")
+    
+    # Calculate difference
+    diff = specific_date - now
+    print(f"Days until Christmas 2025: {diff.days}")
+    
+except ImportError as e:
+    print(f"Failed to import datetime: {e}")
+except Exception as e:
+    print(f"Error during datetime operations: {e}")
+
+print("Simple Python package test completed successfully!")
+    </script>
+</body>
+</html>
