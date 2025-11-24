@@ -40,8 +40,9 @@ PythonPackageManager& PythonPackageManager::the()
 String PythonPackageManager::get_package_install_path() const
 {
     // Return a path for package installation
-    // Use a virtual environment directory instead of a simple target directory
-    return String("/tmp/ladybird_python_venv/lib/python3.12/site-packages"_string);
+    // Use the correct Python version for the virtual environment
+    // Based on the logs, it seems to be Python 3.13
+    return String("/tmp/ladybird_python_venv/lib/python3.13/site-packages"_string);
 }
 
 ErrorOr<void> PythonPackageManager::initialize()
