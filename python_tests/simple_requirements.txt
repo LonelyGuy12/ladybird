@@ -1,0 +1,2 @@
+# This file contains built-in Python packages for testing
+# Ladybird should automatically detect and handle these

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>External Python Package Test</title>
+</head>
+<body>
+    <h1>External Python Package Test</h1>
+    <p>This test demonstrates importing and using external Python packages that would be installed via requirements.txt.</p>
+    
+    <script type="text/python">
+# Test importing and using the 'requests' package
+try:
+    import requests
+    print("Successfully imported requests package")
+    
+    # Make a simple HTTP request to a public API
+    response = requests.get("https://httpbin.org/json")
+    if response.status_code == 200:
+        print(f"HTTP request successful, status code: {response.status_code}")
+        data = response.json()
+        print(f"Received JSON data with keys: {list(data.keys())}")
+    else:
+        print(f"HTTP request failed with status code: {response.status_code}")
+        
+except ImportError as e:
+    print(f"Failed to import requests (package may not be installed): {e}")
+except Exception as e:
+    print(f"Error during request: {e}")
+
+# Test importing and using the 'numpy' package
+try:
+    import numpy as np
+    print("Successfully imported numpy package")
+    
+    # Create arrays and perform mathematical operations
+    a = np.array([1, 2, 3, 4, 5])
+    b = np.array([6, 7, 8, 9, 10])
+    
+    # Perform operations
+    sum_array = a + b
+    product_array = a * b
+    dot_product = np.dot(a, b)
+    
+    print(f"Array a: {a}")
+    print(f"Array b: {b}")
+    print(f"Sum (a + b): {sum_array}")
+    print(f"Product (a * b): {product_array}")
+    print(f"Dot product: {dot_product}")
+    
+except ImportError as e:
+    print(f"Failed to import numpy (package may not be installed): {e}")
+except Exception as e:
+    print(f"Error during numpy operations: {e}")
+
+# Test importing and using a simple external package
+try:
+    # This would test a simple package installation
+    import uuid
+    print("Successfully imported uuid package")
+    
+    # Generate a UUID
+    generated_uuid = uuid.uuid4()
+    print(f"Generated UUID: {generated_uuid}")
+    
+except ImportError as e:
+    print(f"Failed to import uuid: {e}")
+except Exception as e:
+    print(f"Error during uuid operations: {e}")
+
+print("External Python package test completed!")
+print("If you see 'Failed to import' messages above, make sure the packages are listed in requirements.txt")
+    </script>
+    
+    <div id="output"></div>
+</body>
+</html>

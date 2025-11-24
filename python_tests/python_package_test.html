@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Python Package Import Test</title>
+</head>
+<body>
+    <h1>Python Package Import Test</h1>
+    <p>This test demonstrates importing and using external Python packages.</p>
+    
+    <script type="text/python">
+# Test importing and using the 'requests' package
+try:
+    import requests
+    print("Successfully imported requests package")
+    
+    # Make a simple HTTP request
+    response = requests.get("https://httpbin.org/get")
+    print(f"Status Code: {response.status_code}")
+    print(f"Response Headers: {dict(response.headers)}")
+    
+    # Parse JSON response
+    data = response.json()
+    print(f"Response JSON keys: {list(data.keys())}")
+    
+except ImportError as e:
+    print(f"Failed to import requests: {e}")
+except Exception as e:
+    print(f"Error during request: {e}")
+
+# Test importing and using the 'numpy' package
+try:
+    import numpy as np
+    print("Successfully imported numpy package")
+    
+    # Create a simple array and perform operations
+    arr = np.array([1, 2, 3, 4, 5])
+    print(f"Original array: {arr}")
+    
+    # Perform some operations
+    squared = np.square(arr)
+    print(f"Squared array: {squared}")
+    
+    mean_val = np.mean(arr)
+    print(f"Mean of array: {mean_val}")
+    
+except ImportError as e:
+    print(f"Failed to import numpy: {e}")
+except Exception as e:
+    print(f"Error during numpy operations: {e}")
+
+# Test importing and using the 'matplotlib' package
+try:
+    import matplotlib.pyplot as plt
+    print("Successfully imported matplotlib package")
+    
+    # Create a simple plot
+    x = [1, 2, 3, 4, 5]
+    y = [1, 4, 9, 16, 25]
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(x, y, 'bo-')
+    plt.title('Simple Plot Test')
+    plt.xlabel('X values')
+    plt.ylabel('Y values')
+    plt.grid(True)
+    
+    # Save the plot to a file (since we can't display it in the browser)
+    plt.savefig('/tmp/test_plot.png')
+    print("Plot saved to /tmp/test_plot.png")
+    
+except ImportError as e:
+    print(f"Failed to import matplotlib: {e}")
+except Exception as e:
+    print(f"Error during matplotlib operations: {e}")
+
+print("Python package import test completed")
+    </script>
+</body>
+</html>
