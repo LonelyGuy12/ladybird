@@ -8,6 +8,9 @@
     <p>This test demonstrates importing and using external Python packages that would be installed via requirements.txt.</p>
     
     <script type="text/python">
+# Import necessary exception classes
+from builtins import ImportError, Exception
+
 # Test importing and using the 'requests' package
 try:
     import requests
