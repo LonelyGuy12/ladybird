@@ -11,6 +11,7 @@
 #include <LibCore/Event.h>
 #include <LibCore/EventReceiver.h>
 #include <LibCore/Notifier.h>
+#include <LibCore/SocketAddress.h>
 #include <LibCore/System.h>
 #include <LibCore/ThreadEventQueue.h>
 #include <LibThreading/Mutex.h>
@@ -249,13 +250,6 @@ bool EventLoopImplementationQt::was_exit_requested() const
     if (is_main_loop())
         return QCoreApplication::closingDown();
     return !m_event_loop->isRunning();
-}
-
-void EventLoopImplementationQt::post_event(Core::EventReceiver& receiver, NonnullOwnPtr<Core::Event>&& event)
-{
-    m_thread_event_queue.post_event(receiver, move(event));
-    if (&m_thread_event_queue != &Core::ThreadEventQueue::current())
-        wake();
 }
 
 void EventLoopImplementationQt::set_main_loop()

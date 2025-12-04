@@ -350,6 +350,7 @@ class PercentageStyleValue;
 class PositionStyleValue;
 class PropertyNameAndID;
 class RadialGradientStyleValue;
+class RandomValueSharingStyleValue;
 class Ratio;
 class RatioStyleValue;
 class RectStyleValue;
@@ -366,6 +367,7 @@ class ShadowStyleValue;
 class ShorthandStyleValue;
 class Size;
 class ScrollbarColorStyleValue;
+class ScrollFunctionStyleValue;
 class StringStyleValue;
 class StyleComputer;
 class StylePropertyMap;
@@ -391,6 +393,7 @@ class UnicodeRangeStyleValue;
 class UnresolvedStyleValue;
 class URL;
 class URLStyleValue;
+class ViewFunctionStyleValue;
 class VisualViewport;
 
 enum class Keyword : u16;
@@ -398,6 +401,8 @@ enum class MediaFeatureID : u8;
 enum class PropertyID : u16;
 enum class PaintOrder : u8;
 enum class ValueType : u8;
+enum class AnimatedPropertyResultOfTransition : u8;
+enum class AnimationPlayState : u8;
 
 struct BackgroundLayerData;
 struct CalculationContext;
@@ -405,6 +410,7 @@ struct CalculationResolutionContext;
 struct CSSStyleSheetInit;
 struct GridRepeatParams;
 struct LogicalAliasMappingContext;
+struct RandomCachingKey;
 struct StyleSheetIdentifier;
 
 using PaintOrderList = Array<PaintOrder, 3>;
@@ -542,14 +548,12 @@ class FetchController;
 class FetchParams;
 class FetchRecord;
 class FetchTimingInfo;
-class HeaderList;
 class IncrementalReadLoopReadRequest;
 class Request;
 class Response;
 
 struct BodyWithType;
 struct ConnectionTimingInfo;
-struct Header;
 
 }
 
@@ -737,7 +741,7 @@ class PageTransitionEvent;
 class Path2D;
 class Plugin;
 class PluginArray;
-class PopoverInvokerElement;
+class PopoverTargetAttributes;
 class PromiseRejectionEvent;
 class RadioNodeList;
 class SelectedFile;
@@ -764,6 +768,7 @@ class UserActivation;
 class ValidityState;
 class VideoTrack;
 class VideoTrackList;
+class WebWorkerClient;
 class Window;
 class WindowEnvironmentSettingsObject;
 class WindowProxy;
