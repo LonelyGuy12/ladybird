@@ -505,7 +505,7 @@ WebIDL::ExceptionOr<void> fetch_python_script(GC::Ref<HTMLScriptElement> element
         }
 
         // 3. Let potentialMIMETypeForEncoding be the result of extracting a MIME type given response's header list.
-        auto potential_mime_type_for_encoding = response->header_list()->extract_mime_type();
+        auto potential_mime_type_for_encoding = Fetch::Infrastructure::extract_mime_type(response->header_list());
 
         // 4. Set character encoding to the result of legacy extracting an encoding given potentialMIMETypeForEncoding
         //    and UTF-8 (fallback).
