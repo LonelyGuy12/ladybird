@@ -1,5 +1,6 @@
 include(cmake/ResourceFiles.cmake)
 
+# Fixed: Properly separate target name and visibility for library linking
 function(create_ladybird_bundle target_name)
     set_target_properties(${target_name} PROPERTIES
         OUTPUT_NAME "Ladybird"
@@ -74,9 +75,9 @@ set(LADYBIRD_LIBS AK LibCoreMinimal LibCore LibFileSystem LibGfx LibImageDecoder
 target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} ${LADYBIRD_LIBS})
 target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} OpenSSL::Crypto OpenSSL::SSL)
 
-target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} ${LADYBIRD_SOURCE_DIR})
-target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} ${LADYBIRD_SOURCE_DIR}/Services/)
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_SOURCE_DIR})
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_SOURCE_DIR}/Services/)
 
 if(WIN32)
     target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} LibDevTools)
