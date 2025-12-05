@@ -15,7 +15,7 @@ target_sources(ladybird PRIVATE
     WebContentView.cpp
     ladybird.qrc
 )
-target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Widgets)
+target_link_libraries(ladybird PRIVATE Qt::Core Qt::Gui Qt::Widgets LibCoreMinimal)
 create_ladybird_bundle(ladybird)
 
 if (WIN32)
