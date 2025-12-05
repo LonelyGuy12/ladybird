@@ -102,11 +102,6 @@ size_t EventLoop::pump(WaitMode mode)
     return m_impl->pump(mode == WaitMode::WaitForEvents ? EventLoopImplementation::PumpMode::WaitForEvents : EventLoopImplementation::PumpMode::DontWaitForEvents);
 }
 
-void EventLoop::post_event(EventReceiver& receiver, NonnullOwnPtr<Event>&& event)
-{
-    m_impl->post_event(receiver, move(event));
-}
-
 void EventLoop::add_job(NonnullRefPtr<Promise<NonnullRefPtr<EventReceiver>>> job_promise)
 {
     ThreadEventQueue::current().add_job(move(job_promise));
@@ -149,8 +144,7 @@ void EventLoop::wake()
 
 void EventLoop::deferred_invoke(Function<void()> invokee)
 {
-    auto context = DeferredInvocationContext::construct();
-    post_event(context, make<Core::DeferredInvocationEvent>(context, move(invokee)));
+    m_impl->deferred_invoke(move(invokee));
 }
 
 void deferred_invoke(Function<void()> invokee)

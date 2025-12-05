@@ -13,6 +13,7 @@
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
 
 namespace Web::CSS {
 
@@ -24,7 +25,7 @@ class WEB_API CSSImportRule final
 public:
     [[nodiscard]] static GC::Ref<CSSImportRule> create(JS::Realm&, URL, GC::Ptr<DOM::Document>, RefPtr<Supports>, Vector<NonnullRefPtr<MediaQuery>>);
 
-    virtual ~CSSImportRule() = default;
+    virtual ~CSSImportRule();
 
     URL const& url() const { return m_url; }
     String href() const { return m_url.url(); }
@@ -41,6 +42,7 @@ private:
 
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
+    virtual void dump(StringBuilder&, int indent_levels) const override;
 
     virtual void set_parent_style_sheet(CSSStyleSheet*) override;
 

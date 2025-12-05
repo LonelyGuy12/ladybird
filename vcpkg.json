@@ -1,5 +1,5 @@
 {
-  "builtin-baseline": "d80785c4ee1df22a4119a3451452f59e978e06aa",
+  "builtin-baseline": "4c4abc2e8727221ede31021349386dac674309b0",
   "dependencies": [
     {
       "name": "angle",
@@ -277,6 +277,10 @@
     {
       "name": "libwebp",
       "version": "1.6.0#1"
+    },
+    {
+      "name": "libxml2",
+      "version": "2.13.8#1"
     },
     {
       "name": "mman",
