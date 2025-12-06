@@ -49,6 +49,33 @@ Vector<String> default_safe_builtins()
     append_literal("TypeError"sv);
     append_literal("ValueError"sv);
     append_literal("ZeroDivisionError"sv);
+    append_literal("AttributeError"sv);
+    append_literal("ImportError"sv);
+    append_literal("ModuleNotFoundError"sv);
+    append_literal("KeyError"sv);
+    append_literal("IndexError"sv);
+    append_literal("NameError"sv);
+    append_literal("RuntimeError"sv);
+    append_literal("NotImplementedError"sv);
+    append_literal("AssertionError"sv);
+    append_literal("StopIteration"sv);
+    append_literal("ArithmeticError"sv);
+    append_literal("FloatingPointError"sv);
+    append_literal("OverflowError"sv);
+    append_literal("LookupError"sv);
+    append_literal("MemoryError"sv);
+    append_literal("OSError"sv);
+    append_literal("IOError"sv);
+    append_literal("FileNotFoundError"sv);
+    append_literal("PermissionError"sv);
+    append_literal("SyntaxError"sv);
+    append_literal("IndentationError"sv);
+    append_literal("TabError"sv);
+    append_literal("SystemError"sv);
+    append_literal("Warning"sv);
+    append_literal("UserWarning"sv);
+    append_literal("DeprecationWarning"sv);
+    append_literal("FutureWarning"sv);
 
     // Introspection and data model helpers (safe subset)
     append_literal("abs"sv);
@@ -221,13 +248,13 @@ ErrorOr<void> PythonSecurityModel::setup_global_restricted_builtins()
     // This function sets up the restricted 'open' in the global builtins module
     // It should be called during Python initialization, before any scripts run
     PyGILState_STATE gstate = PyGILState_Ensure();
-    
+
     PyObject* builtins_module = PyEval_GetBuiltins();
     if (!builtins_module) {
         PyGILState_Release(gstate);
         return Error::from_string_literal("Failed to retrieve Python builtins");
     }
-    
+
     // Create a restricted 'open' function that raises an error when called
     static PyMethodDef restricted_open_method = {
         "open",
@@ -235,7 +262,7 @@ ErrorOr<void> PythonSecurityModel::setup_global_restricted_builtins()
         METH_VARARGS,
         "Restricted: open() is not allowed"
     };
-    
+
     PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
     if (restricted_open) {
         // Add to the global builtins module to prevent KeyError during imports
@@ -244,7 +271,7 @@ ErrorOr<void> PythonSecurityModel::setup_global_restricted_builtins()
         PyDict_SetItemString(builtins_module, "open", restricted_open);
         Py_DECREF(restricted_open); // Safe to decref, builtins_module now holds a reference
     }
-    
+
     PyGILState_Release(gstate);
     return {};
 }
@@ -304,7 +331,7 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
             PyDict_SetItemString(safe_builtins, name_bytes.characters(), builtin);
         }
     }
-    
+
     // Create a restricted 'open' function that raises an error when called
     // This allows Python's internal code to check for 'open' without KeyError,
     // but prevents user code from actually using it
@@ -314,7 +341,7 @@ ErrorOr<void> PythonSecurityModel::restrict_builtins(void* globals_ptr)
         METH_VARARGS,
         "Restricted: open() is not allowed"
     };
-    
+
     PyObject* restricted_open = PyCFunction_New(&restricted_open_method, nullptr);
     if (restricted_open) {
         // Add to the execution context's __builtins__
