@@ -31,7 +31,7 @@ static String const& default_origin_key()
 Vector<String> default_safe_builtins()
 {
     Vector<String> builtins;
-    builtins.ensure_capacity(80);
+    builtins.ensure_capacity(120);
     auto append_literal = [&](StringView literal) {
         builtins.unchecked_append(MUST(String::from_utf8(literal)));
     };
