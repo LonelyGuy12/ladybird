@@ -20,6 +20,7 @@
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ImportMapParseResult.h>
+#include <LibWeb/HTML/Scripting/PythonPackageManager.h>
 #include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
@@ -164,7 +165,7 @@ void HTMLScriptElement::execute_script()
     // -> "python"
     else if (m_script_type == ScriptType::Python) {
         dbgln("🐍 HTMLScriptElement::execute_script() - Python script type detected!");
-        
+
         // 1. Let oldCurrentScript be the value to which document's currentScript object was most recently set.
         auto old_current_script = document->current_script();
         // 2. If el's root is not a shadow root, then set document's currentScript attribute to el. Otherwise, set it to null.
@@ -487,7 +488,7 @@ void HTMLScriptElement::prepare_script()
         // -> "python"
         else if (m_script_type == ScriptType::Python) {
             // For external Python scripts we'll need to fetch them and then create a PythonScript object.
-        // Disabled Python support
+            // Disabled Python support
             // We'll implement this behavior similar to how classic scripts are handled.
             fetch_python_script(*this, *url, settings_object, move(options), on_complete).release_value_but_fixme_should_propagate_errors();
         }
@@ -538,6 +539,33 @@ void HTMLScriptElement::prepare_script()
         }
         // -> "python"
         else if (m_script_type == ScriptType::Python) {
+            // 0. Install packages from requirements.txt BEFORE creating and executing the script
+            auto& package_manager = HTML::PythonPackageManager::the();
+            auto init_result = package_manager.initialize();
+            if (!init_result.is_error()) {
+                auto requirements_result = package_manager.find_requirements_file(document().url());
+                if (!requirements_result.is_error() && requirements_result.value().has_value()) {
+                    dbgln("🐍 HTMLScriptElement: Found requirements.txt, installing packages before script execution");
+                    auto packages_result = package_manager.parse_requirements(requirements_result.value().value(), document().url());
+                    if (!packages_result.is_error()) {
+                        auto install_result = package_manager.install_packages(packages_result.value());
+                        if (!install_result.is_error()) {
+                            dbgln("🐍 HTMLScriptElement: Successfully installed packages from requirements.txt");
+                            auto setup_result = package_manager.setup_python_path();
+                            if (setup_result.is_error()) {
+                                dbgln("🐍 HTMLScriptElement: Failed to set up Python path: {}", setup_result.error());
+                            }
+                        } else {
+                            dbgln("🐍 HTMLScriptElement: Failed to install packages: {}", install_result.error());
+                        }
+                    } else {
+                        dbgln("🐍 HTMLScriptElement: Failed to parse requirements.txt: {}", packages_result.error());
+                    }
+                } else {
+                    dbgln("🐍 HTMLScriptElement: No requirements.txt found for this origin");
+                }
+            }
+
             // 1. Let script be the result of creating a python script using source text, settings object's realm, base URL, and options.
             // FIXME: Pass options.
             auto script = PythonScript::create(m_document->url().to_byte_string(), source_text.to_byte_string(), settings_object.realm(), base_url);
@@ -554,7 +582,7 @@ void HTMLScriptElement::prepare_script()
         // FIXME: I believe this step to be a spec bug, and it should be removed: https://github.com/whatwg/html/issues/8534
 
         if (m_script_type == ScriptType::Python)
-            dbgln("🐍 HTMLScriptElement: Python script entering execution scheduling (parser_inserted={}, has_defer={}, has_async={})", 
+            dbgln("🐍 HTMLScriptElement: Python script entering execution scheduling (parser_inserted={}, has_defer={}, has_async={})",
                 is_parser_inserted(), has_attribute(HTML::AttributeNames::defer), has_attribute(HTML::AttributeNames::async));
 
         // 2. If el has an async attribute or el's force async is true:
@@ -694,7 +722,7 @@ void HTMLScriptElement::mark_as_ready(Result result)
 {
     if (m_script_type == ScriptType::Python)
         dbgln("🐍 HTMLScriptElement::mark_as_ready() - Python script marked as ready, has_callback={}", static_cast<bool>(m_steps_to_run_when_the_result_is_ready));
-    
+
     // 1. Set el's result to result.
     m_result = move(result);
 
