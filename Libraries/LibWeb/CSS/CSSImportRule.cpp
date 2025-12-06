@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, the SerenityOS developers.
- * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2022-2024, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2025, Lorenz Ackermann <me@lorenzackermann.xyz>
  *
@@ -18,6 +18,8 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Dump.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
 #include <LibWeb/HTML/Window.h>
 
@@ -38,6 +40,8 @@ CSSImportRule::CSSImportRule(JS::Realm& realm, URL url, GC::Ptr<DOM::Document> d
     , m_media_query_list(move(media_query_list))
 {
 }
+
+CSSImportRule::~CSSImportRule() = default;
 
 void CSSImportRule::initialize(JS::Realm& realm)
 {
@@ -153,7 +157,7 @@ void CSSImportRule::fetch()
             // 4. Let importedStylesheet be the result of parsing byteStream given parsedUrl.
             // FIXME: Tidy up our parsing API. For now, do the decoding here.
             Optional<String> mime_type_charset;
-            if (auto extracted_mime_type = response->header_list()->extract_mime_type(); extracted_mime_type.has_value()) {
+            if (auto extracted_mime_type = Fetch::Infrastructure::extract_mime_type(response->header_list()); extracted_mime_type.has_value()) {
                 if (auto charset = extracted_mime_type->parameters().get("charset"sv); charset.has_value())
                     mime_type_charset = charset.value();
             }
@@ -208,6 +212,30 @@ Optional<String> CSSImportRule::supports_text() const
     if (!m_supports)
         return {};
     return m_supports->to_string();
+}
+
+void CSSImportRule::dump(StringBuilder& builder, int indent_levels) const
+{
+    Base::dump(builder, indent_levels);
+
+    dump_indent(builder, indent_levels + 1);
+    builder.appendff("Document URL: {}\n", url().to_string());
+
+    dump_indent(builder, indent_levels + 1);
+    builder.appendff("Has document load delayer: {}\n", m_document_load_event_delayer.has_value());
+
+    if (auto media_list = media())
+        media_list->dump(builder, indent_levels + 1);
+
+    if (m_supports)
+        m_supports->dump(builder, indent_levels + 1);
+
+    if (m_style_sheet) {
+        dump_sheet(builder, *m_style_sheet, indent_levels + 1);
+    } else {
+        dump_indent(builder, indent_levels + 1);
+        builder.append("Style sheet not loaded\n"sv);
+    }
 }
 
 }

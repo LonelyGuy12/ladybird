@@ -1,5 +1,6 @@
 include(cmake/ResourceFiles.cmake)
 
+# Fixed: Properly separate target name and visibility for library linking
 function(create_ladybird_bundle target_name)
     set_target_properties(${target_name} PROPERTIES
         OUTPUT_NAME "Ladybird"
@@ -63,21 +64,23 @@ if (NOT TARGET ladybird)
 endif()
 
 if (TARGET ladybird_impl)
-    set(LADYBIRD_TARGET ladybird_impl PUBLIC)
+    set(LADYBIRD_TARGET ladybird_impl)
+    set(LADYBIRD_VISIBILITY PUBLIC)
 else()
-    set(LADYBIRD_TARGET ladybird PRIVATE)
+    set(LADYBIRD_TARGET ladybird)
+    set(LADYBIRD_VISIBILITY PRIVATE)
 endif()
 
-set(LADYBIRD_LIBS AK LibCore LibFileSystem LibGfx LibImageDecoderClient LibIPC LibJS LibMain LibWeb LibWebView LibWebViewPlatform LibRequests LibURL)
+set(LADYBIRD_LIBS AK LibCore LibFileSystem LibGfx LibImageDecoderClient LibIPC LibJS LibMain LibWeb LibWebView LibRequests LibURL)
 target_link_libraries(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_LIBS})
 target_link_libraries(${LADYBIRD_TARGET} PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 
-target_include_directories(${LADYBIRD_TARGET} ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_SOURCE_DIR})
-target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_SOURCE_DIR}/Services/)
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_SOURCE_DIR})
+target_include_directories(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_SOURCE_DIR}/Services/)
 
 if(WIN32)
-    target_link_libraries(${LADYBIRD_TARGET} LibDevTools)
+    target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} LibDevTools)
 endif()
 
 function(set_helper_process_properties)

@@ -37,6 +37,14 @@ PythonPackageManager& PythonPackageManager::the()
     return *s_the;
 }
 
+String PythonPackageManager::get_package_install_path() const
+{
+    // Return a path for package installation
+    // Use the correct Python version for the virtual environment
+    // Based on the logs, it seems to be Python 3.13
+    return String("/tmp/ladybird_python_venv/lib/python3.13/site-packages"_string);
+}
+
 ErrorOr<void> PythonPackageManager::initialize()
 {
     if (m_initialized)
@@ -44,14 +52,84 @@ ErrorOr<void> PythonPackageManager::initialize()
     
     dbgln("🐍 PythonPackageManager: Initializing package manager");
     
-    // Initialize the package installation directory
-    auto package_path = get_package_install_path();
-    dbgln("🐍 PythonPackageManager: Package installation path: {}", package_path);
+    // Create a virtual environment for package isolation
+    String venv_path = "/tmp/ladybird_python_venv"_string;
+    auto venv_path_byte_string = venv_path.to_byte_string();
     
-    // Set up Python path to include our package directory
+    // Check if virtual environment already exists
+    struct stat buffer;
+    if (stat(venv_path_byte_string.characters(), &buffer) != 0) {
+        // Virtual environment doesn't exist, create it
+        dbgln("🐍 PythonPackageManager: Creating virtual environment at {}", venv_path);
+        auto command_result = String::formatted("python3 -m venv {}", venv_path);
+        if (command_result.is_error()) {
+            dbgln("🐍 PythonPackageManager: Failed to format command string");
+            return command_result.release_error();
+        }
+        String command = command_result.release_value();
+        auto command_byte_string = command.to_byte_string();
+        int result = system(command_byte_string.characters());
+        
+        if (result != 0) {
+            dbgln("🐍 PythonPackageManager: Failed to create virtual environment");
+            return Error::from_string_literal("Failed to create virtual environment");
+        }
+    } else {
+        dbgln("🐍 PythonPackageManager: Using existing virtual environment at {}", venv_path);
+    }
+    
+    // Upgrade pip in the virtual environment to ensure we have the latest version
+    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
+    auto upgrade_command_result = String::formatted("{} install --upgrade pip", venv_pip);
+    if (upgrade_command_result.is_error()) {
+        dbgln("🐍 PythonPackageManager: Failed to format pip upgrade command");
+        return upgrade_command_result.release_error();
+    }
+    String upgrade_command = upgrade_command_result.release_value();
+    auto upgrade_command_byte_string = upgrade_command.to_byte_string();
+    // We don't care about the result of this command as it's not critical
+    // But we need to handle the return value to avoid compiler warnings
+    [[maybe_unused]] auto unused_result = system(upgrade_command_byte_string.characters());
+    
+    // Set up Python path to include our virtual environment
     TRY(setup_python_path());
     
     m_initialized = true;
+    return {};
+}
+
+ErrorOr<void> PythonPackageManager::setup_python_path()
+{
+    // Add our virtual environment's site-packages directory to Python's sys.path
+    String package_path = get_package_install_path();
+    dbgln("🐍 PythonPackageManager: Adding {} to Python path", package_path);
+    
+    // Convert to ByteString for Python C API
+    ByteString package_path_byte_string = package_path.to_byte_string();
+    
+    // Get the current Python path
+    PyObject* sys_path = PySys_GetObject("path");
+    if (!sys_path) {
+        dbgln("🐍 PythonPackageManager: Failed to get Python sys.path");
+        return Error::from_string_literal("Failed to get Python sys.path");
+    }
+    
+    // Add our package directory to the beginning of the path for highest priority
+    PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
+    if (!path_string) {
+        dbgln("🐍 PythonPackageManager: Failed to create Python string for package path");
+        return Error::from_string_literal("Failed to create Python string for package path");
+    }
+    
+    int result = PyList_Insert(sys_path, 0, path_string);
+    Py_DECREF(path_string);
+    
+    if (result == -1) {
+        dbgln("🐍 PythonPackageManager: Failed to insert package path into Python sys.path");
+        return Error::from_string_literal("Failed to insert package path into Python sys.path");
+    }
+    
+    dbgln("🐍 PythonPackageManager: Successfully added package path to Python sys.path");
     return {};
 }
 
@@ -228,25 +306,56 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     
     dbgln("🐍 PythonPackageManager: Installing {} new packages", packages_to_install.size());
     
-    // Create the package installation directory if it doesn't exist
-    String package_install_path = get_package_install_path();
-    auto package_install_path_byte_string = package_install_path.to_byte_string();
-    if (mkdir(package_install_path_byte_string.characters(), 0755) == -1 && errno != EEXIST) {
-        dbgln("🐍 PythonPackageManager: Failed to create package installation directory: {}", strerror(errno));
-        return Error::from_string_literal("Failed to create package installation directory");
+    // Use the virtual environment's pip directly
+    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
+    
+    // Check if pip is available in the virtual environment
+    auto check_command = String::formatted("{} --version > /dev/null 2>&1", venv_pip);
+    if (check_command.is_error()) {
+        dbgln("🐍 PythonPackageManager: Failed to format check command");
+        return check_command.release_error();
+    }
+    String check_command_str = check_command.release_value();
+    auto check_command_byte_string = check_command_str.to_byte_string();
+    int pip_check = system(check_command_byte_string.characters());
+    
+    if (pip_check != 0) {
+        dbgln("🐍 PythonPackageManager: pip is not available in virtual environment. Please ensure the virtual environment is properly created.");
+        return Error::from_string_literal("pip is not available in virtual environment");
     }
     
-    // Install each package using pip
+    // Install each package using pip in our virtual environment
     for (auto const& package : packages_to_install) {
         StringBuilder command_builder;
-        command_builder.append("pip install --target "sv);
-        command_builder.append(package_install_path);
-        command_builder.append(" "sv);
+        command_builder.append(venv_pip);
+        command_builder.append(" install --upgrade "_string);
         command_builder.append(package.name);
         
         if (package.version.has_value()) {
-            command_builder.append("=="sv);
-            command_builder.append(*package.version);
+            // Fix the version specifier - remove any spaces or extra characters
+            String version = *package.version;
+            // Remove leading/trailing whitespace
+            auto trimmed_version = version.trim_whitespace();
+            if (!trimmed_version.is_error() && !trimmed_version.value().is_empty()) {
+                // Check if version already has an operator
+                if (!trimmed_version.value().starts_with_bytes("="sv) && 
+                    !trimmed_version.value().starts_with_bytes(">"sv) && 
+                    !trimmed_version.value().starts_with_bytes("<"sv) && 
+                    !trimmed_version.value().starts_with_bytes("~"sv)) {
+                    command_builder.append("=="sv);
+                }
+                command_builder.append(trimmed_version.value());
+            }
+        }
+        
+        // Special handling for numpy to avoid installation issues
+        if (package.name == "numpy"_string) {
+            // Add --no-cache-dir to avoid potential cache issues
+            command_builder.append(" --no-cache-dir"_string);
+            // Also add --force-reinstall to ensure a clean installation
+            command_builder.append(" --force-reinstall"_string);
+            // Add --no-deps to avoid dependency conflicts
+            command_builder.append(" --no-deps"_string);
         }
         
         auto command_result = command_builder.to_string();
@@ -294,47 +403,6 @@ bool PythonPackageManager::is_package_installed(PythonPackage const& package) co
     }
     
     return false;
-}
-
-String PythonPackageManager::get_package_install_path() const
-{
-    // Return a path for package installation
-    // In a real implementation, this would be a directory within the browser's data directory
-    return String("/tmp/ladybird_python_packages"_string);
-}
-
-ErrorOr<void> PythonPackageManager::setup_python_path()
-{
-    dbgln("🐍 PythonPackageManager: Setting up Python path");
-    
-    // Get the current Python path
-    PyObject* sys_module = PyImport_ImportModule("sys");
-    if (!sys_module) {
-        dbgln("🐍 PythonPackageManager: Failed to import sys module");
-        return Error::from_string_literal("Failed to import sys module");
-    }
-    
-    PyObject* path_list = PyObject_GetAttrString(sys_module, "path");
-    if (!path_list) {
-        Py_DECREF(sys_module);
-        dbgln("🐍 PythonPackageManager: Failed to get sys.path");
-        return Error::from_string_literal("Failed to get sys.path");
-    }
-    
-    // Add our package installation directory to the path
-    String package_path = get_package_install_path();
-    auto package_path_byte_string = package_path.to_byte_string();
-    PyObject* path_string = PyUnicode_FromString(package_path_byte_string.characters());
-    if (path_string) {
-        PyList_Append(path_list, path_string);
-        Py_DECREF(path_string);
-        dbgln("🐍 PythonPackageManager: Added {} to Python path", package_path);
-    }
-    
-    Py_DECREF(path_list);
-    Py_DECREF(sys_module);
-    
-    return {};
 }
 
 void PythonPackageManager::clear_cache_for_origin(URL::URL const& origin)

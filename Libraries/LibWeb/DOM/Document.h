@@ -264,12 +264,17 @@ public:
     CSS::StyleComputer& style_computer() { return *m_style_computer; }
     CSS::StyleComputer const& style_computer() const { return *m_style_computer; }
 
+    CSS::FontComputer& font_computer() { return *m_font_computer; }
+    CSS::FontComputer const& font_computer() const { return *m_font_computer; }
+
     CSS::StyleSheetList& style_sheets();
     CSS::StyleSheetList const& style_sheets() const;
 
     void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
+
+    double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
 
     Optional<String> get_style_sheet_source(CSS::StyleSheetIdentifier const&) const;
 
@@ -1020,6 +1025,7 @@ private:
 
     GC::Ref<Page> m_page;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
+    GC::Ptr<CSS::FontComputer> m_font_computer;
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
     GC::Ptr<Node> m_active_favicon;
     GC::Ptr<HTML::BrowsingContext> m_browsing_context;
@@ -1363,6 +1369,9 @@ private:
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>> m_registered_custom_properties;
 
     CSS::StyleScope m_style_scope;
+
+    // https://drafts.csswg.org/css-values-5/#random-caching
+    HashMap<CSS::RandomCachingKey, double> m_element_shared_css_random_base_value_cache;
 };
 
 template<>

@@ -68,8 +68,10 @@ set(GENERATED_SOURCES
     UIProcessServerEndpoint.h
 )
 
+
+# Force CMake reconfiguration to pick up PUBLIC LibCoreMinimal dependency
 ladybird_lib(LibWebView webview EXPLICIT_SYMBOL_EXPORT)
-target_link_libraries(LibWebView PRIVATE LibCore LibDatabase LibDevTools LibFileSystem LibGfx LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax LibTextCodec)
+target_link_libraries(LibWebView PUBLIC LibCoreMinimal PRIVATE LibCore LibDatabase LibDevTools LibFileSystem LibGfx LibHTTP LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax LibTextCodec)
 
 if (APPLE)
     target_link_libraries(LibWebView PRIVATE LibThreading)
@@ -78,29 +80,6 @@ endif()
 # Third-party
 if (HAS_FONTCONFIG)
     target_link_libraries(LibWebView PRIVATE Fontconfig::Fontconfig)
-endif()
-
-add_library(LibWebViewPlatform INTERFACE)
-if (ENABLE_QT)
-    add_library(LibWebViewQt STATIC
-        EventLoop/EventLoopImplementationQt.cpp
-        EventLoop/EventLoopImplementationQtEventTarget.cpp
-    )
-
-    set_target_properties(LibWebViewQt PROPERTIES AUTOMOC ON AUTORCC OFF AUTOUIC OFF)
-    find_package(Qt6 REQUIRED COMPONENTS Core)
-    target_link_libraries(LibWebViewQt PUBLIC Qt::Core)
-    if (WIN32)
-        find_package(pthread REQUIRED)
-        target_include_directories(LibWebViewQt PRIVATE $<BUILD_INTERFACE:${PTHREAD_INCLUDE_DIR}>)
-    endif()
-    target_link_libraries(LibWebViewPlatform INTERFACE LibWebViewQt)
-elseif (APPLE)
-    add_library(LibWebViewCocoa STATIC
-        EventLoop/EventLoopImplementationMacOS.mm
-    )
-    target_link_libraries(LibWebViewCocoa PUBLIC "-framework Cocoa")
-    target_link_libraries(LibWebViewPlatform INTERFACE LibWebViewCocoa)
 endif()
 
 if (ENABLE_INSTALL_HEADERS)

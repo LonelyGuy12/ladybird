@@ -6,6 +6,7 @@
  */
 
 #include <AK/JsonObject.h>
+#include <LibGfx/Cursor.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibUnicode/TimeZone.h>
@@ -236,6 +237,20 @@ void Internals::pinch(double x, double y, double scale_delta)
     page.handle_pinch_event(position, scale_delta);
 }
 
+String Internals::current_cursor()
+{
+    auto& page = this->page();
+
+    return page.current_cursor().visit(
+        [](Gfx::StandardCursor cursor) {
+            auto cursor_string = Gfx::standard_cursor_to_string(cursor);
+            return String::from_utf8_without_validation(cursor_string.bytes());
+        },
+        [](Gfx::ImageCursor const&) {
+            return "Image"_string;
+        });
+}
+
 WebIDL::ExceptionOr<bool> Internals::dispatch_user_activated_event(DOM::EventTarget& target, DOM::Event& event)
 {
     event.set_is_trusted(true);
@@ -301,8 +316,8 @@ void Internals::expire_cookies_with_time_offset(WebIDL::LongLong seconds)
 
 bool Internals::set_http_memory_cache_enabled(bool enabled)
 {
-    auto was_enabled = Web::Fetch::Fetching::http_cache_enabled();
-    Web::Fetch::Fetching::set_http_cache_enabled(enabled);
+    auto was_enabled = Web::Fetch::Fetching::http_memory_cache_enabled();
+    Web::Fetch::Fetching::set_http_memory_cache_enabled(enabled);
     return was_enabled;
 }
 
