@@ -71,9 +71,9 @@ else()
     set(LADYBIRD_VISIBILITY PRIVATE)
 endif()
 
-set(LADYBIRD_LIBS AK LibCoreMinimal LibCore LibFileSystem LibGfx LibImageDecoderClient LibIPC LibJS LibMain LibWeb LibWebView LibWebViewPlatform LibRequests LibURL)
-target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} ${LADYBIRD_LIBS})
-target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_VISIBILITY} OpenSSL::Crypto OpenSSL::SSL)
+set(LADYBIRD_LIBS AK LibCore LibFileSystem LibGfx LibImageDecoderClient LibIPC LibJS LibMain LibWeb LibWebView LibRequests LibURL)
+target_link_libraries(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_LIBS})
+target_link_libraries(${LADYBIRD_TARGET} PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 
 target_include_directories(${LADYBIRD_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(${LADYBIRD_TARGET} PRIVATE ${LADYBIRD_SOURCE_DIR})
