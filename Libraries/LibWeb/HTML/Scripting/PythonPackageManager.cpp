@@ -132,7 +132,26 @@ ErrorOr<void> PythonPackageManager::initialize()
     if (stat(venv_path_byte_string.characters(), &buffer) != 0) {
         // Virtual environment doesn't exist, create it
         dbgln("🐍 PythonPackageManager: Creating virtual environment at {}", venv_path);
-        auto command_result = String::formatted("python3 -m venv {}", venv_path);
+
+        // Use bundled Python if available, otherwise system python3
+        String python_executable = "python3"_string;
+#ifdef __APPLE__
+        auto bundle_path = get_app_bundle_path();
+        if (bundle_path.has_value()) {
+            auto bundled_python_result = String::formatted("{}/Contents/Frameworks/Python.framework/Versions/3.14/bin/python3.14", bundle_path.value());
+            if (!bundled_python_result.is_error()) {
+                String bundled_python = bundled_python_result.release_value();
+                auto bundled_python_bytes = bundled_python.to_byte_string();
+                // Check if bundled Python exists
+                if (stat(bundled_python_bytes.characters(), &buffer) == 0) {
+                    python_executable = bundled_python;
+                    dbgln("🐍 PythonPackageManager: Using bundled Python: {}", python_executable);
+                }
+            }
+        }
+#endif
+
+        auto command_result = String::formatted("{} -m venv {}", python_executable, venv_path);
         if (command_result.is_error()) {
             dbgln("🐍 PythonPackageManager: Failed to format command string");
             return command_result.release_error();
