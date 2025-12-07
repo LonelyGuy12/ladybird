@@ -32,9 +32,9 @@ static Optional<ByteString> get_bundled_python_home()
     if (_NSGetExecutablePath(exe_path, &size) == 0) {
         // exe_path is like: /path/to/Ladybird.app/Contents/MacOS/Ladybird
         ByteString path_str(exe_path);
-        if (path_str.contains(".app/Contents/MacOS")) {
+        if (path_str.contains(".app/Contents/MacOS"sv)) {
             // Extract bundle path
-            auto app_index = path_str.find(".app/Contents/MacOS");
+            auto app_index = path_str.find(".app/Contents/MacOS"sv);
             if (app_index.has_value()) {
                 auto bundle_path = path_str.substring(0, app_index.value() + 4); // Include ".app"
                 auto python_home = ByteString::formatted("{}/Contents/Frameworks/Python.framework/Versions/3.14", bundle_path);
@@ -71,7 +71,10 @@ void PythonEngine::initialize()
         dbgln("🐍 Using bundled Python at: {}", bundled_python.value());
         wchar_t* python_home_wide = Py_DecodeLocale(bundled_python.value().characters(), nullptr);
         if (python_home_wide) {
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wdeprecated-declarations"
             Py_SetPythonHome(python_home_wide);
+#    pragma clang diagnostic pop
             // Note: python_home_wide should NOT be freed - Py_SetPythonHome keeps the pointer
         }
     } else {
