@@ -469,9 +469,28 @@ jobs:
           echo ""
           echo "=== Ad-hoc signing the app bundle ==="
           
-          # Don't sign Python.framework - it's already signed by Homebrew
-          # Don't use --deep - it tries to re-sign nested bundles which fails
-          # Just sign the main app bundle itself
+          # Fix Python.framework structure to avoid codesign ambiguity
+          if [ -d "$APP_BUNDLE/Contents/Frameworks/Python.framework" ]; then
+            echo "Preparing Python.framework for signing..."
+            
+            # Python.framework has symlinks that confuse codesign
+            # Remove the top-level symlinks (they point inside Versions/)
+            # Keep only the actual Versions/3.14 directory
+            cd "$APP_BUNDLE/Contents/Frameworks/Python.framework"
+            
+            # Remove symlinks at framework root
+            rm -f Headers Modules Python Resources Versions/Current 2>/dev/null || true
+            
+            # Sign the actual version directory explicitly
+            echo "Signing Python 3.14 binaries..."
+            find Versions/3.14 -type f -perm +111 -exec codesign --force --sign - {} \; 2>/dev/null || true
+            
+            cd - >/dev/null
+            echo "Python.framework prepared"
+          fi
+          
+          # Sign the main app bundle without --deep (Python is already signed)
+          echo "Signing Ladybird.app..."
           codesign --force --sign - "$APP_BUNDLE"
           codesign --verify --verbose "$APP_BUNDLE"
           
