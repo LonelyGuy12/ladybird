@@ -26,9 +26,41 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#ifdef __APPLE__
+#    include <mach-o/dyld.h>
+#endif
+
 namespace Web::HTML {
 
 static PythonPackageManager* s_the = nullptr;
+
+#ifdef __APPLE__
+// Helper to get app bundle path on macOS
+static Optional<String> get_app_bundle_path()
+{
+    char exe_path[PATH_MAX];
+    uint32_t size = sizeof(exe_path);
+    if (_NSGetExecutablePath(exe_path, &size) == 0) {
+        // exe_path is like: /path/to/Ladybird.app/Contents/MacOS/Ladybird
+        // Check if we're in an app bundle
+        auto path_str_result = String::from_utf8({ exe_path, strlen(exe_path) });
+        if (path_str_result.is_error())
+            return {};
+
+        String path_str = path_str_result.release_value();
+        if (path_str.contains(".app/Contents/MacOS"sv)) {
+            // Extract bundle path by going up to .app
+            auto app_index = path_str.find(".app/Contents/MacOS"sv);
+            if (app_index.has_value()) {
+                auto bundle_path_result = path_str.substring_from_byte_offset(0, app_index.value() + 4); // Include ".app"
+                if (!bundle_path_result.is_error())
+                    return bundle_path_result.release_value();
+            }
+        }
+    }
+    return {};
+}
+#endif
 
 PythonPackageManager& PythonPackageManager::the()
 {
@@ -37,16 +69,37 @@ PythonPackageManager& PythonPackageManager::the()
     return *s_the;
 }
 
+String PythonPackageManager::get_venv_base_path() const
+{
+#ifdef __APPLE__
+    // On macOS, check if we're in an app bundle
+    auto bundle_path = get_app_bundle_path();
+    if (bundle_path.has_value()) {
+        auto venv_path_result = String::formatted("{}/Contents/Resources/python_venv", bundle_path.value());
+        if (!venv_path_result.is_error()) {
+            dbgln("🐍 PythonPackageManager: Using bundle venv at: {}", venv_path_result.value());
+            return venv_path_result.release_value();
+        }
+    }
+    // Fall through to temp path for development builds
+#endif
+
+    // Development builds and other platforms use temp directory
+    return String("/tmp/ladybird_python_venv"_string);
+}
+
 String PythonPackageManager::get_package_install_path() const
 {
     // Dynamically detect Python version to construct the correct site-packages path
     // Extract major.minor from Py_GetVersion() which returns something like "3.14.0 (...)"
     char const* version_str = Py_GetVersion();
 
+    String venv_base = get_venv_base_path();
+
     // Parse "3.14.0" to get "3.14"
     int major = 0, minor = 0;
     if (sscanf(version_str, "%d.%d", &major, &minor) >= 2) {
-        auto path_result = String::formatted("/tmp/ladybird_python_venv/lib/python{}.{}/site-packages", major, minor);
+        auto path_result = String::formatted("{}/lib/python{}.{}/site-packages", venv_base, major, minor);
         if (!path_result.is_error()) {
             return path_result.release_value();
         }
@@ -54,6 +107,10 @@ String PythonPackageManager::get_package_install_path() const
 
     // Fallback to python3.14 if parsing fails
     dbgln("🐍 PythonPackageManager: Warning - failed to parse Python version, using python3.14 as fallback");
+    auto fallback_result = String::formatted("{}/lib/python3.14/site-packages", venv_base);
+    if (!fallback_result.is_error())
+        return fallback_result.release_value();
+
     return String("/tmp/ladybird_python_venv/lib/python3.14/site-packages"_string);
 }
 
@@ -65,8 +122,10 @@ ErrorOr<void> PythonPackageManager::initialize()
     dbgln("🐍 PythonPackageManager: Initializing package manager");
 
     // Create a virtual environment for package isolation
-    String venv_path = "/tmp/ladybird_python_venv"_string;
+    String venv_path = get_venv_base_path();
     auto venv_path_byte_string = venv_path.to_byte_string();
+
+    dbgln("🐍 PythonPackageManager: Using venv path: {}", venv_path);
 
     // Check if virtual environment already exists
     struct stat buffer;
@@ -91,7 +150,10 @@ ErrorOr<void> PythonPackageManager::initialize()
     }
 
     // Upgrade pip in the virtual environment to ensure we have the latest version
-    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
+    auto venv_pip_result = String::formatted("{}/bin/pip", venv_path);
+    if (venv_pip_result.is_error())
+        return venv_pip_result.release_error();
+    String venv_pip = venv_pip_result.release_value();
     auto upgrade_command_result = String::formatted("{} install --upgrade pip", venv_pip);
     if (upgrade_command_result.is_error()) {
         dbgln("🐍 PythonPackageManager: Failed to format pip upgrade command");
@@ -319,8 +381,11 @@ ErrorOr<void> PythonPackageManager::install_packages(Vector<PythonPackage> const
     dbgln("🐍 PythonPackageManager: Installing {} new packages", packages_to_install.size());
 
     // Use the virtual environment's pip directly
-    String venv_pip = "/tmp/ladybird_python_venv/bin/pip"_string;
-
+    String venv_base = get_venv_base_path();
+    auto venv_pip_result = String::formatted("{}/bin/pip", venv_base);
+    if (venv_pip_result.is_error())
+        return venv_pip_result.release_error();
+    String venv_pip = venv_pip_result.release_value();
     // Check if pip is available in the virtual environment
     auto check_command = String::formatted("{} --version > /dev/null 2>&1", venv_pip);
     if (check_command.is_error()) {
