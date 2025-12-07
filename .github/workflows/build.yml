@@ -469,14 +469,10 @@ jobs:
           echo ""
           echo "=== Ad-hoc signing the app bundle ==="
           
-          # Sign Python.framework separately first (if it exists)
-          if [ -d "$APP_BUNDLE/Contents/Frameworks/Python.framework" ]; then
-            echo "Signing Python.framework..."
-            codesign --force --deep --sign - "$APP_BUNDLE/Contents/Frameworks/Python.framework"
-          fi
-          
-          # Now sign the main app bundle
-          codesign --force --deep --sign - "$APP_BUNDLE"
+          # Don't sign Python.framework - it's already signed by Homebrew
+          # Don't use --deep - it tries to re-sign nested bundles which fails
+          # Just sign the main app bundle itself
+          codesign --force --sign - "$APP_BUNDLE"
           codesign --verify --verbose "$APP_BUNDLE"
           
           # Create DMG staging directory
