@@ -30,3 +30,16 @@ target_link_libraries(ladybird_impl PUBLIC "-framework Cocoa -framework UniformT
 target_link_libraries(ladybird PRIVATE ladybird_impl)
 
 create_ladybird_bundle(ladybird)
+
+# Bundle Python.framework into app during build (not just install)
+if(APPLE)
+    add_custom_command(TARGET ladybird POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Bundling Python.framework into Ladybird.app..."
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Frameworks"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
+            "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Frameworks/Python.framework"
+        COMMAND ${CMAKE_COMMAND} -E echo "✅ Python.framework bundled successfully"
+        COMMENT "Bundling Python.framework for self-contained distribution"
+    )
+endif()
