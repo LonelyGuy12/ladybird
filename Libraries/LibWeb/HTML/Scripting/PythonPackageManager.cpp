@@ -50,7 +50,7 @@ static Optional<String> get_app_bundle_path()
         String path_str = path_str_result.release_value();
         if (path_str.contains(".app/Contents/MacOS"sv)) {
             // Extract bundle path by going up to .app
-            auto app_index = path_str.find(".app/Contents/MacOS"sv);
+            auto app_index = path_str.find_byte_offset(".app/Contents/MacOS"sv);
             if (app_index.has_value()) {
                 auto bundle_path_result = path_str.substring_from_byte_offset(0, app_index.value() + 4); // Include ".app"
                 if (!bundle_path_result.is_error())
