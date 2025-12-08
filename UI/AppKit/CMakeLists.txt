@@ -41,6 +41,10 @@ if(APPLE)
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
         # Remove Python.app (GUI wrapper for IDLE) - we don't need it
         COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
+        # Patch python3.14 binary to remove hardcoded Python.app reference
+        # The binary contains "Resources/Python.app/Contents/MacOS/Python" which venv tries to use
+        COMMAND sed -i.bak "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
+        COMMAND rm -f "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14.bak"
         COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
         # Fix the python3.14 executable to find the bundled libpython dylib
         # python3.14 is at: Resources/bundled_python/Versions/3.14/bin/python3.14
