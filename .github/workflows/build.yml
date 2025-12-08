@@ -468,6 +468,7 @@ jobs:
           # Ad-hoc code sign the app bundle
           echo ""
           echo "=== Ad-hoc signing the app bundle ==="
+          # Now valid to sign - Python is just resources, not a nested Framework bundle
           codesign --force --deep --sign - "$APP_BUNDLE"
           codesign --verify --verbose "$APP_BUNDLE"
           
