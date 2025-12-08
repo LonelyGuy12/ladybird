@@ -465,11 +465,12 @@ jobs:
           NEW_BUNDLE_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
           echo "Bundle size after adding libraries: $NEW_BUNDLE_SIZE"
           
-          # Skip app bundle signing - Python.framework causes codesign ambiguity
-          # Ad-hoc signing isn't required for DMG distribution anyway
-          # We'll sign the DMG at the end instead
+          # Ad-hoc code sign the app bundle
           echo ""
-          echo "=== Skipping app bundle signing (will sign DMG instead) ==="
+          echo "=== Ad-hoc signing the app bundle ==="
+          # Now valid to sign - Python is just resources, not a nested Framework bundle
+          codesign --force --deep --sign - "$APP_BUNDLE"
+          codesign --verify --verbose "$APP_BUNDLE"
           
           # Create DMG staging directory
           DMG_DIR="Build/dmg_staging"
