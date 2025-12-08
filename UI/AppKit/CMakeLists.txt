@@ -46,20 +46,9 @@ if(APPLE)
         COMMAND sed -i.bak "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
         COMMAND rm -f "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14.bak"
         COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
-        # Fix the python3.14 executable to find the bundled libpython dylib
-        # python3.14 is at: Resources/bundled_python/Versions/3.14/bin/python3.14
-        # Python dylib is at: Resources/bundled_python/Versions/3.14/Python
-        # So from bin/, we go ../ to reach Python
-        COMMAND install_name_tool -change
-            "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../Python"
-            "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
-        # Also fix for the newer version path in case it changed
-        COMMAND install_name_tool -change
-            "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../Python"
-            "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
-            || true
+        # Dynamically detect and fix the python3.14 executable dylib reference
+        # Use otool to find the actual Homebrew path, then rewrite it
+        COMMAND bash -c "OLD_PATH=$(otool -L '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14' | grep '/opt/homebrew/.*Python.framework' | awk '{print $1}') && if [ -n \"$OLD_PATH\" ]; then install_name_tool -change \"$OLD_PATH\" '@executable_path/../Python' '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14'; fi"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )
