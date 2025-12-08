@@ -41,14 +41,17 @@ if(APPLE)
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
         COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
         # Fix the python3.14 executable to find the bundled libpython dylib
+        # python3.14 is at: Resources/bundled_python/Versions/3.14/bin/python3.14
+        # Python dylib is at: Resources/bundled_python/Versions/3.14/Python
+        # So from bin/, we go ../ to reach Python
         COMMAND install_name_tool -change
             "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../../Resources/bundled_python/Versions/3.14/Python"
+            "@executable_path/../Python"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
         # Also fix for the newer version path in case it changed
         COMMAND install_name_tool -change
             "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../../Resources/bundled_python/Versions/3.14/Python"
+            "@executable_path/../Python"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
             || true
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
