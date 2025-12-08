@@ -39,6 +39,8 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
+        # Remove Python.app (GUI wrapper for IDLE) - we don't need it
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
         COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
         # Fix the python3.14 executable to find the bundled libpython dylib
         # python3.14 is at: Resources/bundled_python/Versions/3.14/bin/python3.14
@@ -53,19 +55,6 @@ if(APPLE)
             "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/Python"
             "@executable_path/../Python"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
-            || true
-        # Also fix Python.app executable (used by IDLE and other tools)
-        # It's at: Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python
-        # From there, ../../../Python reaches the dylib
-        COMMAND install_name_tool -change
-            "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../../../Python"
-            "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
-            || true
-        COMMAND install_name_tool -change
-            "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/Python"
-            "@executable_path/../../../Python"
-            "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
             || true
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
