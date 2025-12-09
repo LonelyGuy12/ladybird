@@ -5,6 +5,22 @@ message(STATUS "Fixing Python bundle...")
 
 set(PYTHON_BIN "${BUNDLE_DIR}/Resources/bundled_python/Versions/3.14/bin/python3.14")
 
+# Step 1: Patch out hardcoded Python.app string
+message(STATUS "Removing hardcoded Python.app reference...")
+execute_process(
+    COMMAND perl -pi -e "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "${PYTHON_BIN}"
+    RESULT_VARIABLE PATCH_RESULT
+)
+
+if(PATCH_RESULT EQUAL 0)
+    message(STATUS "✅ Patched Python.app string")
+else()
+    message(WARNING "Failed to patch Python.app string")
+endif()
+
+# Step 2: Fix dylib path
+message(STATUS "Fixing dylib install name...")
+
 # Get current dylib path
 execute_process(
     COMMAND otool -L "${PYTHON_BIN}"
