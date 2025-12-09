@@ -42,7 +42,7 @@ if(APPLE)
         # Create minimal Python.app structure with symlink (venv expects this path)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS"
         COMMAND ${CMAKE_COMMAND} -E create_symlink
-            "../../../../../../bin/python3.14"
+            "../../../../bin/python3.14"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
         # Fix Python dylib references using dedicated script
         COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
