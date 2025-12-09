@@ -41,14 +41,8 @@ if(APPLE)
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
         # Remove Python.app (GUI wrapper for IDLE) - we don't need it
         COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
-        # Patch python3.14 binary to remove hardcoded Python.app reference
-        # The binary contains "Resources/Python.app/Contents/MacOS/Python" which venv tries to use
-        COMMAND sed -i.bak "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14"
-        COMMAND rm -f "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14.bak"
-        COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
-        # Dynamically detect and fix the python3.14 executable dylib reference
-        # Use otool to find the actual Homebrew path, then rewrite it
-        COMMAND bash -c "OLD_PATH=$$(otool -L '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14' | grep '/opt/homebrew/.*Python.framework' | awk '{print $$1}') && if [ -n \"$$OLD_PATH\" ]; then install_name_tool -change \"$$OLD_PATH\" '@executable_path/../Python' '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14'; fi"
+        # Fix Python dylib references using dedicated script
+        COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )
