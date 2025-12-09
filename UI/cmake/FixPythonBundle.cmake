@@ -52,18 +52,4 @@ else()
     message(WARNING "No Homebrew path found in otool output - Python may already be fixed or have a different path")
 endif()
 
-# Step 2: Patch out hardcoded Python.app string (AFTER install_name_tool)
-message(STATUS "=== Step 2: Removing hardcoded Python.app reference ===")
-execute_process(
-    COMMAND perl -pi -e "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "${PYTHON_BIN}"
-    RESULT_VARIABLE PATCH_RESULT
-    ERROR_VARIABLE PATCH_ERROR
-)
-
-if(PATCH_RESULT EQUAL 0)
-    message(STATUS "✅ Patched Python.app string")
-else()
-    message(WARNING "Failed to patch Python.app string: ${PATCH_ERROR}")
-endif()
-
 message(STATUS "=== Python Bundle Fixer Complete ===")
