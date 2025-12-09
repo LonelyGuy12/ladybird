@@ -11,22 +11,8 @@ if(NOT EXISTS "${PYTHON_BIN}")
     message(FATAL_ERROR "Python binary not found at: ${PYTHON_BIN}")
 endif()
 
-# Step 1: Patch out hardcoded Python.app string
-message(STATUS "=== Step 1: Removing hardcoded Python.app reference ===")
-execute_process(
-    COMMAND perl -pi -e "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "${PYTHON_BIN}"
-    RESULT_VARIABLE PATCH_RESULT
-    ERROR_VARIABLE PATCH_ERROR
-)
-
-if(PATCH_RESULT EQUAL 0)
-    message(STATUS "✅ Patched Python.app string")
-else()
-    message(WARNING "Failed to patch Python.app string: ${PATCH_ERROR}")
-endif()
-
-# Step 2: Fix dylib path
-message(STATUS "=== Step 2: Fixing dylib install name ===")
+# Step 1: Fix dylib path FIRST (before binary patching which can corrupt it)
+message(STATUS "=== Step 1: Fixing dylib install name ===")
 
 # Get current dylib path
 execute_process(
@@ -64,6 +50,20 @@ if(OLD_PATH)
     endif()
 else()
     message(WARNING "No Homebrew path found in otool output - Python may already be fixed or have a different path")
+endif()
+
+# Step 2: Patch out hardcoded Python.app string (AFTER install_name_tool)
+message(STATUS "=== Step 2: Removing hardcoded Python.app reference ===")
+execute_process(
+    COMMAND perl -pi -e "s|Resources/Python.app/Contents/MacOS/Python|\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00|g" "${PYTHON_BIN}"
+    RESULT_VARIABLE PATCH_RESULT
+    ERROR_VARIABLE PATCH_ERROR
+)
+
+if(PATCH_RESULT EQUAL 0)
+    message(STATUS "✅ Patched Python.app string")
+else()
+    message(WARNING "Failed to patch Python.app string: ${PATCH_ERROR}")
 endif()
 
 message(STATUS "=== Python Bundle Fixer Complete ===")
