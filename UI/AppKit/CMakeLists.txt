@@ -48,7 +48,7 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E echo "Fixing Python dylib install names..."
         # Dynamically detect and fix the python3.14 executable dylib reference
         # Use otool to find the actual Homebrew path, then rewrite it
-        COMMAND bash -c "OLD_PATH=$(otool -L '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14' | grep '/opt/homebrew/.*Python.framework' | awk '{print $1}') && if [ -n \"$OLD_PATH\" ]; then install_name_tool -change \"$OLD_PATH\" '@executable_path/../Python' '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14'; fi"
+        COMMAND bash -c "OLD_PATH=$$(otool -L '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14' | grep '/opt/homebrew/.*Python.framework' | awk '{print $$1}') && if [ -n \"$$OLD_PATH\" ]; then install_name_tool -change \"$$OLD_PATH\" '@executable_path/../Python' '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14'; fi"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )
