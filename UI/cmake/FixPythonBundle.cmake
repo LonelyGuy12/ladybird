@@ -32,12 +32,12 @@ if(OLD_PATH)
     
     execute_process(
         COMMAND install_name_tool -change "${OLD_PATH}" "@executable_path/../Python" "${PYTHON_BIN}"
-        RESULT_VARIABLE RESULT
+       RESULT_VARIABLE RESULT
         ERROR_VARIABLE TOOL_ERROR
     )
     
     if(RESULT EQUAL 0)
-        message(STATUS "✅ Successfully fixed Python dylib reference")
+        message(STATUS "✅ Successfully fixed Python dylib reference in python3.14")
         
         # Verify the change
         execute_process(
@@ -50,6 +50,27 @@ if(OLD_PATH)
     endif()
 else()
     message(WARNING "No Homebrew path found in otool output - Python may already be fixed or have a different path")
+endif()
+
+# Step 2: Fix the Python dylib's install_id (it references itself with old path)
+message(STATUS "=== Step 2: Fixing Python dylib install_id ===")
+
+set(PYTHON_DYLIB "${BUNDLE_DIR}/Resources/bundled_python/Versions/3.14/Python")
+
+if(EXISTS "${PYTHON_DYLIB}")
+    execute_process(
+        COMMAND install_name_tool -id "@rpath/Python.framework/Versions/3.14/Python" "${PYTHON_DYLIB}"
+        RESULT_VARIABLE DYLIB_RESULT
+        ERROR_VARIABLE DYLIB_ERROR
+    )
+    
+    if(DYLIB_RESULT EQUAL 0)
+        message(STATUS "✅ Successfully fixed Python dylib install_id")
+    else()
+        message(FATAL_ERROR "Failed to fix Python dylib install_id: ${DYLIB_ERROR}")
+    endif()
+else()
+    message(FATAL_ERROR "Python dylib not found at: ${PYTHON_DYLIB}")
 endif()
 
 message(STATUS "=== Python Bundle Fixer Complete ===")
