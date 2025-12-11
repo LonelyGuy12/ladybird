@@ -15,16 +15,6 @@
 
 namespace Media::Matroska {
 
-DecoderErrorOr<NonnullRefPtr<MatroskaDemuxer>> MatroskaDemuxer::from_file(StringView filename)
-{
-    return make_ref_counted<MatroskaDemuxer>(TRY(Reader::from_file(filename)));
-}
-
-DecoderErrorOr<NonnullRefPtr<MatroskaDemuxer>> MatroskaDemuxer::from_mapped_file(NonnullOwnPtr<Core::MappedFile> mapped_file)
-{
-    return make_ref_counted<MatroskaDemuxer>(TRY(Reader::from_mapped_file(move(mapped_file))));
-}
-
 DecoderErrorOr<NonnullRefPtr<MatroskaDemuxer>> MatroskaDemuxer::from_data(ReadonlyBytes data)
 {
     return make_ref_counted<MatroskaDemuxer>(TRY(Reader::from_data(data)));
@@ -175,6 +165,10 @@ DecoderErrorOr<CodedFrame> MatroskaDemuxer::get_next_sample_for_track(Track cons
         status.frame_index = 0;
     }
 
+    VERIFY(status.block.has_value());
+
+    auto timestamp = status.block->timestamp();
+    auto duration = status.block->duration().value_or(AK::Duration::zero());
     auto flags = status.block->only_keyframes() ? FrameFlags::Keyframe : FrameFlags::None;
     auto aux_data = [&] -> CodedFrame::AuxiliaryData {
         if (track.type() == TrackType::Video) {
@@ -186,7 +180,7 @@ DecoderErrorOr<CodedFrame> MatroskaDemuxer::get_next_sample_for_track(Track cons
         VERIFY_NOT_REACHED();
     }();
     auto sample_data = DECODER_TRY_ALLOC(ByteBuffer::copy(status.block->frame(status.frame_index++)));
-    return CodedFrame(status.block->timestamp(), flags, move(sample_data), aux_data);
+    return CodedFrame(timestamp, duration, flags, move(sample_data), aux_data);
 }
 
 DecoderErrorOr<AK::Duration> MatroskaDemuxer::total_duration()
