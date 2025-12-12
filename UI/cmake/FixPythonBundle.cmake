@@ -80,14 +80,16 @@ message(STATUS "=== Step 2: Fixing Python dylib install_id ===")
 set(PYTHON_DYLIB "${BUNDLE_DIR}/Resources/bundled_python/Versions/3.14/Python")
 
 if(EXISTS "${PYTHON_DYLIB}")
+    # Use simple @rpath/Python instead of @rpath/Python.framework/Versions/3.14/Python
+    # The latter creates recursive path resolution with @executable_path/.. rpath
     execute_process(
-        COMMAND install_name_tool -id "@rpath/Python.framework/Versions/3.14/Python" "${PYTHON_DYLIB}"
+        COMMAND install_name_tool -id "@rpath/Python" "${PYTHON_DYLIB}"
         RESULT_VARIABLE DYLIB_RESULT
         ERROR_VARIABLE DYLIB_ERROR
     )
     
     if(DYLIB_RESULT EQUAL 0)
-        message(STATUS "✅ Successfully fixed Python dylib install_id")
+        message(STATUS "✅ Successfully fixed Python dylib install_id to @rpath/Python")
     else()
         message(FATAL_ERROR "Failed to fix Python dylib install_id: ${DYLIB_ERROR}")
     endif()
