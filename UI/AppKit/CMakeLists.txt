@@ -39,6 +39,8 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
+        # Fix Python dylib references (python3.14 → bundled Python dylib)
+        COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )
