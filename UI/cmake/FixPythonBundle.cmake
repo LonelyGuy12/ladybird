@@ -39,7 +39,29 @@ if(OLD_PATH)
     if(RESULT EQUAL 0)
         message(STATUS "✅ Successfully fixed Python dylib reference in python3.14")
         
-        # Verify the change
+        # Add rpath so python3.14 can resolve @rpath in the dylib
+        execute_process(
+            COMMAND install_name_tool -add_rpath "@executable_path/.." "${PYTHON_BIN}"
+            RESULT_VARIABLE RPATH_RESULT
+            ERROR_VARIABLE RPATH_ERROR
+        )
+        
+        if(RPATH_RESULT EQUAL 0)
+            message(STATUS "✅ Added rpath to python3.14")
+        else()
+            # Rpath might already exist, check
+            execute_process(
+                COMMAND otool -l "${PYTHON_BIN}"
+                OUTPUT_VARIABLE RPATH_CHECK
+            )
+            if(RPATH_CHECK MATCHES "LC_RPATH")
+                message(STATUS "✅ Rpath already exists in python3.14")
+            else()
+                message(WARNING "Failed to add rpath: ${RPATH_ERROR}")
+            endif()
+        endif()
+        
+        # Verify the changes
         execute_process(
             COMMAND otool -L "${PYTHON_BIN}"
             OUTPUT_VARIABLE VERIFY_OUTPUT
