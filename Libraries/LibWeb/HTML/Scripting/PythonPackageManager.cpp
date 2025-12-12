@@ -368,9 +368,9 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const& packages)
     dbgln("🐍 PythonPackageManager: Installing {} new packages",
         packages_to_install.size());
 
-    // Use the virtual environment's pip directly
-    String venv_base = get_venv_base_path();
-    auto venv_pip_result = String::formatted("{}/bin/pip", venv_base);
+    // Get the Python home path (bundled or Homebrew)
+    String python_home = get_python_home_path();
+    auto venv_pip_result = String::formatted("{}/bin/pip", python_home);
     if (venv_pip_result.is_error())
         return venv_pip_result.release_error();
     String venv_pip = venv_pip_result.release_value();
