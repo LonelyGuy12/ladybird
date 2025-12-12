@@ -370,12 +370,15 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const& packages)
 
     // Get the Python home path (bundled or Homebrew)
     String python_home = get_python_home_path();
-    auto venv_pip_result = String::formatted("{}/bin/pip", python_home);
-    if (venv_pip_result.is_error())
-        return venv_pip_result.release_error();
-    String venv_pip = venv_pip_result.release_value();
-    // Check if pip is available in the virtual environment
-    auto check_command = String::formatted("{} --version > /dev/null 2>&1", venv_pip);
+
+    // Use python -m pip instead of pip binary (more reliable)
+    auto python_exe_result = String::formatted("{}/bin/python3.14", python_home);
+    if (python_exe_result.is_error())
+        return python_exe_result.release_error();
+    String python_exe = python_exe_result.release_value();
+
+    // Check if python executable exists and pip module is available
+    auto check_command = String::formatted("{} -m pip --version > /dev/null 2>&1", python_exe);
     if (check_command.is_error()) {
         dbgln("🐍 PythonPackageManager: Failed to format check command");
         return check_command.release_error();
@@ -386,17 +389,30 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const& packages)
 
     if (pip_check != 0) {
         dbgln(
-            "🐍 PythonPackageManager: pip is not available in virtual environment. "
-            "Please ensure the virtual environment is properly created.");
+            "🐍 PythonPackageManager: pip module not available. "
+            "Try running: {} -m ensurepip",
+            python_exe);
         return Error::from_string_literal(
-            "pip is not available in virtual environment");
+            "pip module not available");
     }
 
-    // Install each package using pip in our virtual environment
+    // Determine the site-packages directory for installation
+    // This is typically python_home/lib/pythonX.Y/site-packages
+    auto site_packages_result = String::formatted("{}/lib/python3.14/site-packages", python_home);
+    if (site_packages_result.is_error())
+        return site_packages_result.release_error();
+    String site_packages = site_packages_result.release_value();
+
+    // Install each package using python -m pip
     for (auto const& package : packages_to_install) {
+        dbgln("🐍 PythonPackageManager: Installing package: {}",
+            package.name);
+
         StringBuilder command_builder;
-        command_builder.append(venv_pip);
-        command_builder.append(" install --upgrade "_string);
+        command_builder.append(python_exe);
+        command_builder.append(" -m pip install --upgrade --target "_string);
+        command_builder.append(site_packages);
+        command_builder.append(" "_string);
         command_builder.append(package.name);
 
         if (package.version.has_value()) {
