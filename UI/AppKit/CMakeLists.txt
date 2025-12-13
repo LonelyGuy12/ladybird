@@ -43,6 +43,8 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
         # Fix Python dylib references (python3.14 → bundled Python dylib)
         COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
+        # Install pip using ensurepip
+        COMMAND "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14" -m ensurepip --default-pip || echo "ensurepip failed, pip may already be installed"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )
