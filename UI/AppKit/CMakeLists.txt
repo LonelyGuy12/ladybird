@@ -42,7 +42,7 @@ if(APPLE)
         # Create Python.app wrapper - Python has hardcoded ref we can't remove
         COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS"
-        COMMAND bash -c "printf '#!/bin/bash\\nexec \"$$(cd \"$$(dirname \"$${BASH_SOURCE[0]}\")\" && pwd)/../../../../bin/python3.14\" \"$$@\"\\n' > '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python'"
+        COMMAND bash -c "printf '#!/bin/bash\\nexec \"$$(cd \"$$(dirname \"$$0\")\" && pwd)/../../../../bin/python3.14\" \"$$@\"\\n' > '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python'"
         COMMAND chmod +x "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
         # Fix Python dylib references (python3.14 → bundled Python dylib)
         COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
