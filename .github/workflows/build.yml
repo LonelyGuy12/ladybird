@@ -364,8 +364,8 @@ jobs:
             echo "Fixing Python dylib references..."
             PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
             
-            # Extract old dylib path (strip whitespace then get first field)
-            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "/Python.framework" | grep -v "@" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
+            # Extract old dylib path (strip whitespace, filter @ at START, get first field)
+            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | grep -v "^@" | cut -d' ' -f1)
             
             echo "Current dylib: $OLD_DYLIB"
             
