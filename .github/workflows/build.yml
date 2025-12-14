@@ -349,6 +349,8 @@ jobs:
           
           if [ -d "$PYTHON_SRC" ]; then
             echo "Copying Python framework to Resources/bundled_python..."
+            # Remove any existing bundled Python to avoid permission errors
+            rm -rf "$PYTHON_DEST"
             # Copy framework CONTENTS, not the directory itself
             mkdir -p "$PYTHON_DEST"
             cp -R "$PYTHON_SRC"/* "$PYTHON_DEST"/
