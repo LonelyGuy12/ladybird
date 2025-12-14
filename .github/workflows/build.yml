@@ -355,9 +355,18 @@ jobs:
             mkdir -p "$PYTHON_DEST"
             cp -R "$PYTHON_SRC"/* "$PYTHON_DEST"/
             
-            # Create site-packages directory if it doesn't exist
+            # Verify copy succeeded
+            echo "Verifying Python framework copy..."
+            ls -la "$PYTHON_DEST" || echo "ERROR: Copy failed"
+            
+            # Create site-packages directory - ensure parent dirs exist
             echo "Creating site-packages directory..."
-            mkdir -p "$PYTHON_DEST/Versions/3.14/lib/python3.14/site-packages"
+            SITE_PACKAGES="$PYTHON_DEST/Versions/3.14/lib/python3.14/site-packages"
+            if [ ! -d "$PYTHON_DEST/Versions/3.14/lib" ]; then
+              echo "WARNING: lib directory not found, checking actual structure..."
+              find "$PYTHON_DEST" -name "lib" -type d | head -5
+            fi
+            mkdir -p "$SITE_PACKAGES" || echo "ERROR: Failed to create site-packages"
             
             # Remove broken Python.app and create wrapper with recursion detection
             echo "Creating Python.app wrapper..."
