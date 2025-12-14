@@ -349,7 +349,9 @@ jobs:
           
           if [ -d "$PYTHON_SRC" ]; then
             echo "Copying Python framework to Resources/bundled_python..."
-            cp -R "$PYTHON_SRC" "$PYTHON_DEST"
+            # Copy framework CONTENTS, not the directory itself
+            mkdir -p "$PYTHON_DEST"
+            cp -R "$PYTHON_SRC"/* "$PYTHON_DEST"/
             
             # Remove broken Python.app and create wrapper with recursion detection
             echo "Creating Python.app wrapper..."
@@ -357,7 +359,6 @@ jobs:
             mkdir -p "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS"
             
             printf '#!/bin/bash\n[ -n "$LADYBIRD_PYTHON_APP_GUARD" ] && exit 0\nexport LADYBIRD_PYTHON_APP_GUARD=1\nexec "$(cd "$(dirname "$0")" && pwd)/../../../../bin/python3.14" "$@"\n' > "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
-
             chmod +x "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
             
             # Fix dylib reference in python3.14 binary
