@@ -352,8 +352,9 @@ jobs:
             # Remove any existing bundled Python to avoid permission errors
             rm -rf "$PYTHON_DEST"
             # Copy framework CONTENTS, not the directory itself
+            # Use -L to follow symlinks (framework has symlinks to Versions/Current)
             mkdir -p "$PYTHON_DEST"
-            cp -R "$PYTHON_SRC"/* "$PYTHON_DEST"/
+            cp -RL "$PYTHON_SRC"/* "$PYTHON_DEST"/
             
             # Verify copy succeeded
             echo "Verifying Python framework copy..."
