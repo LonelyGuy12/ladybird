@@ -363,12 +363,22 @@ jobs:
             # Fix dylib reference in python3.14 binary
             echo "Fixing Python dylib references..."
             PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
-            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python.framework" | grep -v "@" | awk '{print $1}' | head -1)
+            
+            # Extract old dylib path (otool uses tabs, not spaces)
+            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "/Python.framework" | grep -v "@" | awk '{print $1}')
+            
+            echo "Current dylib: $OLD_DYLIB"
             
             if [ -n "$OLD_DYLIB" ]; then
-              echo "Changing $OLD_DYLIB -> @executable_path/../Python"
+              echo "Fixing: $OLD_DYLIB -> @executable_path/../Python"
               install_name_tool -change "$OLD_DYLIB" "@executable_path/../Python" "$PYTHON_BIN"
+              
+              # Verify the fix
+              NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | awk '{print $1}')
+              echo "New dylib: $NEW_DYLIB"
               echo "✅ Python dylib fixed"
+            else
+              echo "⚠️  No Homebrew dylib found to fix"
             fi
             
             # Install pip
