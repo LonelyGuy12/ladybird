@@ -57,17 +57,35 @@ if (APPLE)
     set(contents_dir \${CMAKE_INSTALL_PREFIX}/bundle/Ladybird.app/Contents)
     file(COPY \${lib_dir} DESTINATION \${contents_dir})
     
+    
     # Bundle Python.framework for self-contained Python integration
     if (EXISTS /opt/homebrew/opt/python@3.14/Frameworks/Python.framework)
-      message(STATUS \"Bundling Python.framework into app bundle\")
+      message(STATUS \\\"Bundling Python.framework with all fixes\\\")
+      
+      # Copy to Resources instead of Frameworks (code signing friendly)
       file(COPY /opt/homebrew/opt/python@3.14/Frameworks/Python.framework
-           DESTINATION \${contents_dir}/Frameworks
-           PATTERN \"*.pyc\" EXCLUDE
-           PATTERN \"__pycache__\" EXCLUDE
-           PATTERN \"test\" EXCLUDE
+           DESTINATION \\${contents_dir}/Resources/bundled_python
+           PATTERN \\\"*.pyc\\\" EXCLUDE
+           PATTERN \\\"__pycache__\\\" EXCLUDE
+           PATTERN \\\"test\\\" EXCLUDE
       )
+      
+      # Create Python.app wrapper with recursion detection
+      file(REMOVE_RECURSE \\\"\\${contents_dir}/Resources/bundled_python/Versions/3.14/Resources/Python.app\\\")
+      file(MAKE_DIRECTORY \\\"\\${contents_dir}/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS\\\")
+      file(WRITE \\\"\\${contents_dir}/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\\\"
+           \\\"#!/bin/bash\\n[ -n \\\\\\\"\\\$LADYBIRD_PYTHON_APP_GUARD\\\\\\\" ] && exit 0\\nexport LADYBIRD_PYTHON_APP_GUARD=1\\nexec \\\\\\\"\\\$(cd \\\\\\\"\\\$(dirname \\\\\\\"\\\$0\\\\\\\")\\\\\\\" && pwd)/../../../../bin/python3.14\\\\\\\" \\\\\\\"\\\$@\\\\\\\"\\n\\\")
+      execute_process(COMMAND chmod +x \\\"\\${contents_dir}/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python\\\")
+      
+      # Fix dylib references
+      execute_process(COMMAND \\\${CMAKE_COMMAND} -DBUNDLE_DIR=\\\"\\${contents_dir}\\\" -P \\\"\\\${CMAKE_CURRENT_SOURCE_DIR}/cmake/FixPythonBundle.cmake\\\")
+      
+      # Install pip
+      execute_process(COMMAND \\\"\\${contents_dir}/Resources/bundled_python/Versions/3.14/bin/python3.14\\\" -m ensurepip --default-pip OUTPUT_QUIET ERROR_QUIET)
+      
+      message(STATUS \\\"Python bundling complete\\\")
     else()
-      message(WARNING \"Python framework not found at /opt/homebrew/opt/python@3.14 - Python will not be bundled\")
+      message(WARNING \\\"Python framework not found at /opt/homebrew/opt/python@3.14 - Python will not be bundled\\\")
     endif()
   "
             COMPONENT ladybird_Runtime)
