@@ -387,8 +387,10 @@ jobs:
             echo "Current dylib: $OLD_DYLIB"
             
             if [ -n "$OLD_DYLIB" ]; then
-              echo "Fixing: $OLD_DYLIB -> @executable_path/../Python"
-              install_name_tool -change "$OLD_DYLIB" "@executable_path/../Python" "$PYTHON_BIN"
+              # Use @loader_path (relative to the binary being loaded)
+              # From bin/python3.14: ../../Python gets to Versions/3.14/Python
+              echo "Fixing: $OLD_DYLIB -> @loader_path/../../Python"
+              install_name_tool -change "$OLD_DYLIB" "@loader_path/../../Python" "$PYTHON_BIN"
               
               # Verify the fix
               NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
