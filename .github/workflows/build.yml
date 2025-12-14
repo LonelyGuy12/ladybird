@@ -341,6 +341,51 @@ jobs:
             echo "Python integration will not be available"
           fi
           
+          # Bundle Python framework for self-contained distribution
+          echo ""
+          echo "=== Bundling Python framework ===" 
+          PYTHON_SRC="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
+          PYTHON_DEST="$APP_BUNDLE/Contents/Resources/bundled_python"
+          
+          if [ -d "$PYTHON_SRC" ]; then
+            echo "Copying Python framework to Resources/bundled_python..."
+            cp -R "$PYTHON_SRC" "$PYTHON_DEST"
+            
+            # Remove broken Python.app and create wrapper with recursion detection
+            echo "Creating Python.app wrapper..."
+            rm -rf "$PYTHON_DEST/Versions/3.14/Resources/Python.app"
+            mkdir -p "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS"
+            
+            cat > "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python" << 'EOF'
+#!/bin/bash
+[ -n "$LADYBIRD_PYTHON_APP_GUARD" ] && exit 0
+export LADYBIRD_PYTHON_APP_GUARD=1
+exec "$(cd "$(dirname "$0")" && pwd)/../../../../bin/python3.14" "$@"
+EOF
+            chmod +x "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+            
+            # Fix dylib reference in python3.14 binary
+            echo "Fixing Python dylib references..."
+            PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
+            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python.framework" | grep -v "@" | awk '{print $1}' | head -1)
+            
+            if [ -n "$OLD_DYLIB" ]; then
+              echo "Changing $OLD_DYLIB -> @executable_path/../Python"
+              install_name_tool -change "$OLD_DYLIB" "@executable_path/../Python" "$PYTHON_BIN"
+              echo "✅ Python dylib fixed"
+            fi
+            
+            # Install pip
+            echo "Installing pip..."
+            "$PYTHON_BIN" -m ensurepip --default-pip 2>/dev/null || echo "pip already installed"
+            
+            echo "✅ Python bundling complete!"
+            echo "Bundled Python size: $(du -sh "$PYTHON_DEST" | cut -f1)"
+          else
+            echo "⚠️ WARNING: Python framework not found at $PYTHON_SRC"
+            echo "Python will not be bundled"
+          fi
+          
           # Fix the broken symlink and copy actual libraries
           echo ""
           echo "=== Fixing library paths ==="
