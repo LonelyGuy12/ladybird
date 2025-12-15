@@ -378,11 +378,33 @@ jobs:
             chmod +x "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
             
             
-            # Note: We do NOT modify the dylib paths with install_name_tool
-            # ANY modification to the python3.14 binary breaks Python execution
-            # Python will reference /opt/homebrew dylib paths but the bundled 
-            # framework is self-contained and works correctly
-            echo "✅ Python framework bundled (using original Homebrew dylib paths)"
+            # Fix dylib reference and re-sign the binary
+            echo "Fixing Python dylib references..."
+            PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
+            
+            # Extract old dylib path
+            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | grep -v "^@" | cut -d' ' -f1)
+            
+            echo "Current dylib: $OLD_DYLIB"
+            
+            if [ -n "$OLD_DYLIB" ]; then
+              # Use @loader_path (relative to binary location)
+              # From bin/python3.14: ../Python resolves to Versions/3.14/Python
+              echo "Fixing: $OLD_DYLIB -> @loader_path/../Python"
+              install_name_tool -change "$OLD_DYLIB" "@loader_path/../Python" "$PYTHON_BIN"
+              
+              # CRITICAL: Re-sign the binary after modification
+              # install_name_tool invalidates the code signature, causing Python to fail silently
+              echo "Re-signing python3.14 binary..."
+              codesign --force --sign - "$PYTHON_BIN"
+              
+              # Verify
+              NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
+              echo "New dylib: $NEW_DYLIB"
+              echo "✅ Python dylib fixed and re-signed"
+            else
+              echo "⚠️  No Homebrew dylib found to fix"
+            fi
             
             # Install pip
             echo "Installing pip..."
