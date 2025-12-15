@@ -380,24 +380,27 @@ jobs:
             # Fix dylib reference in python3.14 binary
             echo "Fixing Python dylib references..."
             PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
+            PYTHON_DYLIB="$PYTHON_DEST/Versions/3.14/Python"
             
             # Extract old dylib path (strip whitespace, filter @ at START, get first field)
             OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | grep -v "^@" | cut -d' ' -f1)
             
             echo "Current dylib: $OLD_DYLIB"
+            echo "Target dylib: $PYTHON_DYLIB"
             
-            if [ -n "$OLD_DYLIB" ]; then
-              # Use @loader_path (relative to the binary being loaded)
-              # From bin/python3.14: ../../Python gets to Versions/3.14/Python
-              echo "Fixing: $OLD_DYLIB -> @loader_path/../../Python"
-              install_name_tool -change "$OLD_DYLIB" "@loader_path/../../Python" "$PYTHON_BIN"
+            if [ -n "$OLD_DYLIB" ] && [ -f "$PYTHON_DYLIB" ]; then
+              # Use absolute path within the bundle
+              # Relative paths (@loader_path, @executable_path) don't work reliably
+              ABSOLUTE_DYLIB="$APP_BUNDLE/Contents/Resources/bundled_python/Versions/3.14/Python"
+              echo "Fixing: $OLD_DYLIB -> $ABSOLUTE_DYLIB"
+              install_name_tool -change "$OLD_DYLIB" "$ABSOLUTE_DYLIB" "$PYTHON_BIN"
               
               # Verify the fix
               NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
               echo "New dylib: $NEW_DYLIB"
               echo "✅ Python dylib fixed"
             else
-              echo "⚠️  No Homebrew dylib found to fix"
+              echo "⚠️  Dylib fix failed - OLD_DYLIB: $OLD_DYLIB, PYTHON_DYLIB exists: $(test -f "$PYTHON_DYLIB" && echo yes || echo no)"
             fi
             
             # Install pip
