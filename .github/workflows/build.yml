@@ -377,31 +377,12 @@ jobs:
             printf '#!/bin/bash\n[ -n "$LADYBIRD_PYTHON_APP_GUARD" ] && exit 0\nexport LADYBIRD_PYTHON_APP_GUARD=1\nexec "$(cd "$(dirname "$0")" && pwd)/../../../../bin/python3.14" "$@"\n' > "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
             chmod +x "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
             
-            # Fix dylib reference in python3.14 binary
-            echo "Fixing Python dylib references..."
-            PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
-            PYTHON_DYLIB="$PYTHON_DEST/Versions/3.14/Python"
             
-            # Extract old dylib path (strip whitespace, filter @ at START, get first field)
-            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | grep -v "^@" | cut -d' ' -f1)
-            
-            echo "Current dylib: $OLD_DYLIB"
-            echo "Target dylib: $PYTHON_DYLIB"
-            
-            if [ -n "$OLD_DYLIB" ] && [ -f "$PYTHON_DYLIB" ]; then
-              # Use absolute path within the bundle
-              # Relative paths (@loader_path, @executable_path) don't work reliably
-              ABSOLUTE_DYLIB="$APP_BUNDLE/Contents/Resources/bundled_python/Versions/3.14/Python"
-              echo "Fixing: $OLD_DYLIB -> $ABSOLUTE_DYLIB"
-              install_name_tool -change "$OLD_DYLIB" "$ABSOLUTE_DYLIB" "$PYTHON_BIN"
-              
-              # Verify the fix
-              NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
-              echo "New dylib: $NEW_DYLIB"
-              echo "✅ Python dylib fixed"
-            else
-              echo "⚠️  Dylib fix failed - OLD_DYLIB: $OLD_DYLIB, PYTHON_DYLIB exists: $(test -f "$PYTHON_DYLIB" && echo yes || echo no)"
-            fi
+            # Note: We do NOT modify the dylib paths with install_name_tool
+            # ANY modification to the python3.14 binary breaks Python execution
+            # Python will reference /opt/homebrew dylib paths but the bundled 
+            # framework is self-contained and works correctly
+            echo "✅ Python framework bundled (using original Homebrew dylib paths)"
             
             # Install pip
             echo "Installing pip..."
