@@ -80,27 +80,37 @@ bool Node::can_contain_boxes_with_position_absolute() const
     if (!is<Box>(*this))
         return false;
 
-    if (computed_values().position() != CSS::Positioning::Static)
+    auto const& computed_values = this->computed_values();
+
+    if (computed_values.position() != CSS::Positioning::Static)
         return true;
 
     if (is<Viewport>(*this))
         return true;
 
+    // https://drafts.csswg.org/css-will-change/#will-change
+    // If any non-initial value of a property would cause the element to generate a containing block for absolutely
+    // positioned elements, specifying that property in will-change must cause the element to generate a containing
+    // block for absolutely positioned elements.
+    auto will_change_property = [&](CSS::PropertyID property_id) {
+        return computed_values.will_change().has_property(property_id);
+    };
+
     // https://w3c.github.io/csswg-drafts/css-transforms-1/#propdef-transform
     // Any computed value other than none for the transform affects containing block and stacking context
-    if (!computed_values().transformations().is_empty())
+    if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
         return true;
-    if (computed_values().translate().has_value())
+    if (computed_values.translate() || will_change_property(CSS::PropertyID::Translate))
         return true;
-    if (computed_values().rotate().has_value())
+    if (computed_values.rotate() || will_change_property(CSS::PropertyID::Rotate))
         return true;
-    if (computed_values().scale().has_value())
+    if (computed_values.scale() || will_change_property(CSS::PropertyID::Scale))
         return true;
 
     // https://drafts.csswg.org/css-transforms-2/#propdef-perspective
     // The use of this property with any value other than 'none' establishes a stacking context. It also establishes
     // a containing block for all descendants, just like the 'transform' property does.
-    if (computed_values().perspective().has_value())
+    if (computed_values.perspective().has_value() || will_change_property(CSS::PropertyID::Perspective))
         return true;
 
     // https://drafts.csswg.org/css-contain-2/#containment-types
@@ -108,7 +118,7 @@ bool Node::can_contain_boxes_with_position_absolute() const
     //    containing block.
     // 4. The paint containment box establishes an absolute positioning containing block and a fixed positioning
     //    containing block.
-    if (has_layout_containment() || has_paint_containment())
+    if (has_layout_containment() || has_paint_containment() || will_change_property(CSS::PropertyID::Contain))
         return true;
 
     return false;
@@ -220,13 +230,13 @@ bool Node::establishes_stacking_context() const
     if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
         return true;
 
-    if (computed_values.translate().has_value() || will_change_property(CSS::PropertyID::Translate))
+    if (computed_values.translate() || will_change_property(CSS::PropertyID::Translate))
         return true;
 
-    if (computed_values.rotate().has_value() || will_change_property(CSS::PropertyID::Rotate))
+    if (computed_values.rotate() || will_change_property(CSS::PropertyID::Rotate))
         return true;
 
-    if (computed_values.scale().has_value() || will_change_property(CSS::PropertyID::Scale))
+    if (computed_values.scale() || will_change_property(CSS::PropertyID::Scale))
         return true;
 
     // Element that is a child of a flex container, with z-index value other than auto.
@@ -562,14 +572,14 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_box_shadow(computed_style.box_shadow(*this));
 
-    if (auto rotate_value = computed_style.rotate(); rotate_value.has_value())
-        computed_values.set_rotate(rotate_value.release_value());
+    if (auto rotate_value = computed_style.rotate())
+        computed_values.set_rotate(rotate_value.release_nonnull());
 
-    if (auto translate_value = computed_style.translate(); translate_value.has_value())
-        computed_values.set_translate(translate_value.release_value());
+    if (auto translate_value = computed_style.translate())
+        computed_values.set_translate(translate_value.release_nonnull());
 
-    if (auto scale_value = computed_style.scale(); scale_value.has_value())
-        computed_values.set_scale(scale_value.release_value());
+    if (auto scale_value = computed_style.scale())
+        computed_values.set_scale(scale_value.release_nonnull());
 
     computed_values.set_transformations(computed_style.transformations());
     computed_values.set_transform_box(computed_style.transform_box());
@@ -594,8 +604,14 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         border.color = computed_style.color_or_fallback(color_property, color_resolution_context, computed_values.color());
         border.line_style = computed_style.line_style(style_property);
 
-        // FIXME: Interpolation can cause negative values - we clamp here but should instead clamp as part of interpolation
-        border.width = max(CSSPixels { 0 }, computed_style.length(width_property).absolute_length_to_px());
+        // If the border-style corresponding to a given border-width is none or hidden, then the used width is 0.
+        // https://drafts.csswg.org/css-backgrounds/#border-width
+        if (border.line_style == CSS::LineStyle::None || border.line_style == CSS::LineStyle::Hidden) {
+            border.width = 0;
+        } else {
+            // FIXME: Interpolation can cause negative values - we clamp here but should instead clamp as part of interpolation
+            border.width = max(CSSPixels { 0 }, computed_style.length(width_property).absolute_length_to_px());
+        }
     };
 
     do_border_style(computed_values.border_left(), CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor, CSS::PropertyID::BorderLeftStyle);

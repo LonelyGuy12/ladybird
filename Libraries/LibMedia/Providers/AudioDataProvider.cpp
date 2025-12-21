@@ -6,6 +6,8 @@
 
 #include <AK/Debug.h>
 #include <LibCore/EventLoop.h>
+#include <LibMedia/Audio/SampleSpecification.h>
+#include <LibMedia/FFmpeg/FFmpegAudioConverter.h>
 #include <LibMedia/FFmpeg/FFmpegAudioDecoder.h>
 #include <LibMedia/MutexedDemuxer.h>
 #include <LibMedia/Sinks/AudioSink.h>
@@ -16,13 +18,17 @@
 
 namespace Media {
 
-DecoderErrorOr<NonnullRefPtr<AudioDataProvider>> AudioDataProvider::try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, Track const& track)
+DecoderErrorOr<NonnullRefPtr<AudioDataProvider>> AudioDataProvider::try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, NonnullRefPtr<IncrementallyPopulatedStream> const& stream, Track const& track)
 {
     auto codec_id = TRY(demuxer->get_codec_id_for_track(track));
+    auto const& sample_specification = track.audio_data().sample_specification;
     auto codec_initialization_data = TRY(demuxer->get_codec_initialization_data_for_track(track));
-    auto decoder = DECODER_TRY_ALLOC(FFmpeg::FFmpegAudioDecoder::try_create(codec_id, codec_initialization_data));
+    auto decoder = DECODER_TRY_ALLOC(FFmpeg::FFmpegAudioDecoder::try_create(codec_id, sample_specification, codec_initialization_data));
+    auto converter = DECODER_TRY_ALLOC(FFmpeg::FFmpegAudioConverter::try_create());
 
-    auto thread_data = DECODER_TRY_ALLOC(try_make_ref_counted<AudioDataProvider::ThreadData>(main_thread_event_loop, demuxer, track, move(decoder)));
+    auto stream_cursor = stream->create_cursor();
+    demuxer->create_context_for_track(track, stream_cursor);
+    auto thread_data = DECODER_TRY_ALLOC(try_make_ref_counted<AudioDataProvider::ThreadData>(main_thread_event_loop, demuxer, stream_cursor, track, move(decoder), move(converter)));
     auto provider = DECODER_TRY_ALLOC(try_make_ref_counted<AudioDataProvider>(thread_data));
 
     auto thread = DECODER_TRY_ALLOC(Threading::Thread::try_create([thread_data]() -> int {
@@ -59,6 +65,11 @@ void AudioDataProvider::set_block_end_time_handler(BlockEndTimeHandler&& handler
     m_thread_data->set_block_end_time_handler(move(handler));
 }
 
+void AudioDataProvider::set_output_sample_specification(Audio::SampleSpecification sample_specification)
+{
+    m_thread_data->set_output_sample_specification(sample_specification);
+}
+
 void AudioDataProvider::start()
 {
     m_thread_data->start();
@@ -69,11 +80,13 @@ void AudioDataProvider::seek(AK::Duration timestamp, SeekCompletionHandler&& com
     m_thread_data->seek(timestamp, move(completion_handler));
 }
 
-AudioDataProvider::ThreadData::ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, Track const& track, NonnullOwnPtr<AudioDecoder>&& decoder)
+AudioDataProvider::ThreadData::ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, NonnullRefPtr<IncrementallyPopulatedStream::Cursor> const& stream_cursor, Track const& track, NonnullOwnPtr<AudioDecoder>&& decoder, NonnullOwnPtr<Audio::AudioConverter>&& converter)
     : m_main_thread_event_loop(main_thread_event_loop)
     , m_demuxer(demuxer)
+    , m_stream_cursor(stream_cursor)
     , m_track(track)
     , m_decoder(move(decoder))
+    , m_converter(move(converter))
 {
 }
 
@@ -87,6 +100,11 @@ void AudioDataProvider::ThreadData::set_error_handler(ErrorHandler&& handler)
 void AudioDataProvider::ThreadData::set_block_end_time_handler(BlockEndTimeHandler&& handler)
 {
     m_frame_end_time_handler = move(handler);
+}
+
+void AudioDataProvider::ThreadData::set_output_sample_specification(Audio::SampleSpecification sample_specification)
+{
+    m_converter->set_output_sample_specification(sample_specification).release_value_but_fixme_should_propagate_errors();
 }
 
 void AudioDataProvider::ThreadData::start()
@@ -121,6 +139,7 @@ void AudioDataProvider::ThreadData::seek(AK::Duration timestamp, SeekCompletionH
     m_seek_completion_handler = move(completion_handler);
     m_seek_id++;
     m_seek_timestamp = timestamp;
+    m_stream_cursor->abort();
     wake();
 }
 
@@ -185,6 +204,11 @@ void AudioDataProvider::ThreadData::flush_decoder()
 DecoderErrorOr<void> AudioDataProvider::ThreadData::retrieve_next_block(AudioBlock& block)
 {
     TRY(m_decoder->write_next_block(block));
+
+    auto convert_result = m_converter->convert(block);
+    if (convert_result.is_error())
+        return DecoderError::format(DecoderErrorCategory::NotImplemented, "Sample specification conversion failed: {}", convert_result.error().string_literal());
+
     if (block.timestamp_in_samples() < m_last_sample)
         block.set_timestamp_in_samples(m_last_sample);
     m_last_sample = block.timestamp_in_samples() + static_cast<i64>(block.sample_count());
@@ -239,6 +263,7 @@ bool AudioDataProvider::ThreadData::handle_seek()
             auto locker = take_lock();
             seek_id = m_seek_id;
             timestamp = m_seek_timestamp;
+            m_stream_cursor->reset_abort();
         }
 
         auto demuxer_seek_result_or_error = m_demuxer->seek_to_most_recent_keyframe(m_track, timestamp);

@@ -369,8 +369,8 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, Option
 // https://dom.spec.whatwg.org/#dom-element-setattributens
 WebIDL::ExceptionOr<void> Element::set_attribute_ns_for_bindings(Optional<FlyString> const& namespace_, FlyString const& qualified_name, Variant<GC::Root<TrustedTypes::TrustedHTML>, GC::Root<TrustedTypes::TrustedScript>, GC::Root<TrustedTypes::TrustedScriptURL>, Utf16String> const& value)
 {
-    // 1. Let (namespace, prefix, localName) be the result of validating and extracting namespace and qualifiedName given "element".
-    auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name, ValidationContext::Element));
+    // 1. Let (namespace, prefix, localName) be the result of validating and extracting namespace and qualifiedName given "attribute".
+    auto extracted_qualified_name = TRY(validate_and_extract(realm(), namespace_, qualified_name, ValidationContext::Attribute));
 
     // 2. Let verifiedValue be the result of calling get Trusted Types-compliant attribute value
     //    with localName, namespace, this, and value.
@@ -3929,6 +3929,14 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             return TraversalDecision::Continue;
         });
     } else if (local_name == HTML::AttributeNames::part) {
+        m_parts.clear();
+        if (!value_or_empty.is_empty()) {
+            auto new_parts = value_or_empty.bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
+            m_parts.clear();
+            m_parts.ensure_capacity(new_parts.size());
+            for (auto& new_part : new_parts)
+                m_parts.unchecked_append(MUST(FlyString::from_utf8(new_part)));
+        }
         if (m_part_list)
             m_part_list->associated_attribute_changed(value_or_empty);
     }

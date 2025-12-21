@@ -260,7 +260,8 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractE
         bool rule_is_relevant_for_current_scope = rule_root == shadow_root
             || (element_shadow_root && rule_root == element_shadow_root)
             || from_user_agent_or_user_stylesheet
-            || rule_to_run.slotted;
+            || rule_to_run.slotted
+            || rule_to_run.contains_part_pseudo_element;
 
         if (!rule_is_relevant_for_current_scope)
             return;
@@ -281,7 +282,7 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractE
             }
         } else {
             for (auto const& rule : rules) {
-                if ((rule.slotted || !rule.contains_pseudo_element) && filter_namespace_rule(element_namespace_uri, rule))
+                if ((rule.slotted || rule.contains_part_pseudo_element || !rule.contains_pseudo_element) && filter_namespace_rule(element_namespace_uri, rule))
                     add_rule_to_run(rule);
             }
         }
@@ -312,6 +313,22 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractE
             if (auto const* rule_cache = rule_cache_for_cascade_origin(cascade_origin, qualified_layer_name, slot_shadow_root)) {
                 add_rules_to_run(rule_cache->slotted_rules);
             }
+        }
+    }
+
+    // ::part() can apply to anything in a shadow tree, that is either an element with a `part` attribute or a pseudo-element.
+    // Rules from any ancestor style scope can apply.
+    if (shadow_root && (abstract_element.pseudo_element().has_value() || !abstract_element.element().part_names().is_empty())) {
+        for (auto* part_shadow_root = abstract_element.element().shadow_including_first_ancestor_of_type<DOM::ShadowRoot>();
+            part_shadow_root;
+            part_shadow_root = part_shadow_root->shadow_including_first_ancestor_of_type<DOM::ShadowRoot>()) {
+
+            if (auto const* rule_cache = rule_cache_for_cascade_origin(cascade_origin, qualified_layer_name, part_shadow_root)) {
+                add_rules_to_run(rule_cache->part_rules);
+            }
+        }
+        if (auto const* rule_cache = rule_cache_for_cascade_origin(cascade_origin, qualified_layer_name, nullptr)) {
+            add_rules_to_run(rule_cache->part_rules);
         }
     }
 
@@ -875,8 +892,12 @@ static void apply_animation_properties(DOM::Document const& document, ComputedPr
 
     auto& effect = as<Animations::KeyframeEffect>(*animation.effect());
 
-    effect.set_iteration_duration(animation_properties.duration);
-    effect.set_start_delay(animation_properties.delay);
+    effect.set_specified_iteration_duration(animation_properties.duration);
+    effect.set_specified_start_delay(animation_properties.delay);
+    // https://drafts.csswg.org/web-animations-2/#updating-animationeffect-timing
+    // Timing properties may also be updated due to a style change. Any change to a CSS animation property that affects
+    // timing requires rerunning the procedure to normalize specified timing.
+    effect.normalize_specified_timing();
     effect.set_iteration_count(animation_properties.iteration_count);
     effect.set_timing_function(animation_properties.timing_function);
     effect.set_fill_mode(Animations::css_fill_mode_to_bindings_fill_mode(animation_properties.fill_mode));
@@ -1070,7 +1091,9 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
     };
 
     // For each element and property, the implementation must act as follows:
-    auto style_change_event_time = m_document->timeline()->current_time().value();
+    // NB: We know that a DocumentTimeline's current time is always in milliseconds
+    VERIFY(m_document->timeline()->current_time()->type == Animations::TimeValue::Type::Milliseconds);
+    auto style_change_event_time = m_document->timeline()->current_time()->value;
 
     // FIXME: Add some transition helpers to AbstractElement.
     auto& element = abstract_element.element();
@@ -2283,15 +2306,11 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_property(
     case PropertyID::BackgroundSize:
         return repeat_style_value_list_to_n_elements(absolutized_value, get_property_specified_value(PropertyID::BackgroundImage)->as_value_list().size());
     case PropertyID::BorderBottomWidth:
-        return compute_border_or_outline_width(absolutized_value, get_property_specified_value(PropertyID::BorderBottomStyle), device_pixels_per_css_pixel);
     case PropertyID::BorderLeftWidth:
-        return compute_border_or_outline_width(absolutized_value, get_property_specified_value(PropertyID::BorderLeftStyle), device_pixels_per_css_pixel);
     case PropertyID::BorderRightWidth:
-        return compute_border_or_outline_width(absolutized_value, get_property_specified_value(PropertyID::BorderRightStyle), device_pixels_per_css_pixel);
     case PropertyID::BorderTopWidth:
-        return compute_border_or_outline_width(absolutized_value, get_property_specified_value(PropertyID::BorderTopStyle), device_pixels_per_css_pixel);
     case PropertyID::OutlineWidth:
-        return compute_border_or_outline_width(absolutized_value, get_property_specified_value(PropertyID::OutlineStyle), device_pixels_per_css_pixel);
+        return compute_border_or_outline_width(absolutized_value, device_pixels_per_css_pixel);
     case PropertyID::CornerBottomLeftShape:
     case PropertyID::CornerBottomRightShape:
     case PropertyID::CornerTopLeftShape:
@@ -2376,13 +2395,10 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_font_variation_settings(N
     return StyleValueList::create(move(axis_tags), StyleValueList::Separator::Comma);
 }
 
-NonnullRefPtr<StyleValue const> StyleComputer::compute_border_or_outline_width(NonnullRefPtr<StyleValue const> const& absolutized_value, NonnullRefPtr<StyleValue const> const& style_specified_value, double device_pixels_per_css_pixel)
+NonnullRefPtr<StyleValue const> StyleComputer::compute_border_or_outline_width(NonnullRefPtr<StyleValue const> const& absolutized_value, double device_pixels_per_css_pixel)
 {
     // https://drafts.csswg.org/css-backgrounds/#border-width
-    // absolute length, snapped as a border width; zero if the border style is none or hidden
-    if (first_is_one_of(style_specified_value->to_keyword(), Keyword::None, Keyword::Hidden))
-        return LengthStyleValue::create(Length::make_px(0));
-
+    // absolute length, snapped as a border width
     auto const absolute_length = [&]() -> CSSPixels {
         if (absolutized_value->is_calculated())
             return absolutized_value->as_calculated().resolve_length({})->absolute_length_to_px();
@@ -2891,6 +2907,10 @@ void RuleCache::add_rule(MatchingRule const& matching_rule, Optional<PseudoEleme
 {
     if (matching_rule.slotted) {
         slotted_rules.append(matching_rule);
+        return;
+    }
+    if (matching_rule.contains_part_pseudo_element) {
+        part_rules.append(matching_rule);
         return;
     }
     // NOTE: We traverse the simple selectors in reverse order to make sure that class/ID buckets are preferred over tag buckets

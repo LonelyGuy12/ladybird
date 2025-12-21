@@ -9,6 +9,7 @@
 
 #include <AK/DistinctNumeric.h>
 #include <AK/Variant.h>
+#include <LibGC/Forward.h>
 #include <LibGfx/Forward.h>
 #include <LibIPC/Forward.h>
 #include <LibJS/Forward.h>
@@ -352,6 +353,7 @@ class PercentageStyleValue;
 class PositionStyleValue;
 class PropertyNameAndID;
 class RadialGradientStyleValue;
+class RadialSizeStyleValue;
 class RandomValueSharingStyleValue;
 class Ratio;
 class RatioStyleValue;
@@ -388,7 +390,6 @@ class Time;
 class TimeOrCalculated;
 class TimePercentage;
 class TimeStyleValue;
-class Transformation;
 class TransformationStyleValue;
 class TreeCountingFunctionStyleValue;
 class UnicodeRangeStyleValue;
@@ -415,6 +416,8 @@ struct LogicalAliasMappingContext;
 struct RandomCachingKey;
 struct StyleSheetIdentifier;
 
+// https://drafts.css-houdini.org/css-typed-om-1/#typedefdef-cssnumberish
+using CSSNumberish = Variant<double, GC::Root<CSSNumericValue>>;
 using PaintOrderList = Array<PaintOrder, 3>;
 
 }
@@ -695,6 +698,7 @@ class HTMLPreElement;
 class HTMLProgressElement;
 class HTMLQuoteElement;
 class HTMLScriptElement;
+class HTMLSelectedContentElement;
 class HTMLSelectElement;
 class HTMLSlotElement;
 class HTMLSourceElement;

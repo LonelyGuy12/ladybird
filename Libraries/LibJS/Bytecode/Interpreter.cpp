@@ -470,6 +470,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(BitwiseAnd);
             HANDLE_INSTRUCTION(BitwiseNot);
             HANDLE_INSTRUCTION(BitwiseOr);
+            HANDLE_INSTRUCTION(ToInt32);
             HANDLE_INSTRUCTION(BitwiseXor);
             HANDLE_INSTRUCTION(Call);
             HANDLE_INSTRUCTION(CallBuiltin);
@@ -558,16 +559,12 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(PostfixIncrement);
 
 #define HANDLE_PUT_KIND_BY_ID(kind) HANDLE_INSTRUCTION(Put##kind##ById);
-#define HANDLE_PUT_KIND_BY_NUMERIC_ID(kind) HANDLE_INSTRUCTION(Put##kind##ByNumericId);
 #define HANDLE_PUT_KIND_BY_VALUE(kind) HANDLE_INSTRUCTION(Put##kind##ByValue);
 #define HANDLE_PUT_KIND_BY_VALUE_WITH_THIS(kind) HANDLE_INSTRUCTION(Put##kind##ByValueWithThis);
 #define HANDLE_PUT_KIND_BY_ID_WITH_THIS(kind) HANDLE_INSTRUCTION(Put##kind##ByIdWithThis);
-#define HANDLE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS(kind) HANDLE_INSTRUCTION(Put##kind##ByNumericIdWithThis);
 
             JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_ID)
-            JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_NUMERIC_ID)
             JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_ID_WITH_THIS)
-            JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS)
             JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_VALUE)
             JS_ENUMERATE_PUT_KINDS(HANDLE_PUT_KIND_BY_VALUE_WITH_THIS)
 
@@ -636,6 +633,11 @@ Utf16FlyString const& Interpreter::get_identifier(IdentifierTableIndex index) co
     return m_running_execution_context->identifier_table[index.value];
 }
 
+PropertyKey const& Interpreter::get_property_key(PropertyKeyTableIndex index) const
+{
+    return m_running_execution_context->property_key_table[index.value];
+}
+
 ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, Executable& executable, Optional<size_t> entry_point)
 {
     dbgln_if(JS_BYTECODE_DEBUG, "Bytecode::Interpreter will run unit {}", &executable);
@@ -647,6 +649,7 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
     context.global_object = realm().global_object();
     context.global_declarative_environment = realm().global_environment().declarative_record();
     context.identifier_table = executable.identifier_table->identifiers().data();
+    context.property_key_table = executable.property_key_table->property_keys().data();
 
     ASSERT(executable.registers_and_constants_and_locals_count <= context.registers_and_constants_and_locals_and_arguments_span().size());
 
@@ -659,7 +662,7 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
 
     auto* registers_and_constants_and_locals_and_arguments = context.registers_and_constants_and_locals_and_arguments();
     for (size_t i = 0; i < executable.constants.size(); ++i) {
-        registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants[i];
+        registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants.data()[i];
     }
 
     run_bytecode(entry_point.value_or(0));
@@ -816,28 +819,6 @@ static COLD Completion throw_null_or_undefined_property_get(VM& vm, Value base_v
     return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithProperty, property, base_value);
 }
 
-template<typename BaseType, typename PropertyType>
-COLD Completion throw_null_or_undefined_property_access(VM& vm, Value base_value, BaseType const& base_identifier, PropertyType const& property_identifier)
-{
-    VERIFY(base_value.is_nullish());
-
-    bool has_base_identifier = true;
-    bool has_property_identifier = true;
-
-    if constexpr (requires { base_identifier.has_value(); })
-        has_base_identifier = base_identifier.has_value();
-    if constexpr (requires { property_identifier.has_value(); })
-        has_property_identifier = property_identifier.has_value();
-
-    if (has_base_identifier && has_property_identifier)
-        return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithPropertyAndName, property_identifier, base_value, base_identifier);
-    if (has_property_identifier)
-        return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithProperty, property_identifier, base_value);
-    if (has_base_identifier)
-        return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithName, base_identifier, base_value);
-    return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefined);
-}
-
 ALWAYS_INLINE ThrowCompletionOr<GC::Ref<Object>> base_object_for_get(VM& vm, Value base_value, Optional<IdentifierTableIndex> base_identifier, IdentifierTableIndex property_identifier, Executable const& executable)
 {
     if (auto base_object = base_object_for_get_impl(vm, base_value)) [[likely]]
@@ -859,7 +840,7 @@ ALWAYS_INLINE ThrowCompletionOr<GC::Ref<Object>> base_object_for_get(VM& vm, Val
 inline ThrowCompletionOr<Value> get_by_value(VM& vm, Optional<IdentifierTableIndex> base_identifier, Value base_value, Value property_key_value, Executable const& executable)
 {
     // OPTIMIZATION: Fast path for simple Int32 indexes in array-like objects.
-    if (base_value.is_object() && property_key_value.is_int32() && property_key_value.as_i32() >= 0) {
+    if (base_value.is_object() && property_key_value.is_non_negative_int32()) {
         auto& object = base_value.as_object();
         auto index = static_cast<u32>(property_key_value.as_i32());
 
@@ -948,8 +929,8 @@ inline ThrowCompletionOr<Value> get_global(Interpreter& interpreter, IdentifierT
 
         // OPTIMIZATION: For global var bindings, if the shape of the global object hasn't changed,
         //               we can use the cached property offset.
-        if (&shape == cache.entries[0].shape && (!shape.is_dictionary() || shape.dictionary_generation() == cache.entries[0].shape_dictionary_generation.value())) {
-            auto value = binding_object.get_direct(cache.entries[0].property_offset.value());
+        if (&shape == cache.entries[0].shape && (!shape.is_dictionary() || shape.dictionary_generation() == cache.entries[0].shape_dictionary_generation)) {
+            auto value = binding_object.get_direct(cache.entries[0].property_offset);
             if (value.is_accessor())
                 return TRY(call(vm, value.as_accessor().getter(), js_undefined()));
             return value;
@@ -1009,205 +990,6 @@ inline ThrowCompletionOr<Value> get_global(Interpreter& interpreter, IdentifierT
     }
 
     return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, identifier);
-}
-
-template<PutKind kind>
-ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value, Value value, Optional<Utf16FlyString const&> const base_identifier, PropertyKey name, Strict strict, PropertyLookupCache* caches = nullptr)
-{
-    // Better error message than to_object would give
-    if (strict == Strict::Yes && base.is_nullish()) [[unlikely]]
-        return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base);
-
-    // a. Let baseObj be ? ToObject(V.[[Base]]).
-    auto maybe_object = base.to_object(vm);
-    if (maybe_object.is_error()) [[unlikely]]
-        return throw_null_or_undefined_property_access(vm, base, base_identifier, name);
-    auto object = maybe_object.release_value();
-
-    if constexpr (kind == PutKind::Getter || kind == PutKind::Setter) {
-        // The generator should only pass us functions for getters and setters.
-        VERIFY(value.is_function());
-    }
-    switch (kind) {
-    case PutKind::Getter: {
-        auto& function = value.as_function();
-        if (is<ECMAScriptFunctionObject>(function) && static_cast<ECMAScriptFunctionObject const&>(function).name().is_empty())
-            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(Utf16String::formatted("get {}", name));
-        object->define_direct_accessor(name, &function, nullptr, Attribute::Configurable | Attribute::Enumerable);
-        break;
-    }
-    case PutKind::Setter: {
-        auto& function = value.as_function();
-        if (is<ECMAScriptFunctionObject>(function) && static_cast<ECMAScriptFunctionObject const&>(function).name().is_empty())
-            static_cast<ECMAScriptFunctionObject*>(&function)->set_name(Utf16String::formatted("set {}", name));
-        object->define_direct_accessor(name, nullptr, &function, Attribute::Configurable | Attribute::Enumerable);
-        break;
-    }
-    case PutKind::Normal: {
-        auto this_value_object = MUST(this_value.to_object(vm));
-        auto& from_shape = this_value_object->shape();
-        if (caches) [[likely]] {
-            for (auto& cache : caches->entries) {
-                switch (cache.type) {
-                case PropertyLookupCache::Entry::Type::Empty:
-                    break;
-                case PropertyLookupCache::Entry::Type::ChangePropertyInPrototypeChain: {
-                    auto cached_prototype = cache.prototype.ptr();
-                    if (!cached_prototype) [[unlikely]]
-                        break;
-                    // OPTIMIZATION: If the prototype chain hasn't been mutated in a way that would invalidate the cache, we can use it.
-                    bool can_use_cache = [&]() -> bool {
-                        if (&object->shape() != cache.shape) [[unlikely]]
-                            return false;
-
-                        if (cache.shape->is_dictionary()) {
-                            VERIFY(cache.shape_dictionary_generation.has_value());
-                            if (object->shape().dictionary_generation() != cache.shape_dictionary_generation.value()) [[unlikely]]
-                                return false;
-                        }
-
-                        auto cached_prototype_chain_validity = cache.prototype_chain_validity.ptr();
-                        if (!cached_prototype_chain_validity) [[unlikely]]
-                            return false;
-                        if (!cached_prototype_chain_validity->is_valid()) [[unlikely]]
-                            return false;
-                        return true;
-                    }();
-                    if (can_use_cache) [[likely]] {
-                        auto value_in_prototype = cached_prototype->get_direct(cache.property_offset.value());
-                        if (value_in_prototype.is_accessor()) [[unlikely]] {
-                            (void)TRY(call(vm, value_in_prototype.as_accessor().setter(), this_value, value));
-                            return {};
-                        }
-                    }
-                    break;
-                }
-                case PropertyLookupCache::Entry::Type::ChangeOwnProperty: {
-                    if (cache.shape != &object->shape()) [[unlikely]]
-                        break;
-
-                    if (cache.shape->is_dictionary()) {
-                        VERIFY(cache.shape_dictionary_generation.has_value());
-                        if (cache.shape->dictionary_generation() != cache.shape_dictionary_generation.value())
-                            break;
-                    }
-
-                    auto value_in_object = object->get_direct(cache.property_offset.value());
-                    if (value_in_object.is_accessor()) [[unlikely]] {
-                        (void)TRY(call(vm, value_in_object.as_accessor().setter(), this_value, value));
-                    } else {
-                        object->put_direct(*cache.property_offset, value);
-                    }
-                    return {};
-                }
-                case PropertyLookupCache::Entry::Type::AddOwnProperty: {
-                    // OPTIMIZATION: If the object's shape is the same as the one cached before adding the new property, we can
-                    //               reuse the resulting shape from the cache.
-                    if (cache.from_shape != &object->shape()) [[unlikely]]
-                        break;
-                    auto cached_shape = cache.shape.ptr();
-                    if (!cached_shape) [[unlikely]]
-                        break;
-
-                    if (cache.shape->is_dictionary()) {
-                        VERIFY(cache.shape_dictionary_generation.has_value());
-                        if (object->shape().dictionary_generation() != cache.shape_dictionary_generation.value())
-                            break;
-                    }
-
-                    // The cache is invalid if the prototype chain has been mutated, since such a mutation could have added a setter for the property.
-                    auto cached_prototype_chain_validity = cache.prototype_chain_validity.ptr();
-                    if (cached_prototype_chain_validity && !cached_prototype_chain_validity->is_valid()) [[unlikely]]
-                        break;
-                    object->unsafe_set_shape(*cached_shape);
-                    object->put_direct(*cache.property_offset, value);
-                    return {};
-                }
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-            }
-        }
-
-        CacheableSetPropertyMetadata cacheable_metadata;
-        bool succeeded = TRY(object->internal_set(name, value, this_value, &cacheable_metadata));
-
-        auto get_cache_slot = [&] -> PropertyLookupCache::Entry& {
-            for (size_t i = caches->entries.size() - 1; i >= 1; --i) {
-                caches->entries[i] = caches->entries[i - 1];
-            }
-            caches->entries[0] = {};
-            return caches->entries[0];
-        };
-
-        if (succeeded && caches && cacheable_metadata.type == CacheableSetPropertyMetadata::Type::AddOwnProperty) {
-            auto& cache = get_cache_slot();
-            cache.type = PropertyLookupCache::Entry::Type::AddOwnProperty;
-            cache.from_shape = from_shape;
-            cache.property_offset = cacheable_metadata.property_offset.value();
-            cache.shape = &object->shape();
-            if (cacheable_metadata.prototype) {
-                cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
-            }
-            if (cache.shape->is_dictionary()) {
-                cache.shape_dictionary_generation = cache.shape->dictionary_generation();
-            }
-        }
-
-        // If internal_set() caused object's shape change, we can no longer be sure
-        // that collected metadata is valid, e.g. if setter in prototype chain added
-        // property with the same name into the object itself.
-        if (succeeded && caches && &from_shape == &object->shape()) {
-            auto& cache = get_cache_slot();
-            switch (cacheable_metadata.type) {
-            case CacheableSetPropertyMetadata::Type::AddOwnProperty:
-                // Something went wrong if we ended up here, because cacheable addition of a new property should've changed the shape.
-                VERIFY_NOT_REACHED();
-                break;
-            case CacheableSetPropertyMetadata::Type::ChangeOwnProperty:
-                cache.type = PropertyLookupCache::Entry::Type::ChangeOwnProperty;
-                cache.shape = object->shape();
-                cache.property_offset = cacheable_metadata.property_offset.value();
-
-                if (cache.shape->is_dictionary()) {
-                    cache.shape_dictionary_generation = cache.shape->dictionary_generation();
-                }
-                break;
-            case CacheableSetPropertyMetadata::Type::ChangePropertyInPrototypeChain:
-                cache.type = PropertyLookupCache::Entry::Type::ChangePropertyInPrototypeChain;
-                cache.shape = object->shape();
-                cache.property_offset = cacheable_metadata.property_offset.value();
-                cache.prototype = *cacheable_metadata.prototype;
-                cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
-
-                if (cache.shape->is_dictionary()) {
-                    cache.shape_dictionary_generation = cache.shape->dictionary_generation();
-                }
-                break;
-            case CacheableSetPropertyMetadata::Type::NotCacheable:
-                break;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-        }
-
-        if (!succeeded && strict == Strict::Yes) [[unlikely]] {
-            if (base.is_object())
-                return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base);
-            return vm.throw_completion<TypeError>(ErrorType::ReferencePrimitiveSetProperty, name, base.typeof_(vm)->utf8_string(), base);
-        }
-        break;
-    }
-    case PutKind::Own:
-        object->define_direct_property(name, value, Attribute::Enumerable | Attribute::Writable | Attribute::Configurable);
-        break;
-    case PutKind::Prototype:
-        if (value.is_object() || value.is_null()) [[likely]]
-            MUST(object->internal_set_prototype_of(value.is_object() ? &value.as_object() : nullptr));
-        break;
-    }
-
-    return {};
 }
 
 static COLD Completion throw_type_error_for_callee(Bytecode::Interpreter& interpreter, Value callee, StringView callee_type, Optional<StringTableIndex> const expression_string)
@@ -1289,7 +1071,7 @@ inline ThrowCompletionOr<void> put_by_value(VM& vm, Value base, Optional<Utf16Fl
 {
     // OPTIMIZATION: Fast path for simple Int32 indexes in array-like objects.
     if (kind == PutKind::Normal
-        && base.is_object() && property_key_value.is_int32() && property_key_value.as_i32() >= 0) {
+        && base.is_object() && property_key_value.is_non_negative_int32()) {
         auto& object = base.as_object();
         auto* storage = object.indexed_properties().storage();
         auto index = static_cast<u32>(property_key_value.as_i32());
@@ -1452,16 +1234,15 @@ inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Int
 }
 
 // 13.2.7.3 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-regular-expression-literals-runtime-semantics-evaluation
-inline Value new_regexp(VM& vm, ParsedRegex const& parsed_regex, Utf16String pattern, Utf16String flags)
+inline Value new_regexp(VM& vm, Regex<ECMA262> const& regex, Utf16String pattern, Utf16String flags)
 {
     // 1. Let pattern be CodePointsToString(BodyText of RegularExpressionLiteral).
     // 2. Let flags be CodePointsToString(FlagText of RegularExpressionLiteral).
 
     // 3. Return ! RegExpCreate(pattern, flags).
     auto& realm = *vm.current_realm();
-    Regex<ECMA262> regex(parsed_regex.regex, parsed_regex.pattern.to_byte_string(), parsed_regex.flags);
     // NOTE: We bypass RegExpCreate and subsequently RegExpAlloc as an optimization to use the already parsed values.
-    auto regexp_object = RegExpObject::create(realm, move(regex), move(pattern), move(flags));
+    auto regexp_object = RegExpObject::create(realm, regex, move(pattern), move(flags));
     // RegExpAlloc has these two steps from the 'Legacy RegExp features' proposal.
     regexp_object->set_realm(realm);
     // We don't need to check 'If SameValue(newTarget, thisRealm.[[Intrinsics]].[[%RegExp%]]) is true'
@@ -1838,6 +1619,18 @@ ThrowCompletionOr<void> BitwiseAnd::execute_impl(Bytecode::Interpreter& interpre
     return {};
 }
 
+ThrowCompletionOr<void> ToInt32::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& vm = interpreter.vm();
+    auto const value = interpreter.get(m_value);
+    if (value.is_int32()) [[likely]] {
+        interpreter.set(m_dst, value);
+        return {};
+    }
+    interpreter.set(m_dst, Value(TRY(value.to_i32(vm))));
+    return {};
+}
+
 ThrowCompletionOr<void> BitwiseOr::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
@@ -2075,7 +1868,7 @@ void NewRegExp::execute_impl(Bytecode::Interpreter& interpreter) const
             interpreter.current_executable().get_string(m_flags_index)));
 }
 
-void NewTypeError::execute_impl(Bytecode::Interpreter& interpreter) const
+COLD void NewTypeError::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& realm = *vm.current_realm();
@@ -2169,7 +1962,7 @@ ThrowCompletionOr<void> GetCalleeAndThisFromEnvironment::execute_impl(Bytecode::
 
 ThrowCompletionOr<void> GetGlobal::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    interpreter.set(dst(), TRY(get_global(interpreter, m_identifier, strict(), interpreter.current_executable().global_variable_caches[m_cache_index])));
+    interpreter.set(dst(), TRY(get_global(interpreter, m_identifier, strict(), interpreter.current_executable().global_variable_caches.data()[m_cache_index])));
     return {};
 }
 
@@ -2179,19 +1972,19 @@ ThrowCompletionOr<void> SetGlobal::execute_impl(Bytecode::Interpreter& interpret
     auto& binding_object = interpreter.global_object();
     auto& declarative_record = interpreter.global_declarative_environment();
 
-    auto& cache = interpreter.current_executable().global_variable_caches[m_cache_index];
+    auto& cache = interpreter.current_executable().global_variable_caches.data()[m_cache_index];
     auto& shape = binding_object.shape();
     auto src = interpreter.get(m_src);
 
     if (cache.environment_serial_number == declarative_record.environment_serial_number()) {
         // OPTIMIZATION: For global var bindings, if the shape of the global object hasn't changed,
         //               we can use the cached property offset.
-        if (&shape == cache.entries[0].shape && (!shape.is_dictionary() || shape.dictionary_generation() == cache.entries[0].shape_dictionary_generation.value())) {
-            auto value = binding_object.get_direct(cache.entries[0].property_offset.value());
+        if (&shape == cache.entries[0].shape && (!shape.is_dictionary() || shape.dictionary_generation() == cache.entries[0].shape_dictionary_generation)) {
+            auto value = binding_object.get_direct(cache.entries[0].property_offset);
             if (value.is_accessor())
                 TRY(call(vm, value.as_accessor().setter(), &binding_object, src));
             else
-                binding_object.put_direct(cache.entries[0].property_offset.value(), src);
+                binding_object.put_direct(cache.entries[0].property_offset, src);
             return {};
         }
 
@@ -2431,9 +2224,9 @@ ThrowCompletionOr<void> SetVariableBinding::execute_impl(Bytecode::Interpreter& 
 ThrowCompletionOr<void> GetById::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto base_value = interpreter.get(base());
-    auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];
+    auto& cache = interpreter.current_executable().property_lookup_caches.data()[m_cache_index];
 
-    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(interpreter.vm(), [&] { return interpreter.get_identifier(m_base_identifier); }, [&] { return interpreter.get_identifier(m_property); }, base_value, base_value, cache)));
+    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(interpreter.vm(), [&] { return interpreter.get_identifier(m_base_identifier); }, [&] -> PropertyKey const& { return interpreter.get_property_key(m_property); }, base_value, base_value, cache)));
     return {};
 }
 
@@ -2441,8 +2234,8 @@ ThrowCompletionOr<void> GetByIdWithThis::execute_impl(Bytecode::Interpreter& int
 {
     auto base_value = interpreter.get(m_base);
     auto this_value = interpreter.get(m_this_value);
-    auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];
-    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(interpreter.vm(), [] { return Optional<Utf16FlyString const&> {}; }, [&] { return interpreter.get_identifier(m_property); }, base_value, this_value, cache)));
+    auto& cache = interpreter.current_executable().property_lookup_caches.data()[m_cache_index];
+    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Normal>(interpreter.vm(), [] { return Optional<Utf16FlyString const&> {}; }, [&] -> PropertyKey const& { return interpreter.get_property_key(m_property); }, base_value, this_value, cache)));
     return {};
 }
 
@@ -2450,9 +2243,8 @@ ThrowCompletionOr<void> GetLength::execute_impl(Bytecode::Interpreter& interpret
 {
     auto base_value = interpreter.get(base());
     auto& executable = interpreter.current_executable();
-    auto& cache = executable.property_lookup_caches[m_cache_index];
-
-    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Length>(interpreter.vm(), [&] { return interpreter.get_identifier(m_base_identifier); }, [&] { return executable.get_identifier(*executable.length_identifier); }, base_value, base_value, cache)));
+    auto& cache = executable.property_lookup_caches.data()[m_cache_index];
+    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Length>(interpreter.vm(), [&] { return interpreter.get_identifier(m_base_identifier); }, [&] { return executable.get_property_key(*executable.length_identifier); }, base_value, base_value, cache)));
     return {};
 }
 
@@ -2461,8 +2253,8 @@ ThrowCompletionOr<void> GetLengthWithThis::execute_impl(Bytecode::Interpreter& i
     auto base_value = interpreter.get(m_base);
     auto this_value = interpreter.get(m_this_value);
     auto& executable = interpreter.current_executable();
-    auto& cache = executable.property_lookup_caches[m_cache_index];
-    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Length>(interpreter.vm(), [] { return Optional<Utf16FlyString const&> {}; }, [&] { return executable.get_identifier(*executable.length_identifier); }, base_value, this_value, cache)));
+    auto& cache = executable.property_lookup_caches.data()[m_cache_index];
+    interpreter.set(dst(), TRY(get_by_id<GetByIdMode::Length>(interpreter.vm(), [] { return Optional<Utf16FlyString const&> {}; }, [&] -> PropertyKey const& { return executable.get_property_key(*executable.length_identifier); }, base_value, this_value, cache)));
     return {};
 }
 
@@ -2505,49 +2297,20 @@ ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpreter& interpr
     return {};
 }
 
-#define DEFINE_PUT_KIND_BY_ID(kind)                                                                              \
-    ThrowCompletionOr<void> Put##kind##ById::execute_impl(Bytecode::Interpreter& interpreter) const              \
-    {                                                                                                            \
-        auto& vm = interpreter.vm();                                                                             \
-        auto value = interpreter.get(m_src);                                                                     \
-        auto base = interpreter.get(m_base);                                                                     \
-        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
-        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };         \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
-        return {};                                                                                               \
+#define DEFINE_PUT_KIND_BY_ID(kind)                                                                                      \
+    ThrowCompletionOr<void> Put##kind##ById::execute_impl(Bytecode::Interpreter& interpreter) const                      \
+    {                                                                                                                    \
+        auto& vm = interpreter.vm();                                                                                     \
+        auto value = interpreter.get(m_src);                                                                             \
+        auto base = interpreter.get(m_base);                                                                             \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                                     \
+        auto const& property_key = interpreter.get_property_key(m_property);                                             \
+        auto& cache = interpreter.current_executable().property_lookup_caches.data()[m_cache_index];                     \
+        TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, property_key, strict(), &cache)); \
+        return {};                                                                                                       \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID)
-
-#define DEFINE_PUT_KIND_BY_NUMERIC_ID(kind)                                                                      \
-    ThrowCompletionOr<void> Put##kind##ByNumericId::execute_impl(Bytecode::Interpreter& interpreter) const       \
-    {                                                                                                            \
-        auto& vm = interpreter.vm();                                                                             \
-        auto value = interpreter.get(m_src);                                                                     \
-        auto base = interpreter.get(m_base);                                                                     \
-        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
-        PropertyKey name { m_property };                                                                         \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
-        return {};                                                                                               \
-    }
-
-JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID)
-
-#define DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS(kind)                                                                        \
-    ThrowCompletionOr<void> Put##kind##ByNumericIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const           \
-    {                                                                                                                        \
-        auto& vm = interpreter.vm();                                                                                         \
-        auto value = interpreter.get(m_src);                                                                                 \
-        auto base = interpreter.get(m_base);                                                                                 \
-        PropertyKey name { m_property };                                                                                     \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
-        return {};                                                                                                           \
-    }
-
-JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS)
 
 #define DEFINE_PUT_KIND_BY_ID_WITH_THIS(kind)                                                                                \
     ThrowCompletionOr<void> Put##kind##ByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                  \
@@ -2555,8 +2318,8 @@ JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS)
         auto& vm = interpreter.vm();                                                                                         \
         auto value = interpreter.get(m_src);                                                                                 \
         auto base = interpreter.get(m_base);                                                                                 \
-        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };                     \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                \
+        auto const& name = interpreter.get_property_key(m_property);                                                         \
+        auto& cache = interpreter.current_executable().property_lookup_caches.data()[m_cache_index];                         \
         TRY(put_by_property_key<PutKind::kind>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
         return {};                                                                                                           \
     }
@@ -2577,8 +2340,8 @@ ThrowCompletionOr<void> PutPrivateById::execute_impl(Bytecode::Interpreter& inte
 COLD ThrowCompletionOr<void> DeleteById::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto const& identifier = interpreter.get_identifier(m_property);
-    auto reference = Reference { interpreter.get(m_base), identifier, {}, strict() };
+    auto const& property_key = interpreter.get_property_key(m_property);
+    auto reference = Reference { interpreter.get(m_base), property_key, {}, strict() };
     interpreter.set(dst(), Value(TRY(reference.delete_(vm))));
     return {};
 }
@@ -2587,8 +2350,8 @@ COLD ThrowCompletionOr<void> DeleteByIdWithThis::execute_impl(Bytecode::Interpre
 {
     auto& vm = interpreter.vm();
     auto base_value = interpreter.get(m_base);
-    auto const& identifier = interpreter.get_identifier(m_property);
-    auto reference = Reference { base_value, identifier, interpreter.get(m_this_value), strict() };
+    auto const& property_key = interpreter.get_property_key(m_property);
+    auto reference = Reference { base_value, property_key, interpreter.get(m_this_value), strict() };
     interpreter.set(dst(), Value(TRY(reference.delete_(vm))));
     return {};
 }
@@ -2641,31 +2404,34 @@ static ThrowCompletionOr<Value> dispatch_builtin_call(Bytecode::Interpreter& int
 {
     switch (builtin) {
     case Builtin::MathAbs:
-        return TRY(MathObject::abs_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::abs_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathLog:
-        return TRY(MathObject::log_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::log_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathPow:
-        return TRY(MathObject::pow_impl(interpreter.vm(), interpreter.get(arguments[0]), interpreter.get(arguments[1])));
+        return TRY(MathObject::pow_impl(interpreter.vm(), interpreter.get(arguments.data()[0]), interpreter.get(arguments.data()[1])));
     case Builtin::MathExp:
-        return TRY(MathObject::exp_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::exp_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathCeil:
-        return TRY(MathObject::ceil_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::ceil_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathFloor:
-        return TRY(MathObject::floor_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::floor_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathImul:
-        return TRY(MathObject::imul_impl(interpreter.vm(), interpreter.get(arguments[0]), interpreter.get(arguments[1])));
+        return TRY(MathObject::imul_impl(interpreter.vm(), interpreter.get(arguments.data()[0]), interpreter.get(arguments.data()[1])));
     case Builtin::MathRandom:
         return MathObject::random_impl();
     case Builtin::MathRound:
-        return TRY(MathObject::round_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::round_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathSqrt:
-        return TRY(MathObject::sqrt_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::sqrt_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathSin:
-        return TRY(MathObject::sin_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::sin_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathCos:
-        return TRY(MathObject::cos_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::cos_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
     case Builtin::MathTan:
-        return TRY(MathObject::tan_impl(interpreter.vm(), interpreter.get(arguments[0])));
+        return TRY(MathObject::tan_impl(interpreter.vm(), interpreter.get(arguments.data()[0])));
+    case Builtin::RegExpPrototypeExec:
+    case Builtin::RegExpPrototypeReplace:
+    case Builtin::RegExpPrototypeSplit:
     case Builtin::ArrayIteratorPrototypeNext:
     case Builtin::MapIteratorPrototypeNext:
     case Builtin::SetIteratorPrototypeNext:
@@ -2704,7 +2470,7 @@ static ThrowCompletionOr<void> execute_call(
     auto const insn_argument_count = arguments.size();
 
     for (size_t i = 0; i < insn_argument_count; ++i)
-        callee_context_argument_values[i] = interpreter.get(arguments[i]);
+        callee_context_argument_values[i] = interpreter.get(arguments.data()[i]);
     for (size_t i = insn_argument_count; i < callee_context_argument_count; ++i)
         callee_context_argument_values[i] = js_undefined();
     callee_context->passed_argument_count = insn_argument_count;
@@ -3128,8 +2894,8 @@ ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpr
 ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto const& identifier = interpreter.get_identifier(m_property);
-    auto method = TRY(interpreter.get(m_object).get_method(vm, identifier));
+    auto const& property_key = interpreter.get_property_key(m_property);
+    auto method = TRY(interpreter.get(m_object).get_method(vm, property_key));
     interpreter.set(dst(), method ?: js_undefined());
     return {};
 }

@@ -57,16 +57,21 @@ ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transpo
 ConnectionFromClient::~ConnectionFromClient()
 {
     m_active_requests.clear();
+    m_active_revalidation_requests.clear();
 
     curl_multi_cleanup(m_curl_multi);
     m_curl_multi = nullptr;
 }
 
-void ConnectionFromClient::request_complete(Badge<Request>, int request_id)
+void ConnectionFromClient::request_complete(Badge<Request>, Request const& request)
 {
-    Core::deferred_invoke([weak_self = make_weak_ptr<ConnectionFromClient>(), request_id] {
-        if (auto self = weak_self.strong_ref())
-            self->m_active_requests.remove(request_id);
+    Core::deferred_invoke([weak_self = make_weak_ptr<ConnectionFromClient>(), request_id = request.request_id(), type = request.type()] {
+        if (auto self = weak_self.strong_ref()) {
+            if (type == Request::Type::BackgroundRevalidation)
+                self->m_active_revalidation_requests.remove(request_id);
+            else
+                self->m_active_requests.remove(request_id);
+        }
     });
 }
 
@@ -182,12 +187,22 @@ void ConnectionFromClient::set_use_system_dns()
     m_resolver->dns.reset_connection();
 }
 
-void ConnectionFromClient::start_request(i32 request_id, ByteString method, URL::URL url, Vector<HTTP::Header> request_headers, ByteBuffer request_body, Core::ProxyData proxy_data)
+void ConnectionFromClient::start_request(u64 request_id, ByteString method, URL::URL url, Vector<HTTP::Header> request_headers, ByteBuffer request_body, Core::ProxyData proxy_data)
 {
     dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: start_request({}, {})", request_id, url);
 
     auto request = Request::fetch(request_id, g_disk_cache, *this, m_curl_multi, m_resolver, move(url), move(method), HTTP::HeaderList::create(move(request_headers)), move(request_body), m_alt_svc_cache_path, proxy_data);
     m_active_requests.set(request_id, move(request));
+}
+
+void ConnectionFromClient::start_revalidation_request(Badge<Request>, ByteString method, URL::URL url, NonnullRefPtr<HTTP::HeaderList> request_headers, ByteBuffer request_body, Core::ProxyData proxy_data)
+{
+    auto request_id = m_next_revalidation_request_id++;
+
+    dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: start_revalidation_request({}, {})", request_id, url);
+
+    auto request = Request::revalidate(request_id, g_disk_cache, *this, m_curl_multi, m_resolver, move(url), move(method), move(request_headers), move(request_body), m_alt_svc_cache_path, proxy_data);
+    m_active_revalidation_requests.set(request_id, move(request));
 }
 
 int ConnectionFromClient::on_socket_callback(CURL*, int sockfd, int what, void* user_data, void*)
@@ -276,7 +291,7 @@ void ConnectionFromClient::check_active_requests()
     }
 }
 
-Messages::RequestServer::StopRequestResponse ConnectionFromClient::stop_request(i32 request_id)
+Messages::RequestServer::StopRequestResponse ConnectionFromClient::stop_request(u64 request_id)
 {
     auto request = m_active_requests.take(request_id);
     if (!request.has_value()) {
@@ -287,7 +302,7 @@ Messages::RequestServer::StopRequestResponse ConnectionFromClient::stop_request(
     return true;
 }
 
-Messages::RequestServer::SetCertificateResponse ConnectionFromClient::set_certificate(i32 request_id, ByteString certificate, ByteString key)
+Messages::RequestServer::SetCertificateResponse ConnectionFromClient::set_certificate(u64 request_id, ByteString certificate, ByteString key)
 {
     (void)request_id;
     (void)certificate;
@@ -295,12 +310,10 @@ Messages::RequestServer::SetCertificateResponse ConnectionFromClient::set_certif
     TODO();
 }
 
-void ConnectionFromClient::ensure_connection(URL::URL url, ::RequestServer::CacheLevel cache_level)
+void ConnectionFromClient::ensure_connection(u64 request_id, URL::URL url, ::RequestServer::CacheLevel cache_level)
 {
-    auto connect_only_request_id = get_random<i32>();
-
-    auto request = Request::connect(connect_only_request_id, *this, m_curl_multi, m_resolver, move(url), cache_level);
-    m_active_requests.set(connect_only_request_id, move(request));
+    auto request = Request::connect(request_id, *this, m_curl_multi, m_resolver, move(url), cache_level);
+    m_active_requests.set(request_id, move(request));
 }
 
 void ConnectionFromClient::estimate_cache_size_accessed_since(u64 cache_size_estimation_id, UnixDateTime since)
@@ -319,7 +332,7 @@ void ConnectionFromClient::remove_cache_entries_accessed_since(UnixDateTime sinc
         g_disk_cache->remove_entries_accessed_since(since);
 }
 
-void ConnectionFromClient::websocket_connect(i64 websocket_id, URL::URL url, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, Vector<HTTP::Header> additional_request_headers)
+void ConnectionFromClient::websocket_connect(u64 websocket_id, URL::URL url, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, Vector<HTTP::Header> additional_request_headers)
 {
     auto host = url.serialized_host().to_byte_string();
 
@@ -369,22 +382,22 @@ void ConnectionFromClient::websocket_connect(i64 websocket_id, URL::URL url, Byt
         });
 }
 
-void ConnectionFromClient::websocket_send(i64 websocket_id, bool is_text, ByteBuffer data)
+void ConnectionFromClient::websocket_send(u64 websocket_id, bool is_text, ByteBuffer data)
 {
-    if (auto connection = m_websockets.get(websocket_id).value_or({}); connection && connection->ready_state() == WebSocket::ReadyState::Open)
+    if (auto* connection = m_websockets.get(websocket_id).value_or({}); connection && connection->ready_state() == WebSocket::ReadyState::Open)
         connection->send(WebSocket::Message { move(data), is_text });
 }
 
-void ConnectionFromClient::websocket_close(i64 websocket_id, u16 code, ByteString reason)
+void ConnectionFromClient::websocket_close(u64 websocket_id, u16 code, ByteString reason)
 {
-    if (auto connection = m_websockets.get(websocket_id).value_or({}); connection && connection->ready_state() == WebSocket::ReadyState::Open)
+    if (auto* connection = m_websockets.get(websocket_id).value_or({}); connection && connection->ready_state() == WebSocket::ReadyState::Open)
         connection->close(code, reason);
 }
 
-Messages::RequestServer::WebsocketSetCertificateResponse ConnectionFromClient::websocket_set_certificate(i64 websocket_id, ByteString, ByteString)
+Messages::RequestServer::WebsocketSetCertificateResponse ConnectionFromClient::websocket_set_certificate(u64 websocket_id, ByteString, ByteString)
 {
     auto success = false;
-    if (auto connection = m_websockets.get(websocket_id).value_or({}); connection) {
+    if (auto* connection = m_websockets.get(websocket_id).value_or({}); connection) {
         // NO OP here
         // connection->set_certificate(certificate, key);
         success = true;

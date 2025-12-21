@@ -12,10 +12,12 @@
 #include <AK/Queue.h>
 #include <AK/Time.h>
 #include <LibCore/Forward.h>
+#include <LibMedia/Audio/AudioConverter.h>
 #include <LibMedia/AudioBlock.h>
 #include <LibMedia/DecoderError.h>
 #include <LibMedia/Export.h>
 #include <LibMedia/Forward.h>
+#include <LibMedia/IncrementallyPopulatedStream.h>
 #include <LibMedia/Track.h>
 #include <LibThreading/ConditionVariable.h>
 #include <LibThreading/Forward.h>
@@ -35,12 +37,13 @@ public:
     using BlockEndTimeHandler = Function<void(AK::Duration)>;
     using SeekCompletionHandler = Function<void()>;
 
-    static DecoderErrorOr<NonnullRefPtr<AudioDataProvider>> try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, Track const& track);
+    static DecoderErrorOr<NonnullRefPtr<AudioDataProvider>> try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const& demuxer, NonnullRefPtr<IncrementallyPopulatedStream> const&, Track const& track);
     AudioDataProvider(NonnullRefPtr<ThreadData> const&);
     ~AudioDataProvider();
 
     void set_error_handler(ErrorHandler&&);
     void set_block_end_time_handler(BlockEndTimeHandler&&);
+    void set_output_sample_specification(Audio::SampleSpecification);
 
     void start();
 
@@ -51,11 +54,12 @@ public:
 private:
     class ThreadData final : public AtomicRefCounted<ThreadData> {
     public:
-        ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const&, Track const&, NonnullOwnPtr<AudioDecoder>&&);
+        ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const&, NonnullRefPtr<IncrementallyPopulatedStream::Cursor> const&, Track const&, NonnullOwnPtr<AudioDecoder>&&, NonnullOwnPtr<Audio::AudioConverter>&&);
         ~ThreadData();
 
         void set_error_handler(ErrorHandler&&);
         void set_block_end_time_handler(BlockEndTimeHandler&&);
+        void set_output_sample_specification(Audio::SampleSpecification);
 
         void start();
         void exit();
@@ -98,8 +102,10 @@ private:
         RequestedState m_requested_state { RequestedState::None };
 
         NonnullRefPtr<MutexedDemuxer> m_demuxer;
+        NonnullRefPtr<IncrementallyPopulatedStream::Cursor> m_stream_cursor;
         Track m_track;
         NonnullOwnPtr<AudioDecoder> m_decoder;
+        NonnullOwnPtr<Audio::AudioConverter> m_converter;
         i64 m_last_sample { NumericLimits<i64>::min() };
 
         size_t m_queue_max_size { 8 };

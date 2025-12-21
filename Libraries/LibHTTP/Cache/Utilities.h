@@ -18,6 +18,7 @@ namespace HTTP {
 
 constexpr inline auto TEST_CACHE_ENABLED_HEADER = "X-Ladybird-Enable-Disk-Cache"sv;
 constexpr inline auto TEST_CACHE_STATUS_HEADER = "X-Ladybird-Disk-Cache-Status"sv;
+constexpr inline auto TEST_CACHE_REVALIDATION_STATUS_HEADER = "X-Ladybird-Revalidation-Status"sv;
 constexpr inline auto TEST_CACHE_REQUEST_TIME_OFFSET = "X-Ladybird-Request-Time-Offset"sv;
 
 String serialize_url_for_cache_storage(URL::URL const&);
@@ -30,11 +31,13 @@ bool is_header_exempted_from_storage(StringView name);
 
 AK::Duration calculate_freshness_lifetime(u32 status_code, HeaderList const&, AK::Duration current_time_offset_for_testing = {});
 AK::Duration calculate_age(HeaderList const&, UnixDateTime request_time, UnixDateTime response_time, AK::Duration current_time_offset_for_testing = {});
+AK::Duration calculate_stale_while_revalidate_lifetime(HeaderList const&, AK::Duration freshness_lifetime);
 
 enum class CacheLifetimeStatus {
     Fresh,
     Expired,
     MustRevalidate,
+    StaleWhileRevalidate,
 };
 CacheLifetimeStatus cache_lifetime_status(HeaderList const&, AK::Duration freshness_lifetime, AK::Duration current_age);
 
