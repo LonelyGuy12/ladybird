@@ -66,6 +66,9 @@
 #include <LibWeb/DOM/CustomEvent.h>
 #include <LibWeb/DOM/DOMImplementation.h>
 #include <LibWeb/DOM/Document.h>
+#ifdef ENABLE_PYTHON
+#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+#endif
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/DocumentObserver.h>
 #include <LibWeb/DOM/DocumentOrShadowRoot.h>
