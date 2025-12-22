@@ -30,14 +30,12 @@
 #include <LibUnicode/Segmenter.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/AnimationPlaybackEvent.h>
-#include <LibWeb/Bindings/HostDefined.h>
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Animations/TimeValue.h>
 #include <LibWeb/Bindings/DocumentPrototype.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
-#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
 #include <LibWeb/CSS/AnimationEvent.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSImportRule.h>
@@ -142,9 +140,6 @@
 #include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
-#include <LibWeb/HTML/Scripting/PythonEngine.h>
-#include <LibWeb/HTML/Scripting/PythonPackageManager.h>
-
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
@@ -2998,47 +2993,6 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
 
     // 2. Set document's current document readiness to readinessValue.
     m_readiness = readiness_value;
-
-    // Check for Python requirements when document becomes interactive
-    if (readiness_value == HTML::DocumentReadyState::Interactive && !has_python_packages_loaded()) {
-        // Initialize Python package manager
-        auto& package_manager = HTML::PythonPackageManager::the();
-        auto init_result = package_manager.initialize();
-        if (init_result.is_error()) {
-            dbgln("🐍 Document: Failed to initialize Python package manager: {}", init_result.error());
-        }
-        
-        // Check if we have a requirements.txt for this origin
-        auto requirements_result = package_manager.find_requirements_file(url());
-        if (!requirements_result.is_error() && requirements_result.value().has_value()) {
-            dbgln("🐍 Document: Found requirements.txt, parsing and installing packages...");
-            
-            // Parse and install required packages
-            auto packages_result = package_manager.parse_requirements(requirements_result.value().value(), url());
-            if (!packages_result.is_error()) {
-                auto install_result = package_manager.install_packages(packages_result.value());
-                if (install_result.is_error()) {
-                    dbgln("🐍 Document: Failed to install packages: {}", install_result.error());
-                } else {
-                    dbgln("🐍 Document: Successfully installed packages from requirements.txt");
-                    // Set up Python path after installing packages
-                    auto setup_result = package_manager.setup_python_path();
-                    if (setup_result.is_error()) {
-                        dbgln("🐍 Document: Failed to set up Python path: {}", setup_result.error());
-                    }
-                }
-            } else {
-                dbgln("🐍 Document: Failed to parse requirements.txt: {}", packages_result.error());
-            }
-        } else if (requirements_result.is_error()) {
-            dbgln("🐍 Document: Error while looking for requirements.txt: {}", requirements_result.error());
-        } else {
-            dbgln("🐍 Document: No requirements.txt found for this origin");
-        }
-        
-        // Mark packages as loaded
-        set_python_packages_loaded(true);
-    }
 
     // 3. If document is associated with an HTML parser, then:
     if (m_parser) {
