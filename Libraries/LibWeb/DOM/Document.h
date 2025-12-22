@@ -50,14 +50,16 @@
 #include <LibWeb/XPath/XPath.h>
 
 namespace Web::Bindings {
+
 class PythonDOMWrapperCache;
+
 }
 
 namespace Web::DOM {
 
 enum class QuirksMode {
-	No,
-	Limited,
+    No,
+    Limited,
     Yes
 };
 
@@ -977,9 +979,12 @@ protected:
     Document(JS::Realm&, URL::URL const&, TemporaryDocumentForFragmentParsing = TemporaryDocumentForFragmentParsing::No);
 
 private:
+    // ^JS::Object
+    virtual bool is_dom_document() const final { return true; }
+
     // Python package management
     bool m_python_packages_loaded { false };
-    
+
     // ^HTML::GlobalEventHandlers
     virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return GC::Ptr<EventTarget>(static_cast<EventTarget&>(*this)); }
     virtual void finalize() override final;
