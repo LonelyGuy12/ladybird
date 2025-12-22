@@ -5351,14 +5351,15 @@ void Document::update_animations_and_send_events(Optional<double> const& timesta
     //
     // Note: Due to the hierarchical nature of the timing model, updating the current time of a timeline also involves:
     // - Updating the current time of any animations associated with the timeline.
-    // - Running the update an animation’s finished state procedure for any animations whose current time has been
-    //   updated.
-    // - Queueing animation events for any such animations.
-    m_last_animation_frame_timestamp = timestamp;
+    // - Running the update an animation’s finished state procedure on those animations,
+    //   which may cause them to become finished.
+    // - Queueing animation events for those animations.
+    if (timestamp.has_value())
+        m_last_animation_frame_timestamp = timestamp.value();
 
     auto timelines_to_update = GC::RootVector { heap(), m_associated_animation_timelines.values() };
     for (auto const& timeline : timelines_to_update)
-        timeline->update_current_time(timestamp);
+        timeline->update_current_time(timestamp.value_or(0.0));
 
     // 2. Remove replaced animations for doc.
     remove_replaced_animations();
