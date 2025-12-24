@@ -12,6 +12,7 @@
 #include <LibWeb/CSS/Clip.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/FontComputer.h>
+#include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
@@ -33,6 +34,7 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ScrollbarColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
@@ -630,6 +632,86 @@ ImageRendering ComputedProperties::image_rendering() const
     return keyword_to_image_rendering(value.to_keyword()).release_value();
 }
 
+// https://drafts.csswg.org/css-backgrounds-4/#layering
+Vector<BackgroundLayerData> ComputedProperties::background_layers() const
+{
+    auto coordinated_value_list = assemble_coordinated_value_list(
+        PropertyID::BackgroundImage,
+        {
+            PropertyID::BackgroundAttachment,
+            PropertyID::BackgroundBlendMode,
+            PropertyID::BackgroundClip,
+            PropertyID::BackgroundImage,
+            PropertyID::BackgroundOrigin,
+            PropertyID::BackgroundPositionX,
+            PropertyID::BackgroundPositionY,
+            PropertyID::BackgroundRepeat,
+            PropertyID::BackgroundSize,
+        });
+
+    Vector<BackgroundLayerData> layers;
+    // The number of layers is determined by the number of comma-separated values in the background-image property
+    layers.ensure_capacity(coordinated_value_list.get(PropertyID::BackgroundImage)->size());
+
+    for (size_t i = 0; i < coordinated_value_list.get(PropertyID::BackgroundImage)->size(); i++) {
+        auto const& background_attachment_value = coordinated_value_list.get(PropertyID::BackgroundAttachment)->at(i);
+        auto const& background_blend_mode_value = coordinated_value_list.get(PropertyID::BackgroundBlendMode)->at(i);
+        auto const& background_clip_value = coordinated_value_list.get(PropertyID::BackgroundClip)->at(i);
+        auto const& background_image_value = coordinated_value_list.get(PropertyID::BackgroundImage)->at(i);
+        auto const& background_origin_value = coordinated_value_list.get(PropertyID::BackgroundOrigin)->at(i);
+        auto const& background_position_x_value = coordinated_value_list.get(PropertyID::BackgroundPositionX)->at(i);
+        auto const& background_position_y_value = coordinated_value_list.get(PropertyID::BackgroundPositionY)->at(i);
+        auto const& background_repeat_value = coordinated_value_list.get(PropertyID::BackgroundRepeat)->at(i);
+        auto const& background_size_value = coordinated_value_list.get(PropertyID::BackgroundSize)->at(i);
+
+        BackgroundLayerData layer;
+
+        layer.attachment = keyword_to_background_attachment(background_attachment_value->to_keyword()).value();
+        layer.blend_mode = keyword_to_mix_blend_mode(background_blend_mode_value->to_keyword()).value();
+        layer.clip = keyword_to_background_box(background_clip_value->to_keyword()).value();
+
+        if (background_image_value->is_abstract_image())
+            layer.background_image = background_image_value->as_abstract_image();
+        else
+            VERIFY(background_image_value->to_keyword() == Keyword::None);
+
+        layer.origin = keyword_to_background_box(background_origin_value->to_keyword()).value();
+
+        layer.position_edge_x = background_position_x_value->as_edge().edge().value_or(PositionEdge::Left);
+        layer.position_offset_x = background_position_x_value->as_edge().offset();
+
+        layer.position_edge_y = background_position_y_value->as_edge().edge().value_or(PositionEdge::Top);
+        layer.position_offset_y = background_position_y_value->as_edge().offset();
+
+        layer.repeat_x = background_repeat_value->as_repeat_style().repeat_x();
+        layer.repeat_y = background_repeat_value->as_repeat_style().repeat_y();
+
+        if (background_size_value->is_background_size()) {
+            layer.size_type = CSS::BackgroundSize::LengthPercentage;
+            layer.size_x = CSS::LengthPercentageOrAuto::from_style_value(background_size_value->as_background_size().size_x());
+            layer.size_y = CSS::LengthPercentageOrAuto::from_style_value(background_size_value->as_background_size().size_y());
+        } else if (background_size_value->is_keyword()) {
+            switch (background_size_value->to_keyword()) {
+            case CSS::Keyword::Contain:
+                layer.size_type = CSS::BackgroundSize::Contain;
+                break;
+            case CSS::Keyword::Cover:
+                layer.size_type = CSS::BackgroundSize::Cover;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+                break;
+            }
+        } else {
+            VERIFY_NOT_REACHED();
+        }
+
+        layers.unchecked_append(layer);
+    }
+
+    return layers;
+}
+
 Length ComputedProperties::border_spacing_horizontal(Layout::Node const& layout_node) const
 {
     auto resolve_value = [&](auto const& style_value) -> Optional<Length> {
@@ -706,7 +788,7 @@ JustifySelf ComputedProperties::justify_self() const
     return keyword_to_justify_self(value.to_keyword()).release_value();
 }
 
-Vector<Transformation> ComputedProperties::transformations_for_style_value(StyleValue const& value)
+Vector<NonnullRefPtr<TransformationStyleValue const>> ComputedProperties::transformations_for_style_value(StyleValue const& value)
 {
     if (value.is_keyword() && value.to_keyword() == Keyword::None)
         return {};
@@ -715,43 +797,41 @@ Vector<Transformation> ComputedProperties::transformations_for_style_value(Style
         return {};
 
     auto& list = value.as_value_list();
-
-    Vector<Transformation> transformations;
-    for (auto& it : list.values()) {
-        if (!it->is_transformation())
-            return {};
-        transformations.append(it->as_transformation().to_transformation());
+    Vector<NonnullRefPtr<TransformationStyleValue const>> transformations;
+    for (auto const& transform_value : list.values()) {
+        VERIFY(transform_value->is_transformation());
+        transformations.append(transform_value->as_transformation());
     }
     return transformations;
 }
 
-Vector<Transformation> ComputedProperties::transformations() const
+Vector<NonnullRefPtr<TransformationStyleValue const>> ComputedProperties::transformations() const
 {
     return transformations_for_style_value(property(PropertyID::Transform));
 }
 
-Optional<Transformation> ComputedProperties::rotate() const
+RefPtr<TransformationStyleValue const> ComputedProperties::rotate() const
 {
     auto const& value = property(PropertyID::Rotate);
     if (!value.is_transformation())
         return {};
-    return value.as_transformation().to_transformation();
+    return value.as_transformation();
 }
 
-Optional<Transformation> ComputedProperties::translate() const
+RefPtr<TransformationStyleValue const> ComputedProperties::translate() const
 {
     auto const& value = property(PropertyID::Translate);
     if (!value.is_transformation())
         return {};
-    return value.as_transformation().to_transformation();
+    return value.as_transformation();
 }
 
-Optional<Transformation> ComputedProperties::scale() const
+RefPtr<TransformationStyleValue const> ComputedProperties::scale() const
 {
     auto const& value = property(PropertyID::Scale);
     if (!value.is_transformation())
         return {};
-    return value.as_transformation().to_transformation();
+    return value.as_transformation();
 }
 
 TransformBox ComputedProperties::transform_box() const

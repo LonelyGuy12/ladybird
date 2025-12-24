@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2025, Andreas Kling <andreas@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -18,6 +18,7 @@ GC_DEFINE_ALLOCATOR(Executable);
 Executable::Executable(
     Vector<u8> bytecode,
     NonnullOwnPtr<IdentifierTable> identifier_table,
+    NonnullOwnPtr<PropertyKeyTable> property_key_table,
     NonnullOwnPtr<StringTable> string_table,
     NonnullOwnPtr<RegexTable> regex_table,
     Vector<Value> constants,
@@ -29,6 +30,7 @@ Executable::Executable(
     : bytecode(move(bytecode))
     , string_table(move(string_table))
     , identifier_table(move(identifier_table))
+    , property_key_table(move(property_key_table))
     , regex_table(move(regex_table))
     , constants(move(constants))
     , source_code(move(source_code))
@@ -113,6 +115,17 @@ UnrealizedSourceRange Executable::source_range_at(size_t offset) const
         .start_offset = mapping->source_start_offset,
         .end_offset = mapping->source_end_offset,
     };
+}
+
+Operand Executable::original_operand_from_raw(u32 raw) const
+{
+    if (raw < number_of_registers)
+        return Operand { Operand::Type::Register, raw };
+    if (raw < local_index_base)
+        return Operand { Operand::Type::Constant, raw - static_cast<u32>(number_of_registers) };
+    if (raw < argument_index_base)
+        return Operand { Operand::Type::Local, raw - static_cast<u32>(local_index_base) };
+    return Operand { Operand::Type::Argument, raw - static_cast<u32>(argument_index_base) };
 }
 
 }

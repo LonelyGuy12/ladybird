@@ -30,8 +30,9 @@ public:
             bool is_universal { false };
             FlyString value {};
         };
+        using IdentList = Vector<FlyString>;
 
-        using Value = Variant<Empty, PTNameSelector, NonnullRefPtr<Selector>>;
+        using Value = Variant<Empty, PTNameSelector, NonnullRefPtr<Selector>, IdentList>;
 
         explicit PseudoElementSelector(PseudoElement type, Value value = {})
             : m_type(type)
@@ -62,6 +63,8 @@ public:
 
         // NOTE: This can't (currently) be a CompoundSelector due to cyclic dependencies.
         Selector const& compound_selector() const { return m_value.get<NonnullRefPtr<Selector>>(); }
+
+        IdentList const& ident_list() const { return m_value.get<IdentList>(); }
 
     private:
         PseudoElement m_type;
@@ -229,6 +232,7 @@ public:
     size_t sibling_invalidation_distance() const;
 
     bool is_slotted() const { return m_pseudo_element.has_value() && m_pseudo_element->type() == PseudoElement::Slotted; }
+    bool has_part_pseudo_element() const { return m_pseudo_element.has_value() && m_pseudo_element->type() == PseudoElement::Part; }
 
 private:
     explicit Selector(Vector<CompoundSelector>&&);

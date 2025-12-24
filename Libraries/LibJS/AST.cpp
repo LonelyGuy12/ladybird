@@ -230,7 +230,7 @@ ThrowCompletionOr<ClassElement::ClassValue> ClassField::class_element_evaluation
             FunctionParsingInsights parsing_insights;
             parsing_insights.uses_this_from_environment = true;
             parsing_insights.uses_this = true;
-            auto function = ECMAScriptFunctionObject::create(realm, "field"_utf16_fly_string, ByteString::empty(), *function_code, FunctionParameters::empty(), 0, {}, vm.lexical_environment(), vm.running_execution_context().private_environment, FunctionKind::Normal, true, parsing_insights, false, property_key_or_private_name);
+            auto function = ECMAScriptFunctionObject::create(realm, "field"_utf16_fly_string, Utf16View {}, *function_code, FunctionParameters::empty(), 0, {}, vm.lexical_environment(), vm.running_execution_context().private_environment, FunctionKind::Normal, true, parsing_insights, false, property_key_or_private_name);
             function->make_method(target);
             initializer = function;
         }
@@ -279,7 +279,7 @@ ThrowCompletionOr<ClassElement::ClassValue> StaticInitializer::class_element_eva
     FunctionParsingInsights parsing_insights;
     parsing_insights.uses_this_from_environment = true;
     parsing_insights.uses_this = true;
-    auto body_function = ECMAScriptFunctionObject::create(realm, {}, ByteString::empty(), *m_function_body, FunctionParameters::empty(), 0, m_function_body->local_variables_names(), lexical_environment, private_environment, FunctionKind::Normal, true, parsing_insights, false);
+    auto body_function = ECMAScriptFunctionObject::create(realm, {}, Utf16View {}, *m_function_body, FunctionParameters::empty(), 0, m_function_body->local_variables_names(), lexical_environment, private_environment, FunctionKind::Normal, true, parsing_insights, false);
 
     // 6. Perform MakeMethod(bodyFunction, homeObject).
     body_function->make_method(home_object);
@@ -306,11 +306,11 @@ ThrowCompletionOr<ECMAScriptFunctionObject*> ClassExpression::create_class_const
         if (super_class.is_null()) {
             proto_parent = nullptr;
         } else if (!super_class.is_constructor()) {
-            return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueNotAConstructorOrNull, super_class.to_string_without_side_effects());
+            return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueNotAConstructorOrNull, super_class);
         } else {
             auto super_class_prototype = TRY(super_class.get(vm, vm.names.prototype));
             if (!super_class_prototype.is_null() && !super_class_prototype.is_object())
-                return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueInvalidPrototype, super_class_prototype.to_string_without_side_effects());
+                return vm.throw_completion<TypeError>(ErrorType::ClassExtendsValueInvalidPrototype, super_class_prototype);
 
             if (super_class_prototype.is_null())
                 proto_parent = nullptr;
@@ -801,7 +801,7 @@ void BindingPattern::dump(int indent) const
     }
 }
 
-FunctionNode::FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<LocalVariable> local_variables_names)
+FunctionNode::FunctionNode(RefPtr<Identifier const> name, Utf16View source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<LocalVariable> local_variables_names)
     : m_name(move(name))
     , m_source_text(move(source_text))
     , m_body(move(body))
@@ -1182,8 +1182,8 @@ void VariableDeclarator::dump(int indent) const
 
 void ObjectProperty::dump(int indent) const
 {
-    ASTNode::dump(indent);
-
+    print_indent(indent);
+    outln("ObjectProperty (is_method: {})", is_method());
     if (m_property_type == Type::Spread) {
         print_indent(indent + 1);
         outln("...Spreading");

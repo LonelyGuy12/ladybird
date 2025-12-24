@@ -93,6 +93,8 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(frame, "frame")                                           \
     __ENUMERATE_HTML_ATTRIBUTE(frameborder, "frameborder")                               \
     __ENUMERATE_HTML_ATTRIBUTE(headers, "headers")                                       \
+    __ENUMERATE_HTML_ATTRIBUTE(headingoffset, "headingoffset")                           \
+    __ENUMERATE_HTML_ATTRIBUTE(headingreset, "headingreset")                             \
     __ENUMERATE_HTML_ATTRIBUTE(height, "height")                                         \
     __ENUMERATE_HTML_ATTRIBUTE(hidden, "hidden")                                         \
     __ENUMERATE_HTML_ATTRIBUTE(high, "high")                                             \
@@ -253,6 +255,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(onwheel, "onwheel")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(open, "open")                                             \
     __ENUMERATE_HTML_ATTRIBUTE(optimum, "optimum")                                       \
+    __ENUMERATE_HTML_ATTRIBUTE(part, "part")                                             \
     __ENUMERATE_HTML_ATTRIBUTE(pattern, "pattern")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(paused, "paused")                                         \
     __ENUMERATE_HTML_ATTRIBUTE(ping, "ping")                                             \

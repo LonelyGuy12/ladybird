@@ -52,9 +52,9 @@ public:
 private:
     PythonPackageManager() = default;
 
-    // Get the base path for the virtual environment
-    // Returns bundle path on macOS app builds, /tmp for development
-    String get_venv_base_path() const;
+    // Get the Python home path
+    // Returns bundled Python path on macOS app builds, Homebrew for development
+    String get_python_home_path() const;
 
     // Cache of installed packages
     HashMap<String, Vector<PythonPackage>> m_installed_packages;

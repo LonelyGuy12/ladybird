@@ -50,14 +50,16 @@
 #include <LibWeb/XPath/XPath.h>
 
 namespace Web::Bindings {
+
 class PythonDOMWrapperCache;
+
 }
 
 namespace Web::DOM {
 
 enum class QuirksMode {
-	No,
-	Limited,
+    No,
+    Limited,
     Yes
 };
 
@@ -641,8 +643,12 @@ public:
     String domain() const;
     WebIDL::ExceptionOr<void> set_domain(String const&);
 
-    auto& pending_scroll_event_targets() { return m_pending_scroll_event_targets; }
-    auto& pending_scrollend_event_targets() { return m_pending_scrollend_event_targets; }
+    struct PendingScrollEvent {
+        GC::Ref<EventTarget> event_target;
+        FlyString event_type;
+        bool operator==(PendingScrollEvent const&) const = default;
+    };
+    Vector<PendingScrollEvent>& pending_scroll_events() { return m_pending_scroll_events; }
 
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#completely-loaded
     bool is_completely_loaded() const;
@@ -968,6 +974,8 @@ public:
     CSS::StyleScope const& style_scope() const { return m_style_scope; }
     CSS::StyleScope& style_scope() { return m_style_scope; }
 
+    void exit_pointer_lock();
+
 protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
@@ -975,9 +983,12 @@ protected:
     Document(JS::Realm&, URL::URL const&, TemporaryDocumentForFragmentParsing = TemporaryDocumentForFragmentParsing::No);
 
 private:
+    // ^JS::Object
+    virtual bool is_dom_document() const final { return true; }
+
     // Python package management
     bool m_python_packages_loaded { false };
-    
+
     // ^HTML::GlobalEventHandlers
     virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return GC::Ptr<EventTarget>(static_cast<EventTarget&>(*this)); }
     virtual void finalize() override final;
@@ -1139,11 +1150,9 @@ private:
 
     HashTable<ViewportClient*> m_viewport_clients;
 
-    // https://w3c.github.io/csswg-drafts/cssom-view-1/#document-pending-scroll-event-targets
-    Vector<GC::Ref<EventTarget>> m_pending_scroll_event_targets;
-
-    // https://w3c.github.io/csswg-drafts/cssom-view-1/#document-pending-scrollend-event-targets
-    Vector<GC::Ref<EventTarget>> m_pending_scrollend_event_targets;
+    // https://drafts.csswg.org/cssom-view-1/#document-pending-scroll-events
+    // Each Document has an associated list of pending scroll events, which stores pairs of (EventTarget, DOMString), initially empty.
+    Vector<PendingScrollEvent> m_pending_scroll_events;
 
     // Used by evaluate_media_queries_and_report_changes().
     bool m_needs_media_query_evaluation { false };

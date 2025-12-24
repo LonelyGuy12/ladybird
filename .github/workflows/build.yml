@@ -341,6 +341,82 @@ jobs:
             echo "Python integration will not be available"
           fi
           
+          # Bundle Python framework for self-contained distribution
+          echo ""
+          echo "=== Bundling Python framework ===" 
+          PYTHON_SRC="/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
+          PYTHON_DEST="$APP_BUNDLE/Contents/Resources/bundled_python"
+          
+          if [ -d "$PYTHON_SRC" ]; then
+            echo "Copying Python framework to Resources/bundled_python..."
+            # Remove any existing bundled Python to avoid permission errors
+            rm -rf "$PYTHON_DEST"
+            # Copy framework CONTENTS, not the directory itself
+            # Use -L to follow symlinks (framework has symlinks to Versions/Current)
+            mkdir -p "$PYTHON_DEST"
+            cp -RL "$PYTHON_SRC"/* "$PYTHON_DEST"/
+            
+            # Verify copy succeeded
+            echo "Verifying Python framework copy..."
+            ls -la "$PYTHON_DEST" || echo "ERROR: Copy failed"
+            
+            # Create site-packages directory - ensure parent dirs exist
+            echo "Creating site-packages directory..."
+            SITE_PACKAGES="$PYTHON_DEST/Versions/3.14/lib/python3.14/site-packages"
+            if [ ! -d "$PYTHON_DEST/Versions/3.14/lib" ]; then
+              echo "WARNING: lib directory not found, checking actual structure..."
+              find "$PYTHON_DEST" -name "lib" -type d | head -5
+            fi
+            mkdir -p "$SITE_PACKAGES" || echo "ERROR: Failed to create site-packages"
+            
+            # Remove broken Python.app and create wrapper with recursion detection
+            echo "Creating Python.app wrapper..."
+            rm -rf "$PYTHON_DEST/Versions/3.14/Resources/Python.app"
+            mkdir -p "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS"
+            
+            printf '#!/bin/bash\n[ -n "$LADYBIRD_PYTHON_APP_GUARD" ] && exit 0\nexport LADYBIRD_PYTHON_APP_GUARD=1\nexec "$(cd "$(dirname "$0")" && pwd)/../../../../bin/python3.14" "$@"\n' > "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+            chmod +x "$PYTHON_DEST/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+            
+            
+            # Fix dylib reference and re-sign the binary
+            echo "Fixing Python dylib references..."
+            PYTHON_BIN="$PYTHON_DEST/Versions/3.14/bin/python3.14"
+            
+            # Extract old dylib path
+            OLD_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | grep -v "^@" | cut -d' ' -f1)
+            
+            echo "Current dylib: $OLD_DYLIB"
+            
+            if [ -n "$OLD_DYLIB" ]; then
+              # Use @loader_path (relative to binary location)
+              # From bin/python3.14: ../Python resolves to Versions/3.14/Python
+              echo "Fixing: $OLD_DYLIB -> @loader_path/../Python"
+              install_name_tool -change "$OLD_DYLIB" "@loader_path/../Python" "$PYTHON_BIN"
+              
+              # CRITICAL: Re-sign the binary after modification
+              # install_name_tool invalidates the code signature, causing Python to fail silently
+              echo "Re-signing python3.14 binary..."
+              codesign --force --sign - "$PYTHON_BIN"
+              
+              # Verify
+              NEW_DYLIB=$(otool -L "$PYTHON_BIN" | grep "Python" | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
+              echo "New dylib: $NEW_DYLIB"
+              echo "✅ Python dylib fixed and re-signed"
+            else
+              echo "⚠️  No Homebrew dylib found to fix"
+            fi
+            
+            # Install pip
+            echo "Installing pip..."
+            "$PYTHON_BIN" -m ensurepip --default-pip 2>/dev/null || echo "pip already installed"
+            
+            echo "✅ Python bundling complete!"
+            echo "Bundled Python size: $(du -sh "$PYTHON_DEST" | cut -f1)"
+          else
+            echo "⚠️ WARNING: Python framework not found at $PYTHON_SRC"
+            echo "Python will not be bundled"
+          fi
+          
           # Fix the broken symlink and copy actual libraries
           echo ""
           echo "=== Fixing library paths ==="

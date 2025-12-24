@@ -97,6 +97,7 @@ public:
     TextRendering text_rendering() const;
     CSSPixels text_underline_offset() const;
     TextUnderlinePosition text_underline_position() const;
+    Vector<BackgroundLayerData> background_layers() const;
     Length border_spacing_horizontal(Layout::Node const&) const;
     Length border_spacing_vertical(Layout::Node const&) const;
     CaptionSide caption_side() const;
@@ -208,14 +209,14 @@ public:
     Display display_before_box_type_transformation() const;
     void set_display_before_box_type_transformation(Display value);
 
-    static Vector<Transformation> transformations_for_style_value(StyleValue const& value);
-    Vector<Transformation> transformations() const;
+    static Vector<NonnullRefPtr<TransformationStyleValue const>> transformations_for_style_value(StyleValue const& value);
+    Vector<NonnullRefPtr<TransformationStyleValue const>> transformations() const;
     TransformBox transform_box() const;
     TransformOrigin transform_origin() const;
     TransformStyle transform_style() const;
-    Optional<Transformation> rotate() const;
-    Optional<Transformation> translate() const;
-    Optional<Transformation> scale() const;
+    RefPtr<TransformationStyleValue const> rotate() const;
+    RefPtr<TransformationStyleValue const> translate() const;
+    RefPtr<TransformationStyleValue const> scale() const;
     Optional<CSSPixels> perspective() const;
     Position perspective_origin() const;
 

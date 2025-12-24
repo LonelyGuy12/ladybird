@@ -39,6 +39,15 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework"
             "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python"
+        # Create Python.app wrapper - Python has hardcoded ref we can't remove
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS"
+        COMMAND bash -c "printf '#!/bin/bash\\n[ -n \"$$LADYBIRD_PYTHON_APP_GUARD\" ] && exit 0\\nexport LADYBIRD_PYTHON_APP_GUARD=1\\nexec \"$$(cd \"$$(dirname \"$$0\")\" && pwd)/../../../../bin/python3.14\" \"$$@\"\\n' > '$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python'"
+        COMMAND chmod +x "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+        # Fix Python dylib references (python3.14 → bundled Python dylib)
+        COMMAND ${CMAKE_COMMAND} -DBUNDLE_DIR="$<TARGET_BUNDLE_CONTENT_DIR:ladybird>" -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/FixPythonBundle.cmake"
+        # Install pip using ensurepip
+        COMMAND "$<TARGET_BUNDLE_CONTENT_DIR:ladybird>/Resources/bundled_python/Versions/3.14/bin/python3.14" -m ensurepip --default-pip || echo "ensurepip failed, pip may already be installed"
         COMMAND ${CMAKE_COMMAND} -E echo "Python bundled successfully into Resources"
         COMMENT "Bundling Python into Resources directory"
     )

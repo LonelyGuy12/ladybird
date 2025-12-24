@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2025, Andreas Kling <andreas@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,6 +15,8 @@
 #include <LibGC/WeakInlines.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Label.h>
+#include <LibJS/Bytecode/Operand.h>
+#include <LibJS/Bytecode/PropertyKeyTable.h>
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
@@ -37,14 +39,27 @@ struct PropertyLookupCache {
             ChangePropertyInPrototypeChain,
             GetPropertyInPrototypeChain,
         };
-        Type type { Type::Empty };
+        u32 property_offset { 0 };
+        u32 shape_dictionary_generation { 0 };
         GC::Weak<Shape> from_shape;
         GC::Weak<Shape> shape;
-        Optional<u32> property_offset;
         GC::Weak<Object> prototype;
         GC::Weak<PrototypeChainValidity> prototype_chain_validity;
-        Optional<u32> shape_dictionary_generation;
     };
+
+    void update(Entry::Type type, auto callback)
+    {
+        // First, move all entries one step back.
+        for (size_t i = entries.size() - 1; i >= 1; --i) {
+            types[i] = types[i - 1];
+            entries[i] = entries[i - 1];
+        }
+        types[0] = type;
+        entries[0] = {};
+        callback(entries[0]);
+    }
+
+    AK::Array<Entry::Type, max_number_of_shapes_to_remember> types;
     AK::Array<Entry, max_number_of_shapes_to_remember> entries;
 };
 
@@ -68,6 +83,7 @@ public:
     Executable(
         Vector<u8> bytecode,
         NonnullOwnPtr<IdentifierTable>,
+        NonnullOwnPtr<PropertyKeyTable>,
         NonnullOwnPtr<StringTable>,
         NonnullOwnPtr<RegexTable>,
         Vector<Value> constants,
@@ -85,6 +101,7 @@ public:
     Vector<GlobalVariableCache> global_variable_caches;
     NonnullOwnPtr<StringTable> string_table;
     NonnullOwnPtr<IdentifierTable> identifier_table;
+    NonnullOwnPtr<PropertyKeyTable> property_key_table;
     NonnullOwnPtr<RegexTable> regex_table;
     Vector<Value> constants;
 
@@ -110,10 +127,11 @@ public:
     size_t local_index_base { 0 };
     size_t argument_index_base { 0 };
 
-    Optional<IdentifierTableIndex> length_identifier;
+    Optional<PropertyKeyTableIndex> length_identifier;
 
     Utf16String const& get_string(StringTableIndex index) const { return string_table->get(index); }
     Utf16FlyString const& get_identifier(IdentifierTableIndex index) const { return identifier_table->get(index); }
+    PropertyKey const& get_property_key(PropertyKeyTableIndex index) const { return property_key_table->get(index); }
 
     Optional<Utf16FlyString const&> get_identifier(Optional<IdentifierTableIndex> const& index) const
     {
@@ -122,11 +140,13 @@ public:
         return get_identifier(*index);
     }
 
-    [[nodiscard]] Optional<ExceptionHandlers const&> exception_handlers_for_offset(size_t offset) const;
+    [[nodiscard]] COLD Optional<ExceptionHandlers const&> exception_handlers_for_offset(size_t offset) const;
 
     [[nodiscard]] UnrealizedSourceRange source_range_at(size_t offset) const;
 
     void dump() const;
+
+    [[nodiscard]] Operand original_operand_from_raw(u32) const;
 
 private:
     virtual void visit_edges(Visitor&) override;

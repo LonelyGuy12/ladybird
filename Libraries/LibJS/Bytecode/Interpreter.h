@@ -23,14 +23,13 @@ class InstructionStreamIterator;
 
 class JS_API Interpreter {
 public:
-    explicit Interpreter(VM&);
+    Interpreter();
     ~Interpreter();
 
     [[nodiscard]] Realm& realm() { return *m_running_execution_context->realm; }
     [[nodiscard]] Object& global_object() { return *m_running_execution_context->global_object; }
     [[nodiscard]] DeclarativeEnvironment& global_declarative_environment() { return *m_running_execution_context->global_declarative_environment; }
-    VM& vm() { return m_vm; }
-    VM const& vm() const { return m_vm; }
+    static VM& vm() { return VM::the(); }
 
     ThrowCompletionOr<Value> run(Script&, GC::Ptr<Environment> lexical_environment_override = nullptr);
     ThrowCompletionOr<Value> run(SourceTextModule&);
@@ -87,6 +86,8 @@ public:
         return get_identifier(*index);
     }
 
+    [[nodiscard]] PropertyKey const& get_property_key(PropertyKeyTableIndex) const;
+
 private:
     void run_bytecode(size_t entry_point);
 
@@ -94,9 +95,8 @@ private:
         ExitFromExecutable,
         ContinueInThisExecutable,
     };
-    [[nodiscard]] HandleExceptionResponse handle_exception(u32& program_counter, Value exception);
+    [[nodiscard]] COLD HandleExceptionResponse handle_exception(u32& program_counter, Value exception);
 
-    VM& m_vm;
     ExecutionContext* m_running_execution_context { nullptr };
 };
 

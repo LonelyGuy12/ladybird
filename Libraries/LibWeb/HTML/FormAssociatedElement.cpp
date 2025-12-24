@@ -267,13 +267,18 @@ Utf16String FormAssociatedElement::validation_message() const
     if (!is_candidate_for_constraint_validation() || satisfies_its_constraints())
         return {};
 
-    // FIXME:
     // 2. Return a suitably localized message that the user agent would show the user if this were the only form
     //    control with a validity constraint problem. If the user agent would not actually show a textual message in
     //    such a situation (e.g., it would show a graphical cue instead), then return a suitably localized message that
-    //    expresses (one or more of) the validity constraint(s) that the control does not satisfy. If the element is a
-    //    candidate for constraint validation and is suffering from a custom error, then the custom validity error
-    //    message should be present in the return value.
+    //    expresses (one or more of) the validity constraint(s) that the control does not satisfy.
+
+    // If the element is a candidate for constraint validation and is suffering from a custom error, then
+    // the custom validity error message should be present in the return value.
+    if (suffering_from_a_custom_error()) {
+        return Utf16String::from_utf8(m_custom_validity_error_message);
+    }
+
+    // FIXME: Return more specific localized messages
     return "Invalid form"_utf16;
 }
 
@@ -908,10 +913,10 @@ void FormAssociatedTextControlElement::collapse_selection_to_offset(size_t posit
 void FormAssociatedTextControlElement::selection_was_changed()
 {
     auto& element = form_associated_element_to_html_element();
-    if (is<HTML::HTMLInputElement>(element)) {
-        schedule_a_selectionchange_event(static_cast<HTML::HTMLInputElement&>(element), element.document());
-    } else if (is<HTML::HTMLTextAreaElement>(element)) {
-        schedule_a_selectionchange_event(static_cast<HTML::HTMLTextAreaElement&>(element), element.document());
+    if (auto* input_element = as_if<HTMLInputElement>(element)) {
+        schedule_a_selectionchange_event(*input_element, element.document());
+    } else if (auto* text_area_element = as_if<HTMLTextAreaElement>(element)) {
+        schedule_a_selectionchange_event(*text_area_element, element.document());
     } else {
         VERIFY_NOT_REACHED();
     }
@@ -922,6 +927,7 @@ void FormAssociatedTextControlElement::selection_was_changed()
     auto* text_paintable = text_node->paintable();
     if (!text_paintable)
         return;
+
     if (m_selection_start == m_selection_end) {
         text_paintable->set_selection_state(Painting::Paintable::SelectionState::None);
         text_node->document().reset_cursor_blink_cycle();
@@ -1102,12 +1108,12 @@ void FormAssociatedTextControlElement::decrement_cursor_position_to_previous_lin
 
 GC::Ptr<DOM::Position> FormAssociatedTextControlElement::cursor_position() const
 {
-    auto const node = form_associated_element_to_text_node();
+    auto node = form_associated_element_to_text_node();
     if (!node)
         return nullptr;
-    if (m_selection_start == m_selection_end)
-        return DOM::Position::create(node->realm(), const_cast<DOM::Text&>(*node), m_selection_start);
-    return nullptr;
+    if (m_selection_start != m_selection_end)
+        return nullptr;
+    return DOM::Position::create(node->realm(), const_cast<DOM::Text&>(*node), m_selection_start);
 }
 
 GC::Ref<JS::Cell> FormAssociatedTextControlElement::as_cell()

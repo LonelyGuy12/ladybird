@@ -142,7 +142,36 @@ Parser::ParseErrorOr<NonnullRefPtr<Selector>> Parser::parse_complex_selector(Tok
     if (compound_selectors.is_empty())
         return ParseError::SyntaxError;
 
-    return Selector::create(move(compound_selectors));
+    auto parsed_selector = Selector::create(move(compound_selectors));
+
+    // The rest of our code assumes selectors have at most 1 pseudo-element, in the final compound selector,
+    // so reject anything else for now.
+    // FIXME: Remove this once we support them elsewhere.
+    for (auto i = 0u; i < parsed_selector->compound_selectors().size() - 1; ++i) {
+        for (auto const& simple_selector : parsed_selector->compound_selectors()[i].simple_selectors) {
+            if (simple_selector.type == Selector::SimpleSelector::Type::PseudoElement) {
+                ErrorReporter::the().report(InvalidSelectorError {
+                    .value_string = parsed_selector->serialize(),
+                    .description = "Pseudo elements before the final compound-selector are not yet supported."_string,
+                });
+                return ParseError::SyntaxError;
+            }
+        }
+    }
+    auto pseudo_element_count = 0;
+    for (auto const& simple_selector : parsed_selector->compound_selectors().last().simple_selectors) {
+        if (simple_selector.type == Selector::SimpleSelector::Type::PseudoElement)
+            ++pseudo_element_count;
+    }
+    if (pseudo_element_count > 1) {
+        ErrorReporter::the().report(InvalidSelectorError {
+            .value_string = parsed_selector->serialize(),
+            .description = "Multiple pseudo elements in a selector is not yet supported."_string,
+        });
+        return ParseError::SyntaxError;
+    }
+
+    return parsed_selector;
 }
 
 Parser::ParseErrorOr<Optional<Selector::CompoundSelector>> Parser::parse_compound_selector(TokenStream<ComponentValue>& tokens)
@@ -534,6 +563,24 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
                     value = Selector::create(move(compound_selectors));
                     break;
                 }
+                case PseudoElementMetadata::ParameterType::IdentList: {
+                    // <ident>+
+                    Selector::PseudoElementSelector::IdentList idents;
+                    while (function_tokens.has_next_token()) {
+                        if (!function_tokens.next_token().is(Token::Type::Ident)) {
+                            ErrorReporter::the().report(InvalidPseudoClassOrElementError {
+                                .name = MUST(String::formatted("::{}", pseudo_name)),
+                                .value_string = name_token.to_string(),
+                                .description = "Contains invalid <ident>."_string,
+                            });
+                            return ParseError::SyntaxError;
+                        }
+                        idents.append(function_tokens.consume_a_token().token().ident());
+                        function_tokens.discard_whitespace();
+                    }
+                    value = move(idents);
+                    break;
+                }
                 case PseudoElementMetadata::ParameterType::PTNameSelector: {
                     // <pt-name-selector> = '*' | <custom-ident>
                     // https://drafts.csswg.org/css-view-transitions-1/#typedef-pt-name-selector
@@ -622,8 +669,6 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
 
     if (pseudo_class_token.is(Token::Type::Ident)) {
         auto pseudo_name = pseudo_class_token.token().ident();
-        if (has_ignored_vendor_prefix(pseudo_name))
-            return ParseError::IncludesIgnoredVendorPrefix;
 
         auto make_pseudo_class_selector = [](auto pseudo_class) {
             return Selector::SimpleSelector {
@@ -643,6 +688,9 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
             }
             return make_pseudo_class_selector(pseudo_class.value());
         }
+
+        if (has_ignored_vendor_prefix(pseudo_name))
+            return ParseError::IncludesIgnoredVendorPrefix;
 
         // Single-colon syntax allowed for ::after, ::before, ::first-letter and ::first-line for compatibility.
         // https://www.w3.org/TR/selectors/#pseudo-element-syntax

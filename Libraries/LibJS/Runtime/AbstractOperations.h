@@ -51,7 +51,7 @@ Object* create_mapped_arguments_object(VM&, FunctionObject&, NonnullRefPtr<Funct
 struct JS_API DisposeCapability {
     void visit_edges(GC::Cell::Visitor&) const;
 
-    Vector<DisposableResource> disposable_resource_stack; // [[DisposableResourceStack]]
+    OwnPtr<Vector<DisposableResource>> disposable_resource_stack; // [[DisposableResourceStack]]
 };
 
 // 2.1.2 DisposableResource Records, https://tc39.es/proposal-explicit-resource-management/#sec-disposableresource-records
@@ -212,7 +212,7 @@ ThrowCompletionOr<GroupsType> group_by(VM& vm, Value items, Value callback_funct
 
     // 2. If IsCallable(callbackfn) is false, throw a TypeError exception.
     if (!callback_function.is_function())
-        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, callback_function.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAFunction, callback_function);
 
     // 3. Let groups be a new empty List.
     GroupsType groups;

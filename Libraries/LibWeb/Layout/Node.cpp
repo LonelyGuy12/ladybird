@@ -9,15 +9,14 @@
 #include <AK/Demangle.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
-#include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
-#include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
@@ -81,27 +80,37 @@ bool Node::can_contain_boxes_with_position_absolute() const
     if (!is<Box>(*this))
         return false;
 
-    if (computed_values().position() != CSS::Positioning::Static)
+    auto const& computed_values = this->computed_values();
+
+    if (computed_values.position() != CSS::Positioning::Static)
         return true;
 
     if (is<Viewport>(*this))
         return true;
 
+    // https://drafts.csswg.org/css-will-change/#will-change
+    // If any non-initial value of a property would cause the element to generate a containing block for absolutely
+    // positioned elements, specifying that property in will-change must cause the element to generate a containing
+    // block for absolutely positioned elements.
+    auto will_change_property = [&](CSS::PropertyID property_id) {
+        return computed_values.will_change().has_property(property_id);
+    };
+
     // https://w3c.github.io/csswg-drafts/css-transforms-1/#propdef-transform
     // Any computed value other than none for the transform affects containing block and stacking context
-    if (!computed_values().transformations().is_empty())
+    if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
         return true;
-    if (computed_values().translate().has_value())
+    if (computed_values.translate() || will_change_property(CSS::PropertyID::Translate))
         return true;
-    if (computed_values().rotate().has_value())
+    if (computed_values.rotate() || will_change_property(CSS::PropertyID::Rotate))
         return true;
-    if (computed_values().scale().has_value())
+    if (computed_values.scale() || will_change_property(CSS::PropertyID::Scale))
         return true;
 
     // https://drafts.csswg.org/css-transforms-2/#propdef-perspective
     // The use of this property with any value other than 'none' establishes a stacking context. It also establishes
     // a containing block for all descendants, just like the 'transform' property does.
-    if (computed_values().perspective().has_value())
+    if (computed_values.perspective().has_value() || will_change_property(CSS::PropertyID::Perspective))
         return true;
 
     // https://drafts.csswg.org/css-contain-2/#containment-types
@@ -109,7 +118,7 @@ bool Node::can_contain_boxes_with_position_absolute() const
     //    containing block.
     // 4. The paint containment box establishes an absolute positioning containing block and a fixed positioning
     //    containing block.
-    if (has_layout_containment() || has_paint_containment())
+    if (has_layout_containment() || has_paint_containment() || will_change_property(CSS::PropertyID::Contain))
         return true;
 
     return false;
@@ -221,13 +230,13 @@ bool Node::establishes_stacking_context() const
     if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
         return true;
 
-    if (computed_values.translate().has_value() || will_change_property(CSS::PropertyID::Translate))
+    if (computed_values.translate() || will_change_property(CSS::PropertyID::Translate))
         return true;
 
-    if (computed_values.rotate().has_value() || will_change_property(CSS::PropertyID::Rotate))
+    if (computed_values.rotate() || will_change_property(CSS::PropertyID::Rotate))
         return true;
 
-    if (computed_values.scale().has_value() || will_change_property(CSS::PropertyID::Scale))
+    if (computed_values.scale() || will_change_property(CSS::PropertyID::Scale))
         return true;
 
     // Element that is a child of a flex container, with z-index value other than auto.
@@ -412,137 +421,15 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_vertical_align(computed_style.vertical_align());
 
-    {
-        // FIXME: Use `ComputedProperties::assemble_coordinated_value_list()` for this
-        auto const& attachments = computed_style.property(CSS::PropertyID::BackgroundAttachment);
-        auto const& clips = computed_style.property(CSS::PropertyID::BackgroundClip);
-        auto const& images = computed_style.property(CSS::PropertyID::BackgroundImage);
-        auto const& origins = computed_style.property(CSS::PropertyID::BackgroundOrigin);
-        auto const& x_positions = computed_style.property(CSS::PropertyID::BackgroundPositionX);
-        auto const& y_positions = computed_style.property(CSS::PropertyID::BackgroundPositionY);
-        auto const& repeats = computed_style.property(CSS::PropertyID::BackgroundRepeat);
-        auto const& sizes = computed_style.property(CSS::PropertyID::BackgroundSize);
-        auto const& background_blend_modes = computed_style.property(CSS::PropertyID::BackgroundBlendMode);
+    auto background_layers = computed_style.background_layers();
 
-        auto count_layers = [](auto const& maybe_style_value) -> size_t {
-            if (maybe_style_value.is_value_list())
-                return maybe_style_value.as_value_list().size();
-            else
-                return 1;
-        };
-
-        auto value_for_layer = [](auto const& style_value, size_t layer_index) -> RefPtr<CSS::StyleValue const> {
-            if (style_value.is_value_list())
-                return style_value.as_value_list().value_at(layer_index, true);
-            return style_value;
-        };
-
-        size_t layer_count = 1;
-        layer_count = max(layer_count, count_layers(attachments));
-        layer_count = max(layer_count, count_layers(clips));
-        layer_count = max(layer_count, count_layers(images));
-        layer_count = max(layer_count, count_layers(origins));
-        layer_count = max(layer_count, count_layers(x_positions));
-        layer_count = max(layer_count, count_layers(y_positions));
-        layer_count = max(layer_count, count_layers(repeats));
-        layer_count = max(layer_count, count_layers(sizes));
-
-        Vector<CSS::BackgroundLayerData> layers;
-        layers.ensure_capacity(layer_count);
-
-        for (size_t layer_index = 0; layer_index < layer_count; layer_index++) {
-            CSS::BackgroundLayerData layer;
-
-            if (auto image_value = value_for_layer(images, layer_index); image_value) {
-                if (image_value->is_abstract_image()) {
-                    layer.background_image = image_value->as_abstract_image();
-                    const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
-                }
-            }
-
-            if (auto attachment_value = value_for_layer(attachments, layer_index); attachment_value && attachment_value->is_keyword()) {
-                switch (attachment_value->to_keyword()) {
-                case CSS::Keyword::Fixed:
-                    layer.attachment = CSS::BackgroundAttachment::Fixed;
-                    break;
-                case CSS::Keyword::Local:
-                    layer.attachment = CSS::BackgroundAttachment::Local;
-                    break;
-                case CSS::Keyword::Scroll:
-                    layer.attachment = CSS::BackgroundAttachment::Scroll;
-                    break;
-                default:
-                    break;
-                }
-            }
-
-            auto as_box = [](auto keyword) {
-                switch (keyword) {
-                case CSS::Keyword::BorderBox:
-                    return CSS::BackgroundBox::BorderBox;
-                case CSS::Keyword::ContentBox:
-                    return CSS::BackgroundBox::ContentBox;
-                case CSS::Keyword::PaddingBox:
-                    return CSS::BackgroundBox::PaddingBox;
-                case CSS::Keyword::Text:
-                    return CSS::BackgroundBox::Text;
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-            };
-
-            if (auto origin_value = value_for_layer(origins, layer_index); origin_value && origin_value->is_keyword()) {
-                layer.origin = as_box(origin_value->to_keyword());
-            }
-
-            if (auto clip_value = value_for_layer(clips, layer_index); clip_value && clip_value->is_keyword()) {
-                layer.clip = as_box(clip_value->to_keyword());
-            }
-
-            if (auto position_value = value_for_layer(x_positions, layer_index); position_value && position_value->is_edge()) {
-                auto& position = position_value->as_edge();
-                layer.position_edge_x = position.edge().value_or(CSS::PositionEdge::Left);
-                layer.position_offset_x = position.offset();
-            }
-
-            if (auto position_value = value_for_layer(y_positions, layer_index); position_value && position_value->is_edge()) {
-                auto& position = position_value->as_edge();
-                layer.position_edge_y = position.edge().value_or(CSS::PositionEdge::Top);
-                layer.position_offset_y = position.offset();
-            };
-
-            if (auto size_value = value_for_layer(sizes, layer_index); size_value) {
-                if (size_value->is_background_size()) {
-                    auto& size = size_value->as_background_size();
-                    layer.size_type = CSS::BackgroundSize::LengthPercentage;
-                    layer.size_x = CSS::LengthPercentageOrAuto::from_style_value(size.size_x());
-                    layer.size_y = CSS::LengthPercentageOrAuto::from_style_value(size.size_y());
-                } else if (size_value->is_keyword()) {
-                    switch (size_value->to_keyword()) {
-                    case CSS::Keyword::Contain:
-                        layer.size_type = CSS::BackgroundSize::Contain;
-                        break;
-                    case CSS::Keyword::Cover:
-                        layer.size_type = CSS::BackgroundSize::Cover;
-                        break;
-                    default:
-                        break;
-                    }
-                }
-            }
-
-            if (auto repeat_value = value_for_layer(repeats, layer_index); repeat_value && repeat_value->is_repeat_style()) {
-                layer.repeat_x = repeat_value->as_repeat_style().repeat_x();
-                layer.repeat_y = repeat_value->as_repeat_style().repeat_y();
-            }
-
-            layer.blend_mode = CSS::keyword_to_mix_blend_mode(value_for_layer(background_blend_modes, layer_index)->to_keyword()).value_or(CSS::MixBlendMode::Normal);
-
-            layers.append(move(layer));
-        }
-
-        computed_values.set_background_layers(move(layers));
+    for (auto const& layer : background_layers) {
+        if (layer.background_image)
+            const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
     }
+
+    computed_values.set_background_layers(move(background_layers));
+
     computed_values.set_background_color(computed_style.color_or_fallback(CSS::PropertyID::BackgroundColor, color_resolution_context, CSS::InitialValues::background_color()));
 
     computed_values.set_box_sizing(computed_style.box_sizing());
@@ -685,14 +572,14 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_box_shadow(computed_style.box_shadow(*this));
 
-    if (auto rotate_value = computed_style.rotate(); rotate_value.has_value())
-        computed_values.set_rotate(rotate_value.release_value());
+    if (auto rotate_value = computed_style.rotate())
+        computed_values.set_rotate(rotate_value.release_nonnull());
 
-    if (auto translate_value = computed_style.translate(); translate_value.has_value())
-        computed_values.set_translate(translate_value.release_value());
+    if (auto translate_value = computed_style.translate())
+        computed_values.set_translate(translate_value.release_nonnull());
 
-    if (auto scale_value = computed_style.scale(); scale_value.has_value())
-        computed_values.set_scale(scale_value.release_value());
+    if (auto scale_value = computed_style.scale())
+        computed_values.set_scale(scale_value.release_nonnull());
 
     computed_values.set_transformations(computed_style.transformations());
     computed_values.set_transform_box(computed_style.transform_box());
@@ -717,8 +604,14 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         border.color = computed_style.color_or_fallback(color_property, color_resolution_context, computed_values.color());
         border.line_style = computed_style.line_style(style_property);
 
-        // FIXME: Interpolation can cause negative values - we clamp here but should instead clamp as part of interpolation
-        border.width = max(CSSPixels { 0 }, computed_style.length(width_property).absolute_length_to_px());
+        // If the border-style corresponding to a given border-width is none or hidden, then the used width is 0.
+        // https://drafts.csswg.org/css-backgrounds/#border-width
+        if (border.line_style == CSS::LineStyle::None || border.line_style == CSS::LineStyle::Hidden) {
+            border.width = 0;
+        } else {
+            // FIXME: Interpolation can cause negative values - we clamp here but should instead clamp as part of interpolation
+            border.width = max(CSSPixels { 0 }, computed_style.length(width_property).absolute_length_to_px());
+        }
     };
 
     do_border_style(computed_values.border_left(), CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor, CSS::PropertyID::BorderLeftStyle);

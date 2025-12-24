@@ -57,19 +57,12 @@ if (APPLE)
     set(contents_dir \${CMAKE_INSTALL_PREFIX}/bundle/Ladybird.app/Contents)
     file(COPY \${lib_dir} DESTINATION \${contents_dir})
     
+    
     # Bundle Python.framework for self-contained Python integration
-    if (EXISTS /opt/homebrew/opt/python@3.14/Frameworks/Python.framework)
-      message(STATUS \"Bundling Python.framework into app bundle\")
-      file(COPY /opt/homebrew/opt/python@3.14/Frameworks/Python.framework
-           DESTINATION \${contents_dir}/Frameworks
-           PATTERN \"*.pyc\" EXCLUDE
-           PATTERN \"__pycache__\" EXCLUDE
-           PATTERN \"test\" EXCLUDE
-      )
-    else()
-      message(WARNING \"Python framework not found at /opt/homebrew/opt/python@3.14 - Python will not be bundled\")
-    endif()
-  "
+    execute_process(COMMAND \${CMAKE_COMMAND} 
+        -DCONTENTS_DIR=\\${contents_dir}
+        -P \${CMAKE_CURRENT_SOURCE_DIR}/cmake/BundlePython.cmake)
+"
             COMPONENT ladybird_Runtime)
 endif()
 

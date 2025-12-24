@@ -12,6 +12,7 @@
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibUnicode/CharacterTypes.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Position.h>
@@ -153,12 +154,12 @@ PaintableBox::ScrollHandled PaintableBox::set_scroll_offset(CSSPixelPoint offset
 
     GC::Ref<DOM::EventTarget> const event_target = *dom_node();
 
-    // 3. If the element is already in doc’s pending scroll event targets, abort these steps.
-    if (document.pending_scroll_event_targets().contains_slow(event_target))
+    // 3. If (element, "scroll") is already in doc’s pending scroll events, abort these steps.
+    if (document.pending_scroll_events().contains_slow(DOM::Document::PendingScrollEvent { event_target, HTML::EventNames::scroll }))
         return ScrollHandled::Yes;
 
-    // 4. Append the element to doc’s pending scroll event targets.
-    document.pending_scroll_event_targets().append(*dom_node());
+    // 4. Append (element, "scroll") to doc’s pending scroll events.
+    document.pending_scroll_events().append({ event_target, HTML::EventNames::scroll });
 
     set_needs_display(InvalidateDisplayList::No);
     return ScrollHandled::Yes;
@@ -709,8 +710,8 @@ void PaintableBox::clear_clip_overflow_rect(DisplayListRecordingContext& context
 
 void paint_cursor_if_needed(DisplayListRecordingContext& context, TextPaintable const& paintable, PaintableFragment const& fragment)
 {
-    auto const& navigable = *paintable.navigable();
     auto const& document = paintable.document();
+    auto const& navigable = *document.navigable();
 
     if (!navigable.is_focused())
         return;
@@ -731,8 +732,8 @@ void paint_cursor_if_needed(DisplayListRecordingContext& context, TextPaintable 
 
     auto active_element = document.active_element();
     auto active_element_is_editable = false;
-    if (auto* text_control = as_if<HTML::FormAssociatedTextControlElement>(active_element); text_control && text_control->is_mutable())
-        active_element_is_editable = true;
+    if (auto* text_control = as_if<HTML::FormAssociatedTextControlElement>(active_element))
+        active_element_is_editable = text_control->is_mutable();
 
     auto dom_node = fragment.layout_node().dom_node();
     if (!dom_node || (!dom_node->is_editable() && !active_element_is_editable))
@@ -742,22 +743,9 @@ void paint_cursor_if_needed(DisplayListRecordingContext& context, TextPaintable 
     if (caret_color.alpha() == 0)
         return;
 
-    auto fragment_rect = fragment.absolute_rect();
-    auto text = fragment.text();
+    auto cursor_rect = fragment.range_rect(paintable.selection_state(), cursor_position->offset(), cursor_position->offset());
+    VERIFY(cursor_rect.width() == 1);
 
-    auto const& font = fragment.glyph_run() ? fragment.glyph_run()->font() : fragment.layout_node().first_available_font();
-    auto cursor_offset = font.width(text.substring_view(0, cursor_position->offset() - fragment.start_offset()));
-
-    auto font_metrics = font.pixel_metrics();
-
-    auto cursor_height = font_metrics.ascent + font_metrics.descent;
-
-    CSSPixelRect cursor_rect {
-        fragment_rect.x() + CSSPixels::nearest_value_for(cursor_offset),
-        fragment_rect.top() + fragment.baseline() - CSSPixels::nearest_value_for(font_metrics.ascent),
-        1,
-        CSSPixels::nearest_value_for(cursor_height)
-    };
     auto cursor_device_rect = context.rounded_device_rect(cursor_rect).to_type<int>();
 
     context.display_list_recorder().fill_rect(cursor_device_rect, caret_color);
@@ -1549,14 +1537,14 @@ void PaintableBox::resolve_paint_properties()
     auto const& rotate = computed_values.rotate();
     auto const& scale = computed_values.scale();
     auto matrix = Gfx::FloatMatrix4x4::identity();
-    if (translate.has_value())
+    if (translate)
         matrix = matrix * translate->to_matrix(*this).release_value();
-    if (rotate.has_value())
+    if (rotate)
         matrix = matrix * rotate->to_matrix(*this).release_value();
-    if (scale.has_value())
+    if (scale)
         matrix = matrix * scale->to_matrix(*this).release_value();
     for (auto const& transform : transformations)
-        matrix = matrix * transform.to_matrix(*this).release_value();
+        matrix = matrix * transform->to_matrix(*this).release_value();
     set_transform(matrix);
 
     auto const& transform_origin = computed_values.transform_origin();
@@ -1581,7 +1569,8 @@ void PaintableBox::resolve_paint_properties()
         // 3. Multiply by the matrix that would be obtained from the 'perspective()' transform function, where the
         //    length is provided by the value of the perspective property
         // NB: Length values less than 1px being clamped to 1px is handled by the perspective() function already.
-        m_perspective_matrix = m_perspective_matrix.value() * CSS::Transformation(CSS::TransformFunction::Perspective, Vector<CSS::TransformValue>({ CSS::TransformValue(CSS::Length::make_px(perspective.value())) })).to_matrix({}).release_value();
+        // FIXME: Create the matrix directly.
+        m_perspective_matrix = m_perspective_matrix.value() * CSS::TransformationStyleValue::create(CSS::PropertyID::Transform, CSS::TransformFunction::Perspective, CSS::StyleValueVector { CSS::LengthStyleValue::create(CSS::Length::make_px(perspective.value())) })->to_matrix({}).release_value();
 
         // 4. Translate by the negated computed X and Y values of 'perspective-origin'
         m_perspective_matrix = m_perspective_matrix.value() * Gfx::translation_matrix(Vector3<float>(-computed_x, -computed_y, 0));

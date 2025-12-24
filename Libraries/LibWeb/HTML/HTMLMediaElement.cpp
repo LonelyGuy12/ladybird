@@ -7,6 +7,7 @@
  */
 
 #include <LibJS/Runtime/Promise.h>
+#include <LibMedia/IncrementallyPopulatedStream.h>
 #include <LibMedia/PlaybackManager.h>
 #include <LibMedia/Sinks/DisplayingVideoSink.h>
 #include <LibMedia/Track.h>
@@ -1041,8 +1042,6 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::fetch_resource(URL::URL const& url_r
         Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input {};
 
         fetch_algorithms_input.process_response = [this, byte_range = move(byte_range), failure_callback = move(failure_callback)](auto response) mutable {
-            auto& realm = this->realm();
-
             // FIXME: If the response is CORS cross-origin, we must use its internal response to query any of its data. See:
             //        https://github.com/whatwg/html/issues/9355
             response = response->unsafe_response();
@@ -1058,44 +1057,42 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::fetch_resource(URL::URL const& url_r
                 return;
             }
 
+            m_media_data = Media::IncrementallyPopulatedStream::create_empty();
+            if (auto length = response->header_list()->extract_length(); length.template has<u64>())
+                m_media_data->set_expected_size(length.template get<u64>());
+
+            MUST(setup_playback_manager(move(failure_callback)));
+
             // 2. Let updateMedia be to queue a media element task given the media element to run the first appropriate steps from the media data processing
             //    steps list below. (A new task is used for this so that the work described below occurs relative to the appropriate media element event task
             //    source rather than using the networking task source.)
-            auto update_media = GC::create_function(heap(), [this, failure_callback = move(failure_callback)](ByteBuffer media_data) mutable {
+            auto update_media = GC::create_function(heap(), [this](ByteBuffer media_data) {
                 // 6. Update the media data with the contents of response's unsafe response obtained in this fashion. response can be CORS-same-origin or
                 //    CORS-cross-origin; this affects whether subtitles referenced in the media data are exposed in the API and, for video elements, whether
                 //    a canvas gets tainted when the video is drawn on it.
-                m_media_data = move(media_data);
+                m_media_data->append(move(media_data));
 
-                queue_a_media_element_task([this, failure_callback = move(failure_callback)]() mutable {
-                    process_media_data(move(failure_callback)).release_value_but_fixme_should_propagate_errors();
-
-                    // NOTE: The spec does not say exactly when to update the readyState attribute. Rather, it describes what
-                    //       each step requires, and leaves it up to the user agent to determine when those requirements are
-                    //       reached: https://html.spec.whatwg.org/multipage/media.html#ready-states
-                    //
-                    //       Since we fetch the entire response at once, if we reach here with successfully decoded video
-                    //       metadata, we have satisfied the HAVE_ENOUGH_DATA requirements. This logic will of course need
-                    //       to change if we fetch or process the media data in smaller chunks.
-                    if (m_ready_state == ReadyState::HaveMetadata)
-                        set_ready_state(ReadyState::HaveEnoughData);
+                queue_a_media_element_task([this] {
+                    process_media_data(FetchingStatus::Ongoing).release_value_but_fixme_should_propagate_errors();
                 });
             });
 
-            // FIXME: 3. Let processEndOfMedia be the following step: If the fetching process has completes without errors, including decoding the media data,
-            //           and if all of the data is available to the user agent without network access, then, the user agent must move on to the final step below.
-            //           This might never happen, e.g. when streaming an infinite resource such as web radio, or if the resource is longer than the user agent's
-            //           ability to cache data.
-
-            // 5. Otherwise, incrementally read response's body given updateMedia, processEndOfMedia, an empty algorithm, and global.
+            // 3. Let processEndOfMedia be the following step: If the fetching process has completes without errors, including decoding the media data,
+            //    and if all of the data is available to the user agent without network access, then, the user agent must move on to the final step below.
+            //    This might never happen, e.g. when streaming an infinite resource such as web radio, or if the resource is longer than the user agent's
+            //    ability to cache data.
+            auto process_end_of_media = GC::create_function(heap(), [this] {
+                m_media_data->close();
+                queue_a_media_element_task([this] {
+                    process_media_data(FetchingStatus::Complete).release_value_but_fixme_should_propagate_errors();
+                });
+            });
 
             VERIFY(response->body());
             auto empty_algorithm = GC::create_function(heap(), [](JS::Value) { });
 
-            // FIXME: We are "fully" reading the response here, rather than "incrementally". Memory concerns aside, this should be okay for now as we are
-            //        always setting byteRange to "entire resource". However, we should switch to incremental reads when that is implemented, and then
-            //        implement the processEndOfMedia step.
-            response->body()->fully_read(realm, update_media, empty_algorithm, GC::Ref { global });
+            // 5. Otherwise, incrementally read response's body given updateMedia, processEndOfMedia, an empty algorithm, and global.
+            response->body()->incrementally_read(update_media, process_end_of_media, empty_algorithm, GC::Ref { global });
         };
 
         m_fetch_controller = Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
@@ -1191,148 +1188,111 @@ void HTMLMediaElement::update_video_frame_and_timeline()
         paintable()->set_needs_display();
 }
 
-// https://html.spec.whatwg.org/multipage/media.html#media-data-processing-steps-list
-WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(String)> failure_callback)
+void HTMLMediaElement::on_audio_track_added(Media::Track const& track)
 {
     auto& realm = this->realm();
 
-    auto playback_manager_result = Media::PlaybackManager::try_create(m_media_data.bytes());
+    // 1. Create an AudioTrack object to represent the audio track.
+    auto audio_track = realm.create<AudioTrack>(realm, *this, track);
 
-    // -> If the media data cannot be fetched at all, due to network errors, causing the user agent to give up trying to fetch the resource
-    // -> If the media data can be fetched but is found by inspection to be in an unsupported format, or can otherwise not be rendered at all
-    if (playback_manager_result.is_error()) {
-        // 1. The user agent should cancel the fetching process.
-        m_fetch_controller->stop_fetch();
+    // 2. Update the media element's audioTracks attribute's AudioTrackList object with the new AudioTrack object.
+    m_audio_tracks->add_track({}, audio_track);
 
-        // 2. Abort this subalgorithm, returning to the resource selection algorithm.
-        failure_callback(MUST(String::from_utf8(playback_manager_result.error().description())));
-        return {};
+    // 3. Let enable be unknown.
+    auto enable = TriState::Unknown;
+
+    // 4. If either the media resource or the URL of the current media resource indicate a particular set of audio tracks to enable, or if
+    //    the user agent has information that would facilitate the selection of specific audio tracks to improve the user's experience, then:
+    //    if this audio track is one of the ones to enable, then set enable to true, otherwise, set enable to false.
+    if (auto preferred_audio_track = m_playback_manager->preferred_audio_track(); preferred_audio_track.has_value()) {
+        if (track == preferred_audio_track && !m_has_enabled_preferred_audio_track) {
+            enable = TriState::True;
+            m_has_enabled_preferred_audio_track = true;
+        } else {
+            enable = TriState::False;
+        }
     }
 
-    // NOTE: The spec is unclear on whether the following media resource track conditions should trigger multiple
-    //       times on one media resource, but it is implied to be possible by the start of the "Media elements"
-    //       section, where it says that a "media resource can have multiple audio and video tracks."
-    //       https://html.spec.whatwg.org/multipage/media.html#media-elements
-    //       Therefore, we enumerate all the available tracks into our VideoTrackList and AudioTrackList.
+    // 5. If enable is still unknown, then, if the media element does not yet have an enabled audio track, then set enable to true, otherwise,
+    //    set enable to false.
+    if (enable == TriState::Unknown)
+        enable = !m_audio_tracks->has_enabled_track() ? TriState::True : TriState::False;
 
-    m_playback_manager = playback_manager_result.release_value();
+    // 6. If enable is true, then enable this audio track, otherwise, do not enable this audio track.
+    if (enable == TriState::True)
+        audio_track->set_enabled(true);
 
-    m_playback_manager->on_playback_state_change = [weak_self = GC::Weak(*this)] {
-        if (weak_self)
-            weak_self->on_playback_manager_state_change();
-    };
+    // NB: According to https://dev.w3.org/html5/html-sourcing-inband-tracks/, kind should be set according to format, and the following criteria within
+    //     the specified formats.
+    // WebM:
+    //     - "main": the FlagDefault element is set on the track
+    //     - "translation": not first audio (video) track
+    // MP4:
+    //     - "main": first audio (video) track
+    //     - "translation": not first audio (video) track
+    // Though the behavior for WebM is not clear if its first track is not marked with FlagDefault, the idea here seems to be that the preferred
+    // track should be marked as "main", and the rest should be marked as "translation".
+    audio_track->set_kind(enable == TriState::True ? "main"_utf16 : "translation"_utf16);
 
+    // 7. Fire an event named addtrack at this AudioTrackList object, using TrackEvent, with the track attribute initialized to the new AudioTrack object.
+    TrackEventInit event_init {};
+    event_init.track = GC::make_root(audio_track);
+
+    auto event = TrackEvent::create(realm, EventNames::addtrack, move(event_init));
+    m_audio_tracks->dispatch_event(event);
+}
+
+void HTMLMediaElement::on_video_track_added(Media::Track const& track)
+{
+    auto& realm = this->realm();
+
+    // 1. Create a VideoTrack object to represent the video track.
+    auto video_track = realm.create<VideoTrack>(realm, *this, track);
+
+    // 2. Update the media element's videoTracks attribute's VideoTrackList object with the new VideoTrack object.
+    m_video_tracks->add_track({}, *video_track);
+
+    // 3. Let enable be unknown.
+    auto enable = TriState::Unknown;
+
+    // 4. If either the media resource or the URL of the current media resource indicate a particular set of video tracks to enable, or if
+    //    the user agent has information that would facilitate the selection of specific video tracks to improve the user's experience, then:
+    //    if this video track is the first such video track, then set enable to true, otherwise, set enable to false.
+    if (auto preferred_video_track = m_playback_manager->preferred_video_track(); preferred_video_track.has_value()) {
+        if (track == preferred_video_track && !m_has_selected_preferred_video_track) {
+            enable = TriState::True;
+            m_has_selected_preferred_video_track = true;
+        } else {
+            enable = TriState::False;
+        }
+    }
+
+    // 5. If enable is still unknown, then, if the media element does not yet have a selected video track, then set enable to true, otherwise, set
+    //    enable to false.
+    if (enable == TriState::Unknown)
+        enable = m_video_tracks->selected_index() == -1 ? TriState::True : TriState::False;
+
+    // 6. If enable is true, then select this track and unselect any previously selected video tracks, otherwise, do not select this video track.
+    //    If other tracks are unselected, then a change event will be fired.
+    if (enable == TriState::True)
+        video_track->set_selected(true);
+
+    // NB: See the comment regarding AudioTrack.kind above with regard to https://dev.w3.org/html5/html-sourcing-inband-tracks/.
+    video_track->set_kind(enable == TriState::True ? "main"_utf16 : "translation"_utf16);
+
+    // 7. Fire an event named addtrack at this VideoTrackList object, using TrackEvent, with the track attribute initialized to the new VideoTrack object.
+    TrackEventInit event_init {};
+    event_init.track = GC::make_root(video_track);
+
+    auto event = TrackEvent::create(realm, HTML::EventNames::addtrack, move(event_init));
+    m_video_tracks->dispatch_event(event);
+}
+
+void HTMLMediaElement::on_metadata_parsed()
+{
+    // FIXME: Move this to setup_playback_manager()
     update_volume();
 
-    // -> If the media resource is found to have an audio track
-    auto preferred_audio_track = m_playback_manager->preferred_audio_track();
-    auto has_enabled_preferred_audio_track = false;
-
-    for (auto const& track : m_playback_manager->audio_tracks()) {
-        // 1. Create an AudioTrack object to represent the audio track.
-        auto audio_track = realm.create<AudioTrack>(realm, *this, track);
-
-        // 2. Update the media element's audioTracks attribute's AudioTrackList object with the new AudioTrack object.
-        m_audio_tracks->add_track({}, audio_track);
-
-        // 3. Let enable be unknown.
-        auto enable = TriState::Unknown;
-
-        // 4. If either the media resource or the URL of the current media resource indicate a particular set of audio tracks to enable, or if
-        //    the user agent has information that would facilitate the selection of specific audio tracks to improve the user's experience, then:
-        //    if this audio track is one of the ones to enable, then set enable to true, otherwise, set enable to false.
-        if (preferred_audio_track.has_value()) {
-            if (track == preferred_audio_track && !has_enabled_preferred_audio_track) {
-                enable = TriState::True;
-                has_enabled_preferred_audio_track = true;
-            } else {
-                enable = TriState::False;
-            }
-        }
-
-        // 5. If enable is still unknown, then, if the media element does not yet have an enabled audio track, then set enable to true, otherwise,
-        //    set enable to false.
-        if (enable == TriState::Unknown)
-            enable = !m_audio_tracks->has_enabled_track() ? TriState::True : TriState::False;
-
-        // 6. If enable is true, then enable this audio track, otherwise, do not enable this audio track.
-        if (enable == TriState::True)
-            audio_track->set_enabled(true);
-
-        // NB: According to https://dev.w3.org/html5/html-sourcing-inband-tracks/, kind should be set according to format, and the following criteria within
-        //     the specified formats.
-        // WebM:
-        //     - "main": the FlagDefault element is set on the track
-        //     - "translation": not first audio (video) track
-        // MP4:
-        //     - "main": first audio (video) track
-        //     - "translation": not first audio (video) track
-        // Though the behavior for WebM is not clear if its first track is not marked with FlagDefault, the idea here seems to be that the preferred
-        // track should be marked as "main", and the rest should be marked as "translation".
-        audio_track->set_kind(enable == TriState::True ? "main"_utf16 : "translation"_utf16);
-
-        // 7. Fire an event named addtrack at this AudioTrackList object, using TrackEvent, with the track attribute initialized to the new AudioTrack object.
-        TrackEventInit event_init {};
-        event_init.track = GC::make_root(audio_track);
-
-        auto event = TrackEvent::create(realm, HTML::EventNames::addtrack, move(event_init));
-        m_audio_tracks->dispatch_event(event);
-    }
-
-    if (preferred_audio_track.has_value())
-        VERIFY(has_enabled_preferred_audio_track);
-
-    // -> If the media resource is found to have a video track
-    auto preferred_video_track = m_playback_manager->preferred_video_track();
-    auto has_selected_preferred_video_track = false;
-
-    for (auto const& track : m_playback_manager->video_tracks()) {
-        // 1. Create a VideoTrack object to represent the video track.
-        auto video_track = realm.create<VideoTrack>(realm, *this, track);
-
-        // 2. Update the media element's videoTracks attribute's VideoTrackList object with the new VideoTrack object.
-        m_video_tracks->add_track({}, *video_track);
-
-        // 3. Let enable be unknown.
-        auto enable = TriState::Unknown;
-
-        // 4. If either the media resource or the URL of the current media resource indicate a particular set of video tracks to enable, or if
-        //    the user agent has information that would facilitate the selection of specific video tracks to improve the user's experience, then:
-        //    if this video track is the first such video track, then set enable to true, otherwise, set enable to false.
-        if (preferred_video_track.has_value()) {
-            if (track == preferred_video_track && !has_selected_preferred_video_track) {
-                enable = TriState::True;
-                has_selected_preferred_video_track = true;
-            } else {
-                enable = TriState::False;
-            }
-        }
-
-        // 5. If enable is still unknown, then, if the media element does not yet have a selected video track, then set enable to true, otherwise, set
-        //    enable to false.
-        if (enable == TriState::Unknown)
-            enable = m_video_tracks->selected_index() == -1 ? TriState::True : TriState::False;
-
-        // 6. If enable is true, then select this track and unselect any previously selected video tracks, otherwise, do not select this video track.
-        //    If other tracks are unselected, then a change event will be fired.
-        if (enable == TriState::True)
-            video_track->set_selected(true);
-
-        // NB: See the comment regarding AudioTrack.kind above with regard to https://dev.w3.org/html5/html-sourcing-inband-tracks/.
-        video_track->set_kind(enable == TriState::True ? "main"_utf16 : "translation"_utf16);
-
-        // 7. Fire an event named addtrack at this VideoTrackList object, using TrackEvent, with the track attribute initialized to the new VideoTrack object.
-        TrackEventInit event_init {};
-        event_init.track = GC::make_root(video_track);
-
-        auto event = TrackEvent::create(realm, HTML::EventNames::addtrack, move(event_init));
-        m_video_tracks->dispatch_event(event);
-    }
-
-    if (preferred_video_track.has_value())
-        VERIFY(has_selected_preferred_video_track);
-
-    // -> Once enough of the media data has been fetched to determine the duration of the media resource, its dimensions, and other metadata
     // AD-HOC: After selecting a track, we do not need the source element selector anymore.
     m_source_element_selector = nullptr;
 
@@ -1349,6 +1309,13 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(Str
     // FIXME: Handle unbounded media resources.
     set_duration(m_playback_manager->duration().to_seconds_f64());
 
+    // NB: Register the duration change handler here so that we don't set the duration when the
+    //     playback manager updates the duration after parsing.
+    m_playback_manager->on_duration_change = [weak_self = GC::Weak(*this)](AK::Duration duration) {
+        if (weak_self)
+            weak_self->set_duration(duration.to_seconds_f64());
+    };
+
     // 5. For video elements, set the videoWidth and videoHeight attributes, and queue a media element task given the media element to fire an event
     //    named resize at the media element.
     auto* video_element = as_if<HTMLVideoElement>(*this);
@@ -1363,6 +1330,15 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(Str
 
     // 6. Set the readyState attribute to HAVE_METADATA.
     set_ready_state(ReadyState::HaveMetadata);
+    // NOTE: The spec does not say exactly when to update the readyState attribute. Rather, it describes what
+    //       each step requires, and leaves it up to the user agent to determine when those requirements are
+    //       reached: https://html.spec.whatwg.org/multipage/media.html#ready-states
+    //
+    //       Since we fetch the entire response at once, if we reach here with successfully decoded video
+    //       metadata, we have satisfied the HAVE_ENOUGH_DATA requirements. This logic will of course need
+    //       to change if we fetch or process the media data in smaller chunks.
+    if (m_ready_state == ReadyState::HaveMetadata)
+        set_ready_state(ReadyState::HaveEnoughData);
 
     // 7. Let jumped be false.
     [[maybe_unused]] auto jumped = false;
@@ -1395,14 +1371,75 @@ WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(Function<void(Str
             return IterationDecision::Break;
         });
     }
+}
 
+// https://html.spec.whatwg.org/multipage/media.html#media-data-processing-steps-list
+WebIDL::ExceptionOr<void> HTMLMediaElement::setup_playback_manager(Function<void(String)> failure_callback)
+{
+    m_playback_manager = Media::PlaybackManager::create();
+
+    m_has_enabled_preferred_audio_track = false;
+    m_has_selected_preferred_video_track = false;
+
+    // NB: The spec is unclear on whether the following media resource track conditions should trigger multiple
+    //     times on one media resource, but it is implied to be possible by the start of the "Media elements"
+    //     section, where it says that a "media resource can have multiple audio and video tracks."
+    //     https://html.spec.whatwg.org/multipage/media.html#media-elements
+    //     Therefore, we enumerate all the available tracks into our VideoTrackList and AudioTrackList.
+
+    // -> If the media resource is found to have an audio track
+    // -> If the media resource is found to have a video track
+    m_playback_manager->on_track_added = [weak_self = GC::Weak(*this)](auto track_type, auto& track) {
+        if (!weak_self)
+            return;
+        if (track_type == Media::TrackType::Audio) {
+            weak_self->on_audio_track_added(track);
+        } else {
+            weak_self->on_video_track_added(track);
+        }
+    };
+
+    // -> Once enough of the media data has been fetched to determine the duration of the media resource, its dimensions, and other metadata
+    m_playback_manager->on_metadata_parsed = [weak_self = GC::Weak(*this)] {
+        if (!weak_self)
+            return;
+        weak_self->on_metadata_parsed();
+    };
+
+    // -> If the media data can be fetched but is found by inspection to be in an unsupported format, or can otherwise not be rendered at all
+    m_playback_manager->on_unsupported_format_error = [weak_self = GC::Weak(*this), failure_callback = move(failure_callback)](auto&& error) mutable {
+        if (!weak_self)
+            return;
+
+        // 1. The user agent should cancel the fetching process.
+        weak_self->m_fetch_controller->stop_fetch();
+
+        // 2. Abort this subalgorithm, returning to the resource selection algorithm.
+        failure_callback(MUST(String::from_utf8(error.description())));
+    };
+
+    m_playback_manager->add_media_source(*m_media_data);
+
+    m_playback_manager->on_playback_state_change = [weak_self = GC::Weak(*this)] {
+        if (weak_self)
+            weak_self->on_playback_manager_state_change();
+    };
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#media-data-processing-steps-list
+WebIDL::ExceptionOr<void> HTMLMediaElement::process_media_data(FetchingStatus fetching_status)
+{
     // -> Once the entire media resource has been fetched (but potentially before any of it has been decoded)
-    // Fire an event named progress at the media element.
-    dispatch_event(DOM::Event::create(this->realm(), HTML::EventNames::progress));
+    if (fetching_status == FetchingStatus::Complete) {
+        // Fire an event named progress at the media element.
+        dispatch_event(DOM::Event::create(this->realm(), HTML::EventNames::progress));
 
-    // Set the networkState to NETWORK_IDLE and fire an event named suspend at the media element.
-    m_network_state = NetworkState::Idle;
-    dispatch_event(DOM::Event::create(this->realm(), HTML::EventNames::suspend));
+        // Set the networkState to NETWORK_IDLE and fire an event named suspend at the media element.
+        m_network_state = NetworkState::Idle;
+        dispatch_event(DOM::Event::create(this->realm(), HTML::EventNames::suspend));
+    }
 
     // FIXME: If the user agent ever discards any media data and then needs to resume the network activity to obtain it again, then it must queue a media
     //        element task given the media element to set the networkState to NETWORK_LOADING.

@@ -30,13 +30,12 @@
 #include <LibUnicode/Segmenter.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/AnimationPlaybackEvent.h>
-#include <LibWeb/Bindings/HostDefined.h>
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
+#include <LibWeb/Animations/TimeValue.h>
 #include <LibWeb/Bindings/DocumentPrototype.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
-#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
 #include <LibWeb/CSS/AnimationEvent.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSImportRule.h>
@@ -67,6 +66,9 @@
 #include <LibWeb/DOM/CustomEvent.h>
 #include <LibWeb/DOM/DOMImplementation.h>
 #include <LibWeb/DOM/Document.h>
+#ifdef ENABLE_PYTHON
+#    include <LibWeb/Bindings/PythonDOMWrapperCache.h>
+#endif
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/DocumentObserver.h>
 #include <LibWeb/DOM/DocumentOrShadowRoot.h>
@@ -141,9 +143,6 @@
 #include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
-#include <LibWeb/HTML/Scripting/PythonEngine.h>
-#include <LibWeb/HTML/Scripting/PythonPackageManager.h>
-
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
@@ -601,11 +600,10 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_scripts_to_execute_as_soon_as_possible);
     visitor.visit(m_node_iterators);
     visitor.visit(m_document_observers_being_notified);
-    visitor.visit(m_pending_scroll_event_targets);
-    visitor.visit(m_pending_scrollend_event_targets);
-    for (auto& resize_observer : m_resize_observers) {
+    for (auto& pending_scroll_event : m_pending_scroll_events)
+        visitor.visit(pending_scroll_event.event_target);
+    for (auto& resize_observer : m_resize_observers)
         visitor.visit(resize_observer);
-    }
 
     visitor.visit(m_shared_resource_requests);
 
@@ -1038,7 +1036,7 @@ Utf16String Document::title() const
 
     // 1. If the document element is an SVG svg element, then let value be the child text content of the first SVG title
     //    element that is a child of the document element.
-    if (auto const* document_element = this->document_element(); is<SVG::SVGElement>(document_element)) {
+    if (auto const* document_element = this->document_element(); is<SVG::SVGSVGElement>(document_element)) {
         if (auto const* title_element = document_element->first_child_of_type<SVG::SVGTitleElement>())
             value = title_element->child_text_content();
     }
@@ -1062,7 +1060,7 @@ WebIDL::ExceptionOr<void> Document::set_title(Utf16String const& title)
     auto* document_element = this->document_element();
 
     // -> If the document element is an SVG svg element
-    if (is<SVG::SVGElement>(document_element)) {
+    if (is<SVG::SVGSVGElement>(document_element)) {
         GC::Ptr<Element> element;
 
         // 1. If there is an SVG title element that is a child of the document element, let element be the first such
@@ -1345,10 +1343,22 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
         }
     }
 
-    // NOTE: This is where we assign the chosen overflow values to the viewport.
+    // If 'visible' is applied to the viewport, it must be interpreted as 'auto'. If 'clip' is applied to the viewport, it must be interpreted as 'hidden'.
     auto& overflow_origin_computed_values = overflow_origin_node->mutable_computed_values();
-    viewport_computed_values.set_overflow_x(overflow_origin_computed_values.overflow_x());
-    viewport_computed_values.set_overflow_y(overflow_origin_computed_values.overflow_y());
+    auto overflow_x_to_apply = overflow_origin_computed_values.overflow_x();
+    if (overflow_x_to_apply == CSS::Overflow::Visible) {
+        overflow_x_to_apply = CSS::Overflow::Auto;
+    } else if (overflow_x_to_apply == CSS::Overflow::Clip) {
+        overflow_x_to_apply = CSS::Overflow::Hidden;
+    }
+    auto overflow_y_to_apply = overflow_origin_computed_values.overflow_y();
+    if (overflow_y_to_apply == CSS::Overflow::Visible) {
+        overflow_y_to_apply = CSS::Overflow::Auto;
+    } else if (overflow_y_to_apply == CSS::Overflow::Clip) {
+        overflow_y_to_apply = CSS::Overflow::Hidden;
+    }
+    viewport_computed_values.set_overflow_x(overflow_x_to_apply);
+    viewport_computed_values.set_overflow_y(overflow_y_to_apply);
 
     // The element from which the value is propagated must then have a used overflow value of visible.
     overflow_origin_computed_values.set_overflow_x(CSS::Overflow::Visible);
@@ -2651,7 +2661,7 @@ void Document::dispatch_events_for_transition(GC::Ref<CSS::CSSTransition> transi
         if (!transition->current_time().has_value()) {
             // If the transition has an unresolved current time,
             //   The transition phase is ‘idle’.
-        } else if (transition->current_time().value() < 0.0) {
+        } else if (transition->current_time()->value < 0) {
             // If the transition has a current time < 0,
             //   The transition phase is ‘before’.
             transition_phase = Phase::Before;
@@ -2685,18 +2695,26 @@ void Document::dispatch_events_for_transition(GC::Ref<CSS::CSSTransition> transi
 
         auto effect = transition->effect();
 
-        double elapsed_time = [&]() {
+        Animations::TimeValue elapsed_time = [&]() {
             if (interval == Interval::Start)
-                return max(min(-effect->start_delay(), effect->active_duration()), 0) / 1000;
+                return max(min(-effect->start_delay(), effect->active_duration()), Animations::TimeValue::create_zero(transition->timeline()));
             if (interval == Interval::End)
-                return max(min(transition->associated_effect_end() - effect->start_delay(), effect->active_duration()), 0) / 1000;
+                return max(min(transition->associated_effect_end() - effect->start_delay(), effect->active_duration()), Animations::TimeValue::create_zero(transition->timeline()));
             if (interval == Interval::ActiveTime) {
                 // The active time of the animation at the moment it was canceled calculated using a fill mode of both.
                 // FIXME: Compute this properly.
-                return 0.0;
+                return Animations::TimeValue::create_zero(transition->timeline());
             }
             VERIFY_NOT_REACHED();
         }();
+
+        double elapsed_time_output;
+
+        switch (elapsed_time.type) {
+        case Animations::TimeValue::Type::Milliseconds:
+            elapsed_time_output = elapsed_time.value / 1000;
+            break;
+        }
 
         append_pending_animation_event({
             .event = CSS::TransitionEvent::create(
@@ -2705,7 +2723,7 @@ void Document::dispatch_events_for_transition(GC::Ref<CSS::CSSTransition> transi
                 CSS::TransitionEventInit {
                     { .bubbles = true },
                     MUST(String::from_utf8(transition->transition_property())),
-                    elapsed_time,
+                    elapsed_time_output,
                     transition->owning_element()->pseudo_element().map([](auto it) {
                                                                       return MUST(String::formatted("::{}", CSS::pseudo_element_name(it)));
                                                                   })
@@ -2790,8 +2808,13 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
 
     auto owning_element = css_animation.owning_element();
 
-    auto dispatch_event = [&](FlyString const& name, double elapsed_time_ms) {
-        auto elapsed_time_seconds = elapsed_time_ms / 1000;
+    auto dispatch_event = [&](FlyString const& name, Animations::TimeValue elapsed_time) {
+        double elapsed_time_output;
+        switch (elapsed_time.type) {
+        case Animations::TimeValue::Type::Milliseconds:
+            elapsed_time_output = elapsed_time.value / 1000;
+            break;
+        }
 
         append_pending_animation_event({
             .event = CSS::AnimationEvent::create(
@@ -2800,7 +2823,7 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
                 {
                     { .bubbles = true },
                     css_animation.animation_name(),
-                    elapsed_time_seconds,
+                    elapsed_time_output,
                     owning_element->pseudo_element().map([](auto it) {
                                                         return MUST(String::formatted("::{}", CSS::pseudo_element_name(it)));
                                                     })
@@ -2815,10 +2838,10 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
     // For calculating the elapsedTime of each event, the following definitions are used:
 
     // - interval start = max(min(-start delay, active duration), 0)
-    auto interval_start = max(min(-effect->start_delay(), effect->active_duration()), 0.0);
+    auto interval_start = max(min(-effect->start_delay(), effect->active_duration()), Animations::TimeValue::create_zero(animation->timeline()));
 
     // - interval end = max(min(associated effect end - start delay, active duration), 0)
-    auto interval_end = max(min(effect->end_time() - effect->start_delay(), effect->active_duration()), 0.0);
+    auto interval_end = max(min(effect->end_time() - effect->start_delay(), effect->active_duration()), Animations::TimeValue::create_zero(animation->timeline()));
 
     switch (previous_phase) {
     case Animations::AnimationEffect::Phase::Before:
@@ -2846,9 +2869,7 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
                 auto iteration_boundary = previous_current_iteration > current_iteration ? current_iteration + 1 : current_iteration;
 
                 // 3. The elapsed time is the result of evaluating (iteration boundary - iteration start) × iteration duration).
-                auto iteration_duration_variant = effect->iteration_duration();
-                auto iteration_duration = iteration_duration_variant.has<String>() ? 0.0 : iteration_duration_variant.get<double>();
-                auto elapsed_time = (iteration_boundary - effect->iteration_start()) * iteration_duration;
+                auto elapsed_time = effect->iteration_duration() * (iteration_boundary - effect->iteration_start());
 
                 dispatch_event(HTML::EventNames::animationiteration, elapsed_time);
             }
@@ -2868,7 +2889,7 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
 
     if (current_phase == Animations::AnimationEffect::Phase::Idle && previous_phase != Animations::AnimationEffect::Phase::Idle && previous_phase != Animations::AnimationEffect::Phase::After) {
         // FIXME: Calculate a non-zero time when the animation is cancelled by means other than calling cancel()
-        auto cancel_time = animation->release_saved_cancel_time().value_or(0.0);
+        auto cancel_time = animation->release_saved_cancel_time().value_or(Animations::TimeValue::create_zero(animation->timeline()));
         dispatch_event(HTML::EventNames::animationcancel, cancel_time);
     }
 
@@ -2975,47 +2996,6 @@ void Document::update_readiness(HTML::DocumentReadyState readiness_value)
 
     // 2. Set document's current document readiness to readinessValue.
     m_readiness = readiness_value;
-
-    // Check for Python requirements when document becomes interactive
-    if (readiness_value == HTML::DocumentReadyState::Interactive && !has_python_packages_loaded()) {
-        // Initialize Python package manager
-        auto& package_manager = HTML::PythonPackageManager::the();
-        auto init_result = package_manager.initialize();
-        if (init_result.is_error()) {
-            dbgln("🐍 Document: Failed to initialize Python package manager: {}", init_result.error());
-        }
-        
-        // Check if we have a requirements.txt for this origin
-        auto requirements_result = package_manager.find_requirements_file(url());
-        if (!requirements_result.is_error() && requirements_result.value().has_value()) {
-            dbgln("🐍 Document: Found requirements.txt, parsing and installing packages...");
-            
-            // Parse and install required packages
-            auto packages_result = package_manager.parse_requirements(requirements_result.value().value(), url());
-            if (!packages_result.is_error()) {
-                auto install_result = package_manager.install_packages(packages_result.value());
-                if (install_result.is_error()) {
-                    dbgln("🐍 Document: Failed to install packages: {}", install_result.error());
-                } else {
-                    dbgln("🐍 Document: Successfully installed packages from requirements.txt");
-                    // Set up Python path after installing packages
-                    auto setup_result = package_manager.setup_python_path();
-                    if (setup_result.is_error()) {
-                        dbgln("🐍 Document: Failed to set up Python path: {}", setup_result.error());
-                    }
-                }
-            } else {
-                dbgln("🐍 Document: Failed to parse requirements.txt: {}", packages_result.error());
-            }
-        } else if (requirements_result.is_error()) {
-            dbgln("🐍 Document: Error while looking for requirements.txt: {}", requirements_result.error());
-        } else {
-            dbgln("🐍 Document: No requirements.txt found for this origin");
-        }
-        
-        // Mark packages as loaded
-        set_python_packages_loaded(true);
-    }
 
     // 3. If document is associated with an HTML parser, then:
     if (m_parser) {
@@ -3437,27 +3417,32 @@ void Document::run_the_resize_steps()
     }
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view-1/#document-run-the-scroll-steps
+// https://drafts.csswg.org/cssom-view-1/#document-run-the-scroll-steps
 void Document::run_the_scroll_steps()
 {
-    // 1. For each item target in doc’s pending scroll event targets, in the order they were added to the list, run these substeps:
-    for (auto& target : m_pending_scroll_event_targets) {
-        // 1. If target is a Document, fire an event named scroll that bubbles at target and fire an event named scroll at the VisualViewport that is associated with target.
-        if (is<Document>(*target)) {
-            auto event = DOM::Event::create(realm(), HTML::EventNames::scroll);
+    // FIXME: 1. For each scrolling box box that was scrolled:
+    //        ...
+
+    // 2. For each item (target, type) in doc’s pending scroll events, in the order they were added to the list, run
+    //    these substeps:
+    for (auto const& [target, type] : m_pending_scroll_events) {
+        // 1. If target is a Document, and type is "scroll" or "scrollend", fire an event named type that bubbles at target.
+        if (is<Document>(*target) && (type == HTML::EventNames::scroll || type == HTML::EventNames::scrollend)) {
+            auto event = DOM::Event::create(realm(), type);
             event->set_bubbles(true);
             target->dispatch_event(event);
-            // FIXME: Fire at the associated VisualViewport
         }
-        // 2. Otherwise, fire an event named scroll at target.
+        // FIXME: 2. Otherwise, if type is "scrollsnapchange", then:
+        // FIXME: 3. Otherwise, if type is "scrollsnapchanging", then:
+        // 4. Otherwise, fire an event named type at target.
         else {
             auto event = DOM::Event::create(realm(), HTML::EventNames::scroll);
             target->dispatch_event(event);
         }
     }
 
-    // 2. Empty doc’s pending scroll event targets.
-    m_pending_scroll_event_targets.clear();
+    // 3. Empty doc’s pending scroll events.
+    m_pending_scroll_events.clear();
 }
 
 void Document::add_media_query_list(GC::Ref<CSS::MediaQueryList> media_query_list)
@@ -5128,12 +5113,17 @@ void Document::shared_declarative_refresh_steps(StringView input, GC::Ptr<HTML::
     }
 
     parse:
-        // 11. Set urlRecord to the result of encoding-parsing a URL given urlString, relative to document.
+        // 11. Parse: Set urlRecord to the result of encoding-parsing a URL given urlString, relative to document.
+        // 12. If urlRecord is failure, then return.
         auto maybe_url_record = encoding_parse_url(url_string);
         if (!maybe_url_record.has_value())
             return;
 
         url_record = maybe_url_record.release_value();
+
+        // 13. If urlRecord's scheme is "javascript", then return.
+        if (url_record.scheme() == "javascript"sv)
+            return;
     }
 
     // 12. Set document's will declaratively refresh to true.
@@ -5361,14 +5351,15 @@ void Document::update_animations_and_send_events(Optional<double> const& timesta
     //
     // Note: Due to the hierarchical nature of the timing model, updating the current time of a timeline also involves:
     // - Updating the current time of any animations associated with the timeline.
-    // - Running the update an animation’s finished state procedure for any animations whose current time has been
-    //   updated.
-    // - Queueing animation events for any such animations.
-    m_last_animation_frame_timestamp = timestamp;
+    // - Running the update an animation’s finished state procedure on those animations,
+    //   which may cause them to become finished.
+    // - Queueing animation events for those animations.
+    if (timestamp.has_value())
+        m_last_animation_frame_timestamp = timestamp.value();
 
     auto timelines_to_update = GC::RootVector { heap(), m_associated_animation_timelines.values() };
     for (auto const& timeline : timelines_to_update)
-        timeline->set_current_time(timestamp);
+        timeline->update_current_time(timestamp.value_or(0.0));
 
     // 2. Remove replaced animations for doc.
     remove_replaced_animations();
@@ -5494,8 +5485,8 @@ void Document::remove_replaced_animations()
             // - Set removeEvent’s timelineTime attribute to the current time of the timeline with which animation is
             //   associated.
             Animations::AnimationPlaybackEventInit init;
-            init.current_time = animation->current_time();
-            init.timeline_time = animation->timeline()->current_time();
+            init.current_time = animation->current_time().map([](auto const& value) { return value.as_css_numberish(); });
+            init.timeline_time = animation->timeline()->current_time().map([](auto const& value) { return value.as_css_numberish(); });
             auto remove_event = Animations::AnimationPlaybackEvent::create(realm(), HTML::EventNames::remove, init);
 
             // - If animation has a document for timing, then append removeEvent to its document for timing's pending
@@ -5507,7 +5498,7 @@ void Document::remove_replaced_animations()
                     .event = remove_event,
                     .animation = animation,
                     .target = animation,
-                    .scheduled_event_time = animation->timeline()->convert_a_timeline_time_to_an_origin_relative_time(init.timeline_time),
+                    .scheduled_event_time = animation->timeline()->convert_a_timeline_time_to_an_origin_relative_time(animation->timeline()->current_time()),
                 };
                 document->append_pending_animation_event(pending_animation_event);
             }
@@ -6474,8 +6465,9 @@ GC::Ptr<DOM::Position> Document::cursor_position() const
         if (!input_element->can_have_text_editing_cursor())
             return nullptr;
         target = *input_element;
-    } else if (is<HTML::HTMLTextAreaElement>(*focused_area))
-        target = static_cast<HTML::HTMLTextAreaElement const&>(*focused_area);
+    } else if (auto const* text_area_element = as_if<HTML::HTMLTextAreaElement>(*focused_area)) {
+        target = *text_area_element;
+    }
 
     if (target.has_value())
         return target->cursor_position();
@@ -6997,6 +6989,11 @@ void Document::add_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CS
 void Document::remove_pending_css_import_rule(Badge<CSS::CSSImportRule>, GC::Ref<CSS::CSSImportRule> rule)
 {
     m_pending_css_import_rules.remove(rule);
+}
+
+void Document::exit_pointer_lock()
+{
+    dbgln("FIXME: exit_pointer_lock()");
 }
 
 }

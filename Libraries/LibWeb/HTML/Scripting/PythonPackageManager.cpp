@@ -68,132 +68,71 @@ PythonPackageManager &PythonPackageManager::the() {
   return *s_the;
 }
 
-String PythonPackageManager::get_venv_base_path() const {
+String PythonPackageManager::get_python_home_path() const {
 #ifdef __APPLE__
   // On macOS, check if we're in an app bundle
   auto bundle_path = get_app_bundle_path();
   if (bundle_path.has_value()) {
-    auto venv_path_result = String::formatted(
-        "{}/Contents/Resources/python_venv", bundle_path.value());
-    if (!venv_path_result.is_error()) {
-      dbgln("🐍 PythonPackageManager: Using bundle venv at: {}",
-            venv_path_result.value());
-      return venv_path_result.release_value();
+    auto python_home_result =
+        String::formatted("{}/Contents/Resources/bundled_python/Versions/3.14",
+                          bundle_path.value());
+    if (!python_home_result.is_error()) {
+      dbgln("🐍 PythonPackageManager: Using bundled Python at: {}",
+            python_home_result.value());
+      return python_home_result.release_value();
     }
   }
-  // Fall through to temp path for development builds
+  // Fall through to Homebrew path for development builds
 #endif
 
-  // Development builds and other platforms use temp directory
-  return String("/tmp/ladybird_python_venv"_string);
+  // Development builds use Homebrew Python
+  return String(
+      "/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14"_string);
 }
 
 String PythonPackageManager::get_package_install_path() const {
-  // Dynamically detect Python version to construct the correct site-packages
-  // path Extract major.minor from Py_GetVersion() which returns something like
-  // "3.14.0 (...)"
+  // Install directly to bundled Python's site-packages (no venv)
   char const *version_str = Py_GetVersion();
 
-  String venv_base = get_venv_base_path();
+  String python_home = get_python_home_path();
 
   // Parse "3.14.0" to get "3.14"
   int major = 0, minor = 0;
   if (sscanf(version_str, "%d.%d", &major, &minor) >= 2) {
     auto path_result = String::formatted("{}/lib/python{}.{}/site-packages",
-                                         venv_base, major, minor);
+                                         python_home, major, minor);
     if (!path_result.is_error()) {
       return path_result.release_value();
     }
   }
 
-  // Fallback to python3.14 if parsing fails
-  dbgln("🐍 PythonPackageManager: Warning - failed to parse Python version, "
-        "using python3.14 as fallback");
+  // Fallback
   auto fallback_result =
-      String::formatted("{}/lib/python3.14/site-packages", venv_base);
+      String::formatted("{}/lib/python3.14/site-packages", python_home);
   if (!fallback_result.is_error())
     return fallback_result.release_value();
 
-  return String(
-      "/tmp/ladybird_python_venv/lib/python3.14/site-packages"_string);
+  return String("/opt/homebrew/lib/python3.14/site-packages"_string);
 }
 
 ErrorOr<void> PythonPackageManager::initialize() {
   if (m_initialized)
     return {};
 
-  dbgln("🐍 PythonPackageManager: Initializing package manager");
+  dbgln("🐍 PythonPackageManager: Initializing package manager (no-venv mode)");
 
-  // Create a virtual environment for package isolation
-  String venv_path = get_venv_base_path();
-  auto venv_path_byte_string = venv_path.to_byte_string();
+  // No venv creation needed - we install directly to bundled site-packages
+  String site_packages = get_package_install_path();
+  dbgln("🐍 PythonPackageManager: Using site-packages: {}", site_packages);
 
-  dbgln("🐍 PythonPackageManager: Using venv path: {}", venv_path);
-
-  // Check if virtual environment already exists
+  // Verify site-packages directory exists
+  auto site_packages_byte_string = site_packages.to_byte_string();
   struct stat buffer;
-  if (stat(venv_path_byte_string.characters(), &buffer) != 0) {
-    // Virtual environment doesn't exist, create it
-    dbgln("🐍 PythonPackageManager: Creating virtual environment at {}",
-          venv_path);
-
-    // Use bundled Python if available, otherwise system python3
-    String python_executable = "python3"_string;
-#ifdef __APPLE__
-    auto bundle_path = get_app_bundle_path();
-    if (bundle_path.has_value()) {
-      auto bundled_python_result = String::formatted(
-          "{}/Contents/Resources/bundled_python/Versions/3.14/bin/python3.14",
-          bundle_path.value());
-      if (!bundled_python_result.is_error()) {
-        String bundled_python = bundled_python_result.release_value();
-        auto bundled_python_bytes = bundled_python.to_byte_string();
-        // Check if bundled Python exists
-        if (stat(bundled_python_bytes.characters(), &buffer) == 0) {
-          python_executable = bundled_python;
-          dbgln("🐍 PythonPackageManager: Using bundled Python: {}",
-                python_executable);
-        }
-      }
-    }
-#endif
-
-    auto command_result =
-        String::formatted("{} -m venv {}", python_executable, venv_path);
-    if (command_result.is_error()) {
-      dbgln("🐍 PythonPackageManager: Failed to format command string");
-      return command_result.release_error();
-    }
-    String command = command_result.release_value();
-    auto command_byte_string = command.to_byte_string();
-    int result = system(command_byte_string.characters());
-
-    if (result != 0) {
-      dbgln("🐍 PythonPackageManager: Failed to create virtual environment");
-      return Error::from_string_literal("Failed to create virtual environment");
-    }
-  } else {
-    dbgln("🐍 PythonPackageManager: Using existing virtual environment at {}",
-          venv_path);
+  if (stat(site_packages_byte_string.characters(), &buffer) != 0) {
+    dbgln("🐍 PythonPackageManager: Warning - site-packages not found at {}",
+          site_packages);
+    dbgln("🐍 PythonPackageManager: This is normal for development builds");
   }
-
-  // Upgrade pip in the virtual environment to ensure we have the latest version
-  auto venv_pip_result = String::formatted("{}/bin/pip", venv_path);
-  if (venv_pip_result.is_error())
-    return venv_pip_result.release_error();
-  String venv_pip = venv_pip_result.release_value();
-  auto upgrade_command_result =
-      String::formatted("{} install --upgrade pip", venv_pip);
-  if (upgrade_command_result.is_error()) {
-    dbgln("🐍 PythonPackageManager: Failed to format pip upgrade command");
-    return upgrade_command_result.release_error();
-  }
-  String upgrade_command = upgrade_command_result.release_value();
-  auto upgrade_command_byte_string = upgrade_command.to_byte_string();
-  // We don't care about the result of this command as it's not critical
-  // But we need to handle the return value to avoid compiler warnings
-  [[maybe_unused]] auto unused_result =
-      system(upgrade_command_byte_string.characters());
 
   // Set up Python path to include our virtual environment
   TRY(setup_python_path());
@@ -435,15 +374,18 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const &packages) {
   dbgln("🐍 PythonPackageManager: Installing {} new packages",
         packages_to_install.size());
 
-  // Use the virtual environment's pip directly
-  String venv_base = get_venv_base_path();
-  auto venv_pip_result = String::formatted("{}/bin/pip", venv_base);
-  if (venv_pip_result.is_error())
-    return venv_pip_result.release_error();
-  String venv_pip = venv_pip_result.release_value();
-  // Check if pip is available in the virtual environment
+  // Get the Python home path (bundled or Homebrew)
+  String python_home = get_python_home_path();
+
+  // Use python -m pip instead of pip binary (more reliable)
+  auto python_exe_result = String::formatted("{}/bin/python3.14", python_home);
+  if (python_exe_result.is_error())
+    return python_exe_result.release_error();
+  String python_exe = python_exe_result.release_value();
+
+  // Check if python executable exists and pip module is available
   auto check_command =
-      String::formatted("{} --version > /dev/null 2>&1", venv_pip);
+      String::formatted("{} -m pip --version > /dev/null 2>&1", python_exe);
   if (check_command.is_error()) {
     dbgln("🐍 PythonPackageManager: Failed to format check command");
     return check_command.release_error();
@@ -453,18 +395,29 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const &packages) {
   int pip_check = system(check_command_byte_string.characters());
 
   if (pip_check != 0) {
-    dbgln(
-        "🐍 PythonPackageManager: pip is not available in virtual environment. "
-        "Please ensure the virtual environment is properly created.");
-    return Error::from_string_literal(
-        "pip is not available in virtual environment");
+    dbgln("🐍 PythonPackageManager: pip module not available. "
+          "Try running: {} -m ensurepip",
+          python_exe);
+    return Error::from_string_literal("pip module not available");
   }
 
-  // Install each package using pip in our virtual environment
+  // Determine the site-packages directory for installation
+  // This is typically python_home/lib/pythonX.Y/site-packages
+  auto site_packages_result =
+      String::formatted("{}/lib/python3.14/site-packages", python_home);
+  if (site_packages_result.is_error())
+    return site_packages_result.release_error();
+  String site_packages = site_packages_result.release_value();
+
+  // Install each package using python -m pip
   for (auto const &package : packages_to_install) {
+    dbgln("🐍 PythonPackageManager: Installing package: {}", package.name);
+
     StringBuilder command_builder;
-    command_builder.append(venv_pip);
-    command_builder.append(" install --upgrade "_string);
+    command_builder.append(python_exe);
+    command_builder.append(" -m pip install --upgrade --target "_string);
+    command_builder.append(site_packages);
+    command_builder.append(" \""_string); // Open quote for package spec
     command_builder.append(package.name);
 
     if (package.version.has_value()) {
@@ -483,6 +436,8 @@ PythonPackageManager::install_packages(Vector<PythonPackage> const &packages) {
         command_builder.append(trimmed_version.value());
       }
     }
+
+    command_builder.append("\""_string); // Close quote for package spec
 
     // Special handling for numpy to avoid installation issues
     if (package.name == "numpy"_string) {

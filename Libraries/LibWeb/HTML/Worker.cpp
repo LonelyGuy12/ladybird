@@ -24,7 +24,6 @@ Worker::Worker(String const& script_url, WorkerOptions const& options, DOM::Docu
     : DOM::EventTarget(document.realm())
     , m_script_url(script_url)
     , m_options(options)
-    , m_document(&document)
 {
 }
 
@@ -37,7 +36,6 @@ void Worker::initialize(JS::Realm& realm)
 void Worker::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit(m_document);
     visitor.visit(m_outside_port);
     visitor.visit(m_agent);
 }
@@ -134,7 +132,7 @@ WebIDL::ExceptionOr<void> Worker::terminate()
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker-postmessage
 WebIDL::ExceptionOr<void> Worker::post_message(JS::Value message, StructuredSerializeOptions const& options)
 {
-    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Post Message: {}", message.to_string_without_side_effects());
+    dbgln_if(WEB_WORKER_DEBUG, "WebWorker: Post Message: {}", message);
 
     // The postMessage(message, transfer) and postMessage(message, options) methods on Worker objects act as if,
     // when invoked, they immediately invoked the respective postMessage(message, transfer) and

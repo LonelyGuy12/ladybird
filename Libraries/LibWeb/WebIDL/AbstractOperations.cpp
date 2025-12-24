@@ -182,7 +182,7 @@ JS::Completion call_user_object_operation(CallbackType& callback, Utf16FlyString
 
         // 4. If ! IsCallable(X) is false, then set completion to a new Completion{[[Type]]: throw, [[Value]]: a newly created TypeError object, [[Target]]: empty}, and jump to the step labeled return.
         if (!get_result.value().is_function()) {
-            completion = relevant_realm.vm().template throw_completion<JS::TypeError>(JS::ErrorType::NotAFunction, get_result.value().to_string_without_side_effects());
+            completion = relevant_realm.vm().template throw_completion<JS::TypeError>(JS::ErrorType::NotAFunction, get_result.value());
             return clean_up_on_return(stored_realm, relevant_realm, completion, callback.operation_returns_promise);
         }
 
@@ -393,7 +393,7 @@ JS::Completion construct(CallbackType& callable, ReadonlySpan<JS::Value> args)
     // 4. Let relevant realm be F’s associated realm.
     auto& relevant_realm = function_object->shape().realm();
     if (!JS::Value(function_object).is_constructor())
-        return relevant_realm.vm().template throw_completion<JS::TypeError>(JS::ErrorType::NotAConstructor, JS::Value(function_object).to_string_without_side_effects());
+        return relevant_realm.vm().template throw_completion<JS::TypeError>(JS::ErrorType::NotAConstructor, JS::Value(function_object));
 
     // 5. Let stored realm be callable’s callback context.
     auto& stored_realm = callable.callback_context;
@@ -517,7 +517,7 @@ JS::ThrowCompletionOr<T> convert_to_int(JS::VM& vm, JS::Value value, EnforceRang
 
         // 2. Round x to the nearest integer, choosing the even integer if it lies halfway between two, and choosing +0 rather than −0.
         // 3. Return x.
-        return round(x);
+        return AK::round_to<T>(x);
     }
 
     // 8. If x is NaN, +0, +∞, or −∞, then return +0.

@@ -2442,20 +2442,23 @@ void perform_url_and_history_update_steps(DOM::Document& document, URL::URL new_
 void Navigable::scroll_offset_did_change()
 {
     // https://w3c.github.io/csswg-drafts/cssom-view-1/#scrolling-events
-    // Whenever a viewport gets scrolled (whether in response to user interaction or by an API), the user agent must run these steps:
+    // Whenever a viewport gets scrolled (whether in response to user interaction or by an API), the user agent must
+    // run these steps:
 
     // 1. Let doc be the viewport’s associated Document.
     auto doc = active_document();
     VERIFY(doc);
 
-    // 2. If doc is already in doc’s pending scroll event targets, abort these steps.
-    for (auto& target : doc->pending_scroll_event_targets()) {
-        if (target.ptr() == doc)
-            return;
-    }
+    // FIXME: 2. If doc is a snap container, run the steps to update scrollsnapchanging targets for doc with doc’s eventual
+    //    snap target in the block axis as newBlockTarget and doc’s eventual snap target in the inline axis as
+    //    newInlineTarget.
 
-    // 3. Append doc to doc’s pending scroll event targets.
-    doc->pending_scroll_event_targets().append(*doc);
+    // 3. If (doc, "scroll") is already in doc’s pending scroll events, abort these steps.
+    if (doc->pending_scroll_events().contains_slow(DOM::Document::PendingScrollEvent { *doc, EventNames::scroll }))
+        return;
+
+    // 4. Append (doc, "scroll") to doc’s pending scroll events.
+    doc->pending_scroll_events().append({ *doc, EventNames::scroll });
 }
 
 CSSPixelRect Navigable::to_top_level_rect(CSSPixelRect const& a_rect)
@@ -2826,6 +2829,8 @@ void Navigable::scroll_viewport_by_delta(CSSPixelPoint delta)
     // 13. Let element be doc’s root element if there is one, null otherwise.
 
     // 14. Perform a scroll of the viewport’s scrolling box to its current scroll position + (layout dx, layout dy) with element as the associated element, and behavior as the scroll behavior.
+    if (!doc->paintable_box()->could_be_scrolled_by_wheel_event())
+        return;
     auto scrolling_area = doc->paintable_box()->scrollable_overflow_rect()->to_type<float>();
     auto new_viewport_scroll_offset = m_viewport_scroll_offset.to_type<double>() + Gfx::Point(layout_dx, layout_dy);
     // NOTE: Clamp to the scrolling area.

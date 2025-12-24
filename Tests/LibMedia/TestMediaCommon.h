@@ -8,6 +8,7 @@
 
 #include <AK/Function.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
 #include <LibMedia/Containers/Matroska/MatroskaDemuxer.h>
 #include <LibMedia/Containers/Matroska/Reader.h>
 #include <LibMedia/Demuxer.h>
@@ -21,7 +22,9 @@
 template<typename T>
 static inline void decode_video(StringView path, size_t expected_frame_count, T create_decoder)
 {
-    auto matroska_reader = MUST(Media::Matroska::Reader::from_file(path));
+    auto file = MUST(Core::File::open(path, Core::File::OpenMode::Read));
+    auto stream = Media::IncrementallyPopulatedStream::create_from_buffer(MUST(file->read_until_eof()));
+    auto matroska_reader = MUST(Media::Matroska::Reader::from_stream(stream->create_cursor()));
     u64 video_track = 0;
     MUST(matroska_reader.for_each_track_of_type(Media::Matroska::TrackEntry::TrackType::Video, [&](Media::Matroska::TrackEntry const& track_entry) -> Media::DecoderErrorOr<IterationDecision> {
         video_track = track_entry.track_number();
@@ -29,7 +32,7 @@ static inline void decode_video(StringView path, size_t expected_frame_count, T 
     }));
     VERIFY(video_track != 0);
 
-    auto iterator = MUST(matroska_reader.create_sample_iterator(video_track));
+    auto iterator = MUST(matroska_reader.create_sample_iterator(stream->create_cursor(), video_track));
     size_t frame_count = 0;
     NonnullOwnPtr<Media::VideoDecoder> decoder = create_decoder(iterator);
 
@@ -44,7 +47,7 @@ static inline void decode_video(StringView path, size_t expected_frame_count, T 
 
         auto block = block_result.release_value();
         for (auto const& frame : block.frames()) {
-            MUST(decoder->receive_coded_data(block.timestamp(), frame));
+            MUST(decoder->receive_coded_data(block.timestamp(), block.duration().value_or(AK::Duration::zero()), frame));
             while (true) {
                 auto frame_result = decoder->get_decoded_frame();
                 if (frame_result.is_error()) {
@@ -66,17 +69,18 @@ static inline void decode_audio(StringView path, u32 sample_rate, u8 channel_cou
 {
     Core::EventLoop loop;
 
-    auto mapped_file = TRY_OR_FAIL(Core::MappedFile::map(path));
-    auto demuxer = MUST([&] -> Media::DecoderErrorOr<NonnullRefPtr<Media::Demuxer>> {
-        auto matroska_result = Media::Matroska::MatroskaDemuxer::from_data(mapped_file->bytes());
+    auto file = MUST(Core::File::open(path, Core::File::OpenMode::Read));
+    auto stream = Media::IncrementallyPopulatedStream::create_from_buffer(MUST(file->read_until_eof()));
+    auto inner_demuxer = MUST([&] -> Media::DecoderErrorOr<NonnullRefPtr<Media::Demuxer>> {
+        auto matroska_result = Media::Matroska::MatroskaDemuxer::from_stream(stream->create_cursor());
         if (!matroska_result.is_error())
             return matroska_result.release_value();
-        return Media::FFmpeg::FFmpegDemuxer::from_data(mapped_file->bytes());
+        return Media::FFmpeg::FFmpegDemuxer::from_stream(stream->create_cursor());
     }());
-    auto mutexed_demuxer = make_ref_counted<Media::MutexedDemuxer>(demuxer);
+    auto demuxer = make_ref_counted<Media::MutexedDemuxer>(inner_demuxer);
     auto track = TRY_OR_FAIL(demuxer->get_preferred_track_for_type(Media::TrackType::Audio));
     VERIFY(track.has_value());
-    auto provider = TRY_OR_FAIL(Media::AudioDataProvider::try_create(mutexed_demuxer, track.release_value()));
+    auto provider = TRY_OR_FAIL(Media::AudioDataProvider::try_create(Core::EventLoop::current_weak(), demuxer, stream, track.release_value()));
 
     auto reached_end = false;
     provider->set_error_handler([&](Media::DecoderError&& error) {
