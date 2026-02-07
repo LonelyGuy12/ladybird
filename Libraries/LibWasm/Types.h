@@ -22,6 +22,8 @@
 
 namespace Wasm {
 
+class Module;
+
 template<size_t M>
 using NativeIntegralType = Conditional<M == 8, u8, Conditional<M == 16, u16, Conditional<M == 32, u32, Conditional<M == 64, u64, void>>>>;
 
@@ -78,6 +80,8 @@ AK_TYPEDEF_DISTINCT_ORDERED_ID(u32, GlobalIndex);
 AK_TYPEDEF_DISTINCT_ORDERED_ID(u32, LabelIndex);
 AK_TYPEDEF_DISTINCT_ORDERED_ID(u32, DataIndex);
 AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, InstructionPointer, Arithmetic, Comparison, Flags, Increment);
+
+constexpr static inline auto LocalArgumentMarker = static_cast<LocalIndex::Type>(1) << (sizeof(LocalIndex::Type) * 8 - 1);
 
 ParseError with_eof_check(Stream const& stream, ParseError error_if_not_eof);
 
@@ -248,6 +252,41 @@ public:
 private:
     Vector<ValueType> m_parameters;
     Vector<ValueType> m_results;
+};
+
+// https://webassembly.github.io/spec/core/bikeshed/#composite-types%E2%91%A0
+class FieldType {
+public:
+    FieldType(bool is_mutable, ValueType type_)
+        : m_is_mutable(is_mutable)
+        , m_type(type_)
+    {
+    }
+
+    auto& type() const { return m_type; }
+    auto is_mutable() const { return m_is_mutable; }
+
+    static ParseResult<FieldType> parse(ConstrainedStream& stream);
+
+private:
+    bool m_is_mutable { false };
+    ValueType m_type;
+};
+
+// https://webassembly.github.io/spec/core/bikeshed/#composite-types%E2%91%A0
+class StructType {
+public:
+    StructType(Vector<FieldType> fields)
+        : m_fields(move(fields))
+    {
+    }
+
+    auto& fields() const { return m_fields; }
+
+    static ParseResult<StructType> parse(ConstrainedStream& stream);
+
+private:
+    Vector<FieldType> m_fields;
 };
 
 // https://webassembly.github.io/memory64/core/bikeshed/#address-type%E2%91%A0
@@ -472,13 +511,24 @@ public:
 
     struct StructuredInstructionArgs {
         BlockType block_type;
-        InstructionPointer end_ip;
+        InstructionPointer end_ip; // 'end' instruction IP if there is no 'else'; otherwise IP of instruction after 'end'.
         Optional<InstructionPointer> else_ip;
+
+        struct Meta {
+            u32 arity;
+            u32 parameter_count;
+        };
+        mutable Optional<Meta> meta {};
     };
 
     struct TableBranchArgs {
         Vector<LabelIndex> labels;
         LabelIndex default_;
+    };
+
+    struct BranchArgs {
+        LabelIndex label;
+        mutable bool has_stack_adjustment { false };
     };
 
     struct IndirectCallArgs {
@@ -564,12 +614,15 @@ public:
 
     LocalIndex local_index() const { return m_local_index; }
 
+    void set_local_index(Badge<Module>, LocalIndex index) { m_local_index = index; }
+
 private:
     OpCode m_opcode { 0 };
     LocalIndex m_local_index;
 
     Variant<
         BlockType,
+        BranchArgs,
         DataIndex,
         ElementIndex,
         FunctionIndex,
@@ -614,25 +667,34 @@ struct Dispatch {
         R7,
         CountRegisters,
         Stack = CountRegisters,
+        CallRecord,
+        LastCallRecord = NumericLimits<u8>::max(),
     };
+
+    static_assert(is_power_of_two(to_underlying(Stack)), "Stack marker must be a single bit");
 
     union {
         OpCode instruction_opcode;
         FlatPtr handler_ptr;
     };
     Instruction const* instruction { nullptr };
-    union {
-        struct {
-            RegisterOrStack sources[3];
-            RegisterOrStack destination;
-        };
-        u32 sources_and_destination;
-    };
 };
+
+union SourcesAndDestination {
+    struct {
+        Dispatch::RegisterOrStack sources[3];
+        Dispatch::RegisterOrStack destination;
+    };
+    u32 sources_and_destination;
+};
+
 struct CompiledInstructions {
     Vector<Dispatch> dispatches;
+    Vector<SourcesAndDestination> src_dst_mappings;
     Vector<Instruction, 0, FastLastAccess::Yes> extra_instruction_storage;
     bool direct = false; // true if all dispatches contain handler_ptr, otherwise false and all contain instruction_opcode.
+    size_t max_call_arg_count = 0;
+    size_t max_call_rec_size = 0;
 };
 
 template<Enum auto... Vs>
@@ -727,9 +789,41 @@ private:
 
 class TypeSection {
 public:
+    class Type {
+    private:
+        using TypeDesc = Variant<FunctionType, StructType>;
+
+    public:
+        Type(TypeDesc type)
+            : m_description(type)
+        {
+        }
+
+        auto& description() const { return m_description; }
+
+        auto& function() const { return m_description.get<FunctionType>(); }
+        auto& unsafe_function() const { return m_description.unsafe_get<FunctionType>(); }
+        bool is_function() const { return m_description.has<FunctionType>(); }
+
+        auto& struct_() const { return m_description.get<StructType>(); }
+        bool is_struct() const { return m_description.has<StructType>(); }
+
+        ByteString name() const
+        {
+            return m_description.visit(
+                [](FunctionType const&) -> ByteString { return "function type"; },
+                [](StructType const&) -> ByteString { return "struct type"; });
+        }
+
+        static ParseResult<Type> parse(ConstrainedStream& stream);
+
+    private:
+        TypeDesc m_description;
+    };
+
     TypeSection() = default;
 
-    explicit TypeSection(Vector<FunctionType> types)
+    explicit TypeSection(Vector<Type> types)
         : m_types(move(types))
     {
     }
@@ -739,7 +833,7 @@ public:
     static ParseResult<TypeSection> parse(ConstrainedStream& stream);
 
 private:
-    Vector<FunctionType> m_types;
+    Vector<Type> m_types;
 };
 
 class ImportSection {
@@ -1064,6 +1158,8 @@ public:
             : m_locals(move(locals))
             , m_body(move(body))
         {
+            for (auto const& local : m_locals)
+                m_total_local_count += local.n();
         }
 
         auto& locals() const { return m_locals; }
@@ -1071,9 +1167,12 @@ public:
 
         static ParseResult<Func> parse(ConstrainedStream& stream, size_t size_hint);
 
+        auto total_local_count() const { return m_total_local_count; }
+
     private:
         Vector<Locals> m_locals;
         Expression m_body;
+        size_t m_total_local_count { 0 };
     };
     class Code {
     public:
@@ -1169,29 +1268,9 @@ private:
 
 class TagSection {
 public:
-    class Tag {
-    public:
-        using Flags = TagType::Flags;
-
-        Tag(TypeIndex type, Flags flags)
-            : m_type(type)
-            , m_flags(flags)
-        {
-        }
-
-        auto type() const { return m_type; }
-        auto flags() const { return m_flags; }
-
-        static ParseResult<Tag> parse(ConstrainedStream& stream);
-
-    private:
-        TypeIndex m_type;
-        Flags m_flags { Flags::None };
-    };
-
     TagSection() = default;
 
-    explicit TagSection(Vector<Tag> tags)
+    explicit TagSection(Vector<TagType> tags)
         : m_tags(move(tags))
     {
     }
@@ -1201,7 +1280,7 @@ public:
     static ParseResult<TagSection> parse(ConstrainedStream& stream);
 
 private:
-    Vector<Tag> m_tags;
+    Vector<TagType> m_tags;
 };
 
 class WASM_API Module : public RefCounted<Module>
@@ -1254,8 +1333,12 @@ public:
 
     static ParseResult<NonnullRefPtr<Module>> parse(Stream& stream);
 
+    size_t minimum_call_record_allocation_size() const { return m_minimum_call_record_allocation_size; }
+    void set_minimum_call_record_allocation_size(size_t size) { m_minimum_call_record_allocation_size = size; }
+
 private:
     void set_validation_status(ValidationStatus status) { m_validation_status = status; }
+    void preprocess();
 
     Vector<CustomSection> m_custom_sections;
     TypeSection m_type_section;
@@ -1274,6 +1357,8 @@ private:
 
     ValidationStatus m_validation_status { ValidationStatus::Unchecked };
     Optional<ByteString> m_validation_error;
+
+    size_t m_minimum_call_record_allocation_size { 0 };
 };
 
 CompiledInstructions try_compile_instructions(Expression const&, Span<FunctionType const> functions);

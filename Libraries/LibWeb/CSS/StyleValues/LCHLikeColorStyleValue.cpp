@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2024-2026, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -43,10 +43,20 @@ Optional<Color> LCHColorStyleValue::to_color(ColorResolutionContext color_resolu
     return Color::from_lab(l_val, c_val.value() * cos(h_val), c_val.value() * sin(h_val), alpha_val.value());
 }
 
-// https://www.w3.org/TR/css-color-4/#serializing-lab-lch
-String LCHColorStyleValue::to_string(SerializationMode mode) const
+ValueComparingNonnullRefPtr<StyleValue const> LCHColorStyleValue::absolutized(ComputationContext const& context) const
 {
-    StringBuilder builder;
+    auto l = m_properties.l->absolutized(context);
+    auto c = m_properties.c->absolutized(context);
+    auto h = m_properties.h->absolutized(context);
+    auto alpha = m_properties.alpha->absolutized(context);
+    if (l == m_properties.l && c == m_properties.c && h == m_properties.h && alpha == m_properties.alpha)
+        return *this;
+    return LCHLikeColorStyleValue::create<LCHColorStyleValue>(move(l), move(c), move(h), move(alpha));
+}
+
+// https://www.w3.org/TR/css-color-4/#serializing-lab-lch
+void LCHColorStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
+{
     builder.append("lch("sv);
     serialize_color_component(builder, mode, m_properties.l, 100, 0, 100);
     builder.append(' ');
@@ -60,7 +70,6 @@ String LCHColorStyleValue::to_string(SerializationMode mode) const
     }
 
     builder.append(')');
-    return MUST(builder.to_string());
 }
 
 Optional<Color> OKLCHColorStyleValue::to_color(ColorResolutionContext color_resolution_context) const
@@ -80,10 +89,20 @@ Optional<Color> OKLCHColorStyleValue::to_color(ColorResolutionContext color_reso
     return Color::from_oklab(l_val, c_val * cos(h_val), c_val * sin(h_val), alpha_val.value());
 }
 
-// https://www.w3.org/TR/css-color-4/#serializing-oklab-oklch
-String OKLCHColorStyleValue::to_string(SerializationMode mode) const
+ValueComparingNonnullRefPtr<StyleValue const> OKLCHColorStyleValue::absolutized(ComputationContext const& context) const
 {
-    StringBuilder builder;
+    auto l = m_properties.l->absolutized(context);
+    auto c = m_properties.c->absolutized(context);
+    auto h = m_properties.h->absolutized(context);
+    auto alpha = m_properties.alpha->absolutized(context);
+    if (l == m_properties.l && c == m_properties.c && h == m_properties.h && alpha == m_properties.alpha)
+        return *this;
+    return LCHLikeColorStyleValue::create<OKLCHColorStyleValue>(l, c, h, alpha);
+}
+
+// https://www.w3.org/TR/css-color-4/#serializing-oklab-oklch
+void OKLCHColorStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
+{
     builder.append("oklch("sv);
     serialize_color_component(builder, mode, m_properties.l, 1.0f, 0, 1);
     builder.append(' ');
@@ -97,7 +116,6 @@ String OKLCHColorStyleValue::to_string(SerializationMode mode) const
     }
 
     builder.append(')');
-    return MUST(builder.to_string());
 }
 
 }

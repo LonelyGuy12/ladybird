@@ -67,10 +67,12 @@ enum class ShouldComputeRole {
     X(ElementAttributeChange)                       \
     X(ElementSetShadowRoot)                         \
     X(HTMLDialogElementSetIsModal)                  \
+    X(HTMLDetailsOrDialogOpenAttributeChange)       \
     X(HTMLHyperlinkElementHrefChange)               \
     X(HTMLIFrameElementGeometryChange)              \
     X(HTMLInputElementSetChecked)                   \
     X(HTMLInputElementSetIsOpen)                    \
+    X(HTMLInputElementSetType)                      \
     X(HTMLObjectElementUpdateLayoutAndChildObjects) \
     X(HTMLOptionElementSelectedChange)              \
     X(HTMLSelectElementSetIsOpen)                   \
@@ -107,6 +109,7 @@ enum class StyleInvalidationReason {
     X(KeyframeEffect)                                 \
     X(LayoutTreeUpdate)                               \
     X(NavigableSetViewportSize)                       \
+    X(SVGGraphicsElementTransformChange)              \
     X(SVGImageElementFetchTheDocument)                \
     X(SVGImageFilterFetch)                            \
     X(StyleChange)
@@ -131,7 +134,6 @@ enum class SetNeedsLayoutReason {
     X(NodeRemove)                                         \
     X(NodeSetTextContent)                                 \
     X(None)                                               \
-    X(SVGGraphicsElementTransformChange)                  \
     X(SVGViewBoxChange)                                   \
     X(StyleChange)
 
@@ -148,11 +150,17 @@ class WEB_API Node : public EventTarget
     WEB_PLATFORM_OBJECT(Node, EventTarget);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     ParentNode* parent_or_shadow_host();
     ParentNode const* parent_or_shadow_host() const { return const_cast<Node*>(this)->parent_or_shadow_host(); }
-
+    Node const* parent_or_shadow_host_node() const;
     Element* parent_or_shadow_host_element();
     Element const* parent_or_shadow_host_element() const { return const_cast<Node*>(this)->parent_or_shadow_host_element(); }
+    ParentNode* flat_tree_parent();
+    ParentNode const* flat_tree_parent() const { return const_cast<Node*>(this)->flat_tree_parent(); }
+    Element* flat_tree_parent_element();
+    Element const* flat_tree_parent_element() const { return const_cast<Node*>(this)->flat_tree_parent_element(); }
 
     virtual ~Node();
 
@@ -325,9 +333,9 @@ public:
     GC::Ptr<Element> parent_element();
     GC::Ptr<Element const> parent_element() const;
 
-    virtual void inserted();
+    MUST_UPCALL virtual void inserted();
     virtual void post_connection();
-    virtual void removed_from(Node* old_parent, Node& old_root);
+    MUST_UPCALL virtual void removed_from(Node* old_parent, Node& old_root);
     virtual void moved_from(GC::Ptr<Node> old_parent);
 
     struct ChildrenChangedMetadata {
@@ -457,13 +465,24 @@ public:
         return {};
     }
     template<typename U>
-    U const* shadow_including_first_ancestor_of_type() const
+    U const* first_flat_tree_ancestor_of_type() const
     {
-        return const_cast<Node*>(this)->template shadow_including_first_ancestor_of_type<U>();
+        return const_cast<Node*>(this)->template first_flat_tree_ancestor_of_type<U>();
     }
 
     template<typename U>
-    U* shadow_including_first_ancestor_of_type();
+    U* first_flat_tree_ancestor_of_type();
+
+    template<typename Predicate>
+    requires requires(Predicate& predicate, Node const& node) { { predicate(node) } -> ConvertibleTo<bool>; }
+    Node const* find_in_shadow_including_ancestry(Predicate&& predicate) const
+    {
+        for (Node const* it = this; it; it = it->parent_or_shadow_host_node()) {
+            if (predicate(*it))
+                return it;
+        }
+        return nullptr;
+    }
 
     ErrorOr<String> accessible_name(Document const&, ShouldComputeRole = ShouldComputeRole::Yes) const;
     ErrorOr<String> accessible_description(Document const&) const;
@@ -472,6 +491,7 @@ public:
     Optional<String> lookup_namespace_uri(Optional<String> prefix) const;
     Optional<String> lookup_prefix(Optional<String> namespace_) const;
     bool is_default_namespace(Optional<String> namespace_) const;
+    Vector<FlyString> get_in_scope_prefixes() const;
 
     bool is_inert() const;
 

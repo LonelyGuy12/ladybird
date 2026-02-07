@@ -23,6 +23,8 @@
 
 namespace Web::SVG {
 
+GC_DEFINE_ALLOCATOR(SVGElement);
+
 SVGElement::SVGElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : Element(document, move(qualified_name))
 {
@@ -128,6 +130,7 @@ bool SVGElement::is_presentational_hint(FlyString const& name) const
 
 void SVGElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
 {
+    Base::apply_presentational_hints(cascaded_properties);
     CSS::Parser::ParsingParams parsing_context { document(), CSS::Parser::ParsingMode::SVGPresentationAttribute };
     for_each_attribute([&](auto& name, auto& value) {
         for (auto& property : attribute_style_properties()) {
@@ -249,12 +252,17 @@ void SVGElement::removed_from(Node* old_parent, Node& old_root)
 {
     Base::removed_from(old_parent, old_root);
 
-    if (auto* shadow_root = as_if<DOM::ShadowRoot>(root())) {
-        // If this element is in a shadow root hosted by a use element,
-        // it already represents a clone and is not itself referenced.
-        if (shadow_root->host() && is<SVGUseElement>(*shadow_root->host()))
-            return;
-    }
+    auto is_use_element_shadow_root = [](Node& node) {
+        auto* shadow_root = as_if<DOM::ShadowRoot>(node);
+        return shadow_root && shadow_root->host() && is<SVGUseElement>(*shadow_root->host());
+    };
+
+    // If this element is in a shadow root hosted by a use element,
+    // it already represents a clone and is not itself referenced.
+    // NB: We check both old_root (for when the element is removed from the shadow tree directly)
+    //     and root() (for when the use element host is removed from the document).
+    if (is_use_element_shadow_root(old_root) || is_use_element_shadow_root(root()))
+        return;
 
     remove_from_use_element_that_reference_this();
 }
@@ -287,7 +295,7 @@ GC::Ptr<SVGSVGElement> SVGElement::owner_svg_element()
     // The ownerSVGElement IDL attribute represents the nearest ancestor ‘svg’ element.
     // On getting ownerSVGElement, the nearest ancestor ‘svg’ element is returned;
     // if the current element is the outermost svg element, then null is returned.
-    return shadow_including_first_ancestor_of_type<SVGSVGElement>();
+    return first_flat_tree_ancestor_of_type<SVGSVGElement>();
 }
 
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__viewportElement
@@ -318,10 +326,10 @@ GC::Ref<SVGAnimatedLength> SVGElement::svg_animated_length_for_property(CSS::Pro
     // FIXME: Create a proper animated value when animations are supported.
     auto make_length = [&](SVGLength::ReadOnly read_only) {
         if (auto const computed_properties = this->computed_properties()) {
-            if (auto layout_node = this->layout_node()) {
-                if (auto length = computed_properties->length_percentage(property, *layout_node, CSS::ComputedProperties::ClampNegativeLengths::Yes); length.has_value())
-                    return SVGLength::from_length_percentage(realm(), *length, read_only);
-            }
+            auto const& style_value = computed_properties->property(property);
+
+            if (!style_value.has_auto())
+                return SVGLength::from_length_percentage(realm(), CSS::LengthPercentage::from_style_value(style_value), read_only);
         }
         return SVGLength::create(realm(), 0, 0, read_only);
     };

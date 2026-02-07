@@ -12,6 +12,7 @@
 #include <AK/Debug.h>
 #include <AK/Error.h>
 #include <AK/Find.h>
+#include <AK/FixedBitmap.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/Math.h>
@@ -41,6 +42,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/CSS/StyleSheet.h>
+#include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
@@ -56,7 +58,6 @@
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
-#include <LibWeb/CSS/StyleValues/MathDepthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PendingSubstitutionStyleValue.h>
@@ -86,7 +87,6 @@
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <math.h>
-#include <stdio.h>
 
 namespace Web::CSS {
 
@@ -133,6 +133,8 @@ void StyleComputer::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_document);
+    if (m_has_result_cache)
+        visitor.visit(*m_has_result_cache);
 }
 
 Optional<String> StyleComputer::user_agent_style_sheet_source(StringView name)
@@ -319,9 +321,9 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractE
     // ::part() can apply to anything in a shadow tree, that is either an element with a `part` attribute or a pseudo-element.
     // Rules from any ancestor style scope can apply.
     if (shadow_root && (abstract_element.pseudo_element().has_value() || !abstract_element.element().part_names().is_empty())) {
-        for (auto* part_shadow_root = abstract_element.element().shadow_including_first_ancestor_of_type<DOM::ShadowRoot>();
+        for (auto* part_shadow_root = abstract_element.element().first_flat_tree_ancestor_of_type<DOM::ShadowRoot>();
             part_shadow_root;
-            part_shadow_root = part_shadow_root->shadow_including_first_ancestor_of_type<DOM::ShadowRoot>()) {
+            part_shadow_root = part_shadow_root->first_flat_tree_ancestor_of_type<DOM::ShadowRoot>()) {
 
             if (auto const* rule_cache = rule_cache_for_cascade_origin(cascade_origin, qualified_layer_name, part_shadow_root)) {
                 add_rules_to_run(rule_cache->part_rules);
@@ -350,6 +352,7 @@ Vector<MatchingRule const*> StyleComputer::collect_matching_rules(DOM::AbstractE
             .style_sheet_for_rule = *rule_to_run.sheet,
             .subject = abstract_element.element(),
             .collect_per_element_selector_involvement_metadata = true,
+            .has_result_cache = m_has_result_cache.ptr(),
         };
         ScopeGuard guard = [&] {
             attempted_pseudo_class_matches |= context.attempted_pseudo_class_matches;
@@ -400,7 +403,7 @@ void StyleComputer::for_each_property_expanding_shorthands(PropertyID property_i
         // https://drafts.csswg.org/css-values-5/#pending-substitution-value
         // Ensure we keep the longhand around until it can be resolved.
         set_longhand_property(property_id, value);
-        auto pending_substitution_value = PendingSubstitutionStyleValue::create();
+        auto pending_substitution_value = PendingSubstitutionStyleValue::create(value);
         for (auto longhand_id : longhands_for_shorthand(property_id)) {
             for_each_property_expanding_shorthands(longhand_id, pending_substitution_value, set_longhand_property);
         }
@@ -441,7 +444,7 @@ void StyleComputer::cascade_declarations(
     Optional<LogicalAliasMappingContext> logical_alias_mapping_context,
     ReadonlySpan<PropertyID> properties_to_cascade) const
 {
-    auto seen_properties = MUST(Bitmap::create(to_underlying(last_property_id) + 1, false));
+    AK::FixedBitmap<to_underlying(last_property_id) + 1> seen_properties(false);
     auto cascade_style_declaration = [&](CSSStyleProperties const& declaration) {
         seen_properties.fill(false);
         for (auto const& property : declaration.properties()) {
@@ -627,7 +630,7 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
     auto compute_keyframe_values = [&computed_properties, &abstract_element, this](auto const& keyframe_values) {
         HashMap<PropertyID, RefPtr<StyleValue const>> result;
         HashMap<PropertyID, PropertyID> longhands_set_by_property_id;
-        auto property_is_set_by_use_initial = MUST(Bitmap::create(number_of_longhand_properties, false));
+        AK::FixedBitmap<number_of_longhand_properties> property_is_set_by_use_initial(false);
 
         auto property_is_logical_alias_including_shorthands = [&](PropertyID property_id) {
             if (property_is_shorthand(property_id))
@@ -796,7 +799,8 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
                 .viewport_rect = viewport_rect(),
                 .font_metrics = font_metrics,
                 .root_font_metrics = m_root_element_font_metrics },
-            .abstract_element = abstract_element
+            .abstract_element = abstract_element,
+            .color_scheme = computed_properties.color_scheme(document().page().preferred_color_scheme(), document().supported_color_schemes()),
         };
 
         // NOTE: This doesn't necessarily return the specified value if we reach into computed_properties but that
@@ -869,10 +873,10 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
         }
 
         auto const& underlying_value = computed_properties.property(it.key);
-        if (auto composited_start_value = composite_value(underlying_value, start, start_composite_operation))
+        if (auto composited_start_value = composite_value(it.key, underlying_value, start, start_composite_operation))
             start = *composited_start_value;
 
-        if (auto composited_end_value = composite_value(underlying_value, end, end_composite_operation))
+        if (auto composited_end_value = composite_value(it.key, underlying_value, end, end_composite_operation))
             end = *composited_end_value;
 
         if (auto next_value = interpolate_property(*effect->target(), it.key, *start, *end, progress_in_keyframe, AllowDiscrete::Yes)) {
@@ -1031,54 +1035,7 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
         return;
     }
 
-    auto coordinated_transition_list = style.assemble_coordinated_value_list(
-        PropertyID::TransitionProperty,
-        { PropertyID::TransitionProperty, PropertyID::TransitionDuration, PropertyID::TransitionTimingFunction, PropertyID::TransitionDelay, PropertyID::TransitionBehavior });
-
-    auto transition_properties = coordinated_transition_list.get(PropertyID::TransitionProperty).value();
-    Vector<Vector<PropertyID>> properties;
-
-    for (size_t i = 0; i < transition_properties.size(); i++) {
-        auto property_value = transition_properties[i];
-        Vector<PropertyID> properties_for_this_transition;
-
-        auto const append_property_mapping_logical_aliases = [&](PropertyID property_id) {
-            if (property_is_logical_alias(property_id))
-                properties_for_this_transition.append(map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { style.writing_mode(), style.direction() }));
-            else if (property_id != PropertyID::Custom)
-                properties_for_this_transition.append(property_id);
-        };
-
-        if (property_value->is_keyword()) {
-            VERIFY(property_value->to_keyword() == Keyword::None);
-            properties.append({});
-            continue;
-        } else {
-            auto maybe_property = property_id_from_string(property_value->as_custom_ident().custom_ident());
-            if (!maybe_property.has_value()) {
-                properties.append({});
-                continue;
-            }
-
-            auto transition_property = maybe_property.release_value();
-            if (property_is_shorthand(transition_property)) {
-                for (auto const& prop : expanded_longhands_for_shorthand(transition_property))
-                    append_property_mapping_logical_aliases(prop);
-            } else {
-                append_property_mapping_logical_aliases(transition_property);
-            }
-        }
-
-        properties.append(move(properties_for_this_transition));
-    }
-
-    element.add_transitioned_properties(
-        pseudo_element,
-        move(properties),
-        move(coordinated_transition_list.get(PropertyID::TransitionDelay).value()),
-        move(coordinated_transition_list.get(PropertyID::TransitionDuration).value()),
-        move(coordinated_transition_list.get(PropertyID::TransitionTimingFunction).value()),
-        move(coordinated_transition_list.get(PropertyID::TransitionBehavior).value()));
+    element.add_transitioned_properties(pseudo_element, style.transitions());
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
@@ -1314,7 +1271,10 @@ StyleComputer::MatchingRuleSet StyleComputer::build_matching_rule_set(DOM::Abstr
 
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
         VERIFY(abstract_element.pseudo_element().has_value());
-        did_match_any_pseudo_element_rules = !matching_rule_set.author_rules.is_empty()
+        auto author_rules_has_any_rules = any_of(matching_rule_set.author_rules, [](auto const& layer) {
+            return !layer.rules.is_empty();
+        });
+        did_match_any_pseudo_element_rules = author_rules_has_any_rules
             || !matching_rule_set.user_rules.is_empty()
             || !matching_rule_set.user_agent_rules.is_empty();
     }
@@ -1483,11 +1443,17 @@ void StyleComputer::compute_font(ComputedProperties& style, Optional<DOM::Abstra
 
     auto inherited_font_size = inheritance_parent_has_computed_properties ? inheritance_parent->computed_properties()->font_size() : InitialValues::font_size();
     auto inherited_math_depth = inheritance_parent_has_computed_properties ? inheritance_parent->computed_properties()->math_depth() : InitialValues::math_depth();
+    auto inherited_math_style = inheritance_parent_has_computed_properties ? inheritance_parent->computed_properties()->math_style() : InitialValues::math_style();
 
     ComputationContext font_computation_context {
         .length_resolution_context = inheritance_parent_has_computed_properties ? Length::ResolutionContext::for_element(inheritance_parent.value()) : Length::ResolutionContext::for_window(*m_document->window()),
         .abstract_element = abstract_element
     };
+
+    auto const& math_depth_specified_value = style.property(PropertyID::MathDepth, ComputedProperties::WithAnimationsApplied::No);
+    style.set_property_without_modifying_flags(
+        PropertyID::MathDepth,
+        compute_math_depth(math_depth_specified_value, inherited_math_depth, inherited_math_style, font_computation_context));
 
     auto const& font_size_specified_value = style.property(PropertyID::FontSize, ComputedProperties::WithAnimationsApplied::No);
 
@@ -1519,7 +1485,12 @@ void StyleComputer::compute_font(ComputedProperties& style, Optional<DOM::Abstra
 
     style.set_property_without_modifying_flags(
         PropertyID::FontVariationSettings,
-        compute_font_variation_settings(font_variation_settings_value, font_computation_context));
+        compute_font_feature_tag_value_list(font_variation_settings_value, font_computation_context));
+
+    auto const& font_feature_settings_specified_value = style.property(PropertyID::FontFeatureSettings);
+    style.set_property_without_modifying_flags(
+        PropertyID::FontFeatureSettings,
+        compute_font_feature_tag_value_list(font_feature_settings_specified_value, font_computation_context));
 
     RefPtr<Gfx::Font const> const found_font = style.first_available_computed_font(m_document->font_computer());
 
@@ -1602,7 +1573,8 @@ void StyleComputer::compute_property_values(ComputedProperties& style, Optional<
             .font_metrics = font_metrics,
             .root_font_metrics = m_root_element_font_metrics,
         },
-        .abstract_element = abstract_element
+        .abstract_element = abstract_element,
+        .color_scheme = style.color_scheme(document().page().preferred_color_scheme(), document().supported_color_schemes())
     };
 
     // NOTE: This doesn't necessarily return the specified value if we have already computed this property but that
@@ -1831,7 +1803,6 @@ GC::Ref<ComputedProperties> StyleComputer::create_document_style() const
         style->set_property(property_id, property_initial_value(property_id));
     }
 
-    compute_math_depth(style, {});
     compute_font(style, {});
     compute_property_values(style, {});
     style->set_property(CSS::PropertyID::Width, CSS::LengthStyleValue::create(CSS::Length::make_px(viewport_rect().width())));
@@ -1905,8 +1876,16 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
         // NOTE: If we're computing style for a pseudo-element, we look for a number of reasons to bail early.
 
+        // Some pseudo-elements are generated regardless of CSS rules, so we need to compute their styles even when no
+        // rules matched.
+        auto has_implicit_style = first_is_one_of(*abstract_element.pseudo_element(),
+            PseudoElement::DetailsContent,
+            PseudoElement::FileSelectorButton,
+            PseudoElement::Marker,
+            PseudoElement::Placeholder);
+
         // Bail if no pseudo-element rules matched.
-        if (!did_match_any_pseudo_element_rules)
+        if (!did_match_any_pseudo_element_rules && !has_implicit_style)
             return {};
 
         // Bail if no pseudo-element would be generated due to...
@@ -2040,8 +2019,14 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
 
     for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
         auto property_id = static_cast<CSS::PropertyID>(i);
-        auto value = cascaded_properties.property(property_id);
         auto inherited = ComputedProperties::Inherited::No;
+        RefPtr<StyleValue const> value;
+        auto important = Important::No;
+
+        if (auto cascaded_style_property = cascaded_properties.style_property(property_id); cascaded_style_property.has_value()) {
+            important = cascaded_style_property->important;
+            value = cascaded_style_property->value;
+        }
 
         // NOTE: We've already handled font-size above.
         if (property_id == PropertyID::FontSize && !value && new_font_size)
@@ -2073,22 +2058,19 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
         if (!value || value->is_initial() || value->is_unset())
             value = property_initial_value(property_id);
 
-        computed_style->set_property(property_id, value.release_nonnull(), inherited, cascaded_properties.is_property_important(property_id) ? Important::Yes : Important::No);
+        computed_style->set_property(property_id, value.release_nonnull(), inherited, important);
     }
 
     // Compute the value of custom properties
     compute_custom_properties(computed_style, abstract_element);
 
-    // 2. Compute the math-depth property, since that might affect the font-size
-    compute_math_depth(computed_style, abstract_element);
-
-    // 3. Compute the font, since that may be needed for font-relative CSS units
+    // 2. Compute the font, since that may be needed for font-relative CSS units
     compute_font(computed_style, abstract_element);
 
-    // 4. Convert properties into their computed forms
+    // 3. Convert properties into their computed forms
     compute_property_values(computed_style, abstract_element);
 
-    // 5. Add or modify CSS-defined animations
+    // 4. Add or modify CSS-defined animations
     process_animation_definitions(computed_style, abstract_element);
 
     auto animations = abstract_element.element().get_animations_internal(
@@ -2106,18 +2088,18 @@ GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractEleme
         }
     }
 
-    // 6. Run automatic box type transformations
+    // 5. Run automatic box type transformations
     transform_box_type_if_needed(computed_style, abstract_element);
 
-    // 7. Apply any property-specific computed value logic
+    // 6. Apply any property-specific computed value logic
     resolve_effective_overflow_values(computed_style);
     compute_text_align(computed_style, abstract_element);
 
-    // 8. Let the element adjust computed style
+    // 7. Let the element adjust computed style
     if (!abstract_element.pseudo_element().has_value())
         abstract_element.element().adjust_computed_style(computed_style);
 
-    // 9. Transition declarations [css-transitions-1]
+    // 8. Transition declarations [css-transitions-1]
     // Theoretically this should be part of the cascade, but it works with computed values, which we don't have until now.
     compute_transitioned_properties(computed_style, abstract_element);
     if (auto previous_style = abstract_element.computed_properties()) {
@@ -2316,8 +2298,9 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_property(
     case PropertyID::CornerTopLeftShape:
     case PropertyID::CornerTopRightShape:
         return compute_corner_shape(absolutized_value);
+    case PropertyID::FontFeatureSettings:
     case PropertyID::FontVariationSettings:
-        return compute_font_variation_settings(absolutized_value, computation_context);
+        return compute_font_feature_tag_value_list(absolutized_value, computation_context);
     case PropertyID::LetterSpacing:
     case PropertyID::WordSpacing:
         if (absolutized_value->to_keyword() == Keyword::Normal)
@@ -2364,17 +2347,17 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_animation_name(NonnullRef
     });
 }
 
-NonnullRefPtr<StyleValue const> StyleComputer::compute_font_variation_settings(NonnullRefPtr<StyleValue const> const& specified_value, ComputationContext const& computation_context)
+// https://drafts.csswg.org/css-fonts-4/#font-variation-settings-def
+// https://drafts.csswg.org/css-fonts/#font-feature-settings-prop
+NonnullRefPtr<StyleValue const> StyleComputer::compute_font_feature_tag_value_list(NonnullRefPtr<StyleValue const> const& specified_value, ComputationContext const& computation_context)
 {
+    // NB: The computation logic is the same for both font-feature-settings and font-variation-settings, first we
+    //     deduplicate feature tags (with latter taking precedence), then we sort them in ascending order by code unit
     auto const& absolutized_value = specified_value->absolutized(computation_context);
 
     if (absolutized_value->is_keyword())
         return absolutized_value;
 
-    // https://drafts.csswg.org/css-fonts-4/#font-variation-settings-def
-    // If the same axis name appears more than once, the value associated with the last appearance supersedes any
-    // previous value for that axis. This deduplication is observable by accessing the computed value of this property."
-    // So, we deduplicate them here using a HashSet.
     auto const& value_list = absolutized_value->as_value_list();
     OrderedHashMap<FlyString, NonnullRefPtr<OpenTypeTaggedStyleValue const>> axis_tags_map;
     for (size_t i = 0; i < value_list.values().size(); i++) {
@@ -2384,7 +2367,6 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_font_variation_settings(N
 
     StyleValueVector axis_tags;
 
-    // The computed value contains the de-duplicated axis names, sorted in ascending order by code unit.
     for (auto const& [key, axis_tag] : axis_tags_map)
         axis_tags.append(axis_tag);
 
@@ -2527,7 +2509,7 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_font_style(NonnullRefPtr<
 
     // NB: We always parse as a FontStyleStyleValue, but StylePropertyMap is able to set a KeywordStyleValue directly.
     if (specified_value->is_keyword())
-        return FontStyleStyleValue::create(*keyword_to_font_style(specified_value->to_keyword()));
+        return FontStyleStyleValue::create(keyword_to_font_style_keyword(specified_value->to_keyword()).release_value());
 
     return specified_value->absolutized(computation_context);
 }
@@ -2799,77 +2781,39 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_position_area(NonnullRefP
     return absolutized_value;
 }
 
-void StyleComputer::compute_math_depth(ComputedProperties& style, Optional<DOM::AbstractElement> element) const
+// https://w3c.github.io/mathml-core/#propdef-math-depth
+NonnullRefPtr<StyleValue const> StyleComputer::compute_math_depth(NonnullRefPtr<StyleValue const> const& specified_value, int inherited_math_depth, MathStyle inherited_math_style, ComputationContext const& computation_context)
 {
-    // https://w3c.github.io/mathml-core/#propdef-math-depth
-
-    auto element_to_inherit_style_from = element.has_value() ? element->element_to_inherit_style_from() : OptionalNone {};
-
-    auto inherited_math_depth = [&]() {
-        if (!element_to_inherit_style_from.has_value())
-            return InitialValues::math_depth();
-        return element_to_inherit_style_from->computed_properties()->math_depth();
-    };
-
-    // NB: We always parse as a MathDepthStyleValue, but StylePropertyMap is able to set other StyleValues directly.
-    //     So, extract the properties we care about from it or other StyleValue types we might have.
-    bool is_auto_add = false;
-    bool is_add = false;
-    bool is_integer = false;
-    RefPtr<StyleValue const> integer_value;
-
-    auto const& property_value = style.property(PropertyID::MathDepth);
-    if (property_value.to_keyword() == Keyword::AutoAdd) {
-        is_auto_add = true;
-    } else if (property_value.is_integer() || property_value.is_calculated()) {
-        integer_value = property_value;
-    } else {
-        auto const& math_depth = property_value.as_math_depth();
-        is_auto_add = math_depth.is_auto_add();
-        is_add = math_depth.is_add();
-        is_integer = math_depth.is_integer();
-        if (is_integer || is_add)
-            integer_value = math_depth.integer_value();
-    }
+    auto absolutized_value = specified_value->absolutized(computation_context);
 
     auto resolve_integer = [&](StyleValue const& integer_value) {
         if (integer_value.is_integer())
             return integer_value.as_integer().integer();
-        if (integer_value.is_calculated()) {
-            auto parent_length_resolution_context = element_to_inherit_style_from.has_value() ? Length::ResolutionContext::for_element(element_to_inherit_style_from.value()) : Length::ResolutionContext::for_window(*m_document->window());
-            return integer_value.as_calculated().resolve_integer({ .length_resolution_context = parent_length_resolution_context }).value();
-        }
+
+        if (integer_value.is_calculated())
+            return integer_value.as_calculated().resolve_integer({}).value();
+
         VERIFY_NOT_REACHED();
-    };
-
-    auto inherited_math_style = [&]() -> NonnullRefPtr<StyleValue const> {
-        if (!element_to_inherit_style_from.has_value())
-            return property_initial_value(CSS::PropertyID::MathStyle);
-
-        return element_to_inherit_style_from->computed_properties()->property(CSS::PropertyID::MathStyle);
     };
 
     // The computed value of the math-depth value is determined as follows:
     // - If the specified value of math-depth is auto-add and the inherited value of math-style is compact
     //   then the computed value of math-depth of the element is its inherited value plus one.
-    if (is_auto_add && inherited_math_style()->to_keyword() == Keyword::Compact) {
-        style.set_math_depth(inherited_math_depth() + 1);
-        return;
-    }
+    if (absolutized_value->to_keyword() == Keyword::AutoAdd && inherited_math_style == MathStyle::Compact)
+        return IntegerStyleValue::create(inherited_math_depth + 1);
+
     // - If the specified value of math-depth is of the form add(<integer>) then the computed value of
     //   math-depth of the element is its inherited value plus the specified integer.
-    if (is_add) {
-        style.set_math_depth(inherited_math_depth() + resolve_integer(*integer_value));
-        return;
-    }
+    if (absolutized_value->is_add_function())
+        return IntegerStyleValue::create(inherited_math_depth + resolve_integer(*absolutized_value->as_add_function().value()));
+
     // - If the specified value of math-depth is of the form <integer> then the computed value of math-depth
     //   of the element is the specified integer.
-    if (is_integer) {
-        style.set_math_depth(resolve_integer(*integer_value));
-        return;
-    }
+    if (absolutized_value->is_integer() || absolutized_value->is_calculated())
+        return IntegerStyleValue::create(resolve_integer(*absolutized_value));
+
     // - Otherwise, the computed value of math-depth of the element is the inherited one.
-    style.set_math_depth(inherited_math_depth());
+    return IntegerStyleValue::create(inherited_math_depth);
 }
 
 static void for_each_element_hash(DOM::Element const& element, auto callback)
@@ -2887,6 +2831,14 @@ static void for_each_element_hash(DOM::Element const& element, auto callback)
 void StyleComputer::reset_ancestor_filter()
 {
     m_ancestor_filter->clear();
+}
+
+void StyleComputer::reset_has_result_cache()
+{
+    if (!m_has_result_cache)
+        m_has_result_cache = make<SelectorEngine::HasResultCache>();
+    else
+        m_has_result_cache->clear();
 }
 
 void StyleComputer::push_ancestor(DOM::Element const& element)

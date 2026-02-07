@@ -12,7 +12,7 @@
 
 namespace Web::CSS {
 
-FontStyleStyleValue::FontStyleStyleValue(FontStyle font_style, ValueComparingRefPtr<StyleValue const> angle_value)
+FontStyleStyleValue::FontStyleStyleValue(FontStyleKeyword font_style, ValueComparingRefPtr<StyleValue const> angle_value)
     : StyleValueWithDefaultOperators(Type::FontStyle)
     , m_font_style(font_style)
     , m_angle_value(angle_value)
@@ -25,35 +25,34 @@ int FontStyleStyleValue::to_font_slope() const
 {
     // FIXME: Implement oblique <angle>
     switch (as_font_style().font_style()) {
-    case FontStyle::Italic:
+    case FontStyleKeyword::Italic:
         static int italic_slope = Gfx::name_to_slope("Italic"sv);
         return italic_slope;
-    case FontStyle::Oblique:
+    case FontStyleKeyword::Oblique:
         static int oblique_slope = Gfx::name_to_slope("Oblique"sv);
         return oblique_slope;
-    case FontStyle::Normal:
+    case FontStyleKeyword::Normal:
     default:
         static int normal_slope = Gfx::name_to_slope("Normal"sv);
         return normal_slope;
     }
 }
 
-String FontStyleStyleValue::to_string(SerializationMode mode) const
+void FontStyleStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
 {
     Optional<String> angle_string;
     if (m_angle_value) {
         angle_string = m_angle_value->to_string(mode);
-        if (m_font_style == FontStyle::Oblique && angle_string == "0deg"sv)
-            return "normal"_string;
+        if (m_font_style == FontStyleKeyword::Oblique && angle_string == "0deg"sv) {
+            builder.append("normal"sv);
+            return;
+        }
     }
-    StringBuilder builder;
     builder.append(CSS::to_string(m_font_style));
     // https://drafts.csswg.org/css-fonts/#valdef-font-style-oblique-angle--90deg-90deg
     // The lack of an <angle> represents 14deg. (Note that a font might internally provide its own mapping for "oblique", but the mapping within the font is disregarded.)
     if (angle_string.has_value() && angle_string != "14deg"sv)
         builder.appendff(" {}", angle_string);
-
-    return MUST(builder.to_string());
 }
 
 ValueComparingNonnullRefPtr<StyleValue const> FontStyleStyleValue::absolutized(ComputationContext const& computation_context) const

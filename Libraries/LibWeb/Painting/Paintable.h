@@ -11,6 +11,7 @@
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
+#include <LibWeb/Painting/ShadowData.h>
 #include <LibWeb/PixelUnits.h>
 #include <LibWeb/TraversalDecision.h>
 #include <LibWeb/TreeNode.h>
@@ -31,7 +32,7 @@ struct HitTestResult {
     size_t index_in_node { 0 };
     Optional<CSSPixels> vertical_distance {};
     Optional<CSSPixels> horizontal_distance {};
-
+    Optional<CSS::CursorPredefined> cursor_override {};
     enum InternalPosition {
         None,
         Before,
@@ -55,6 +56,8 @@ class WEB_API Paintable
     GC_CELL(Paintable, JS::Cell);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     virtual ~Paintable();
 
     void detach_from_layout_node();
@@ -70,9 +73,6 @@ public:
 
     bool has_stacking_context() const;
     StackingContext* enclosing_stacking_context();
-
-    virtual void before_paint(DisplayListRecordingContext&, PaintPhase) const { }
-    virtual void after_paint(DisplayListRecordingContext&, PaintPhase) const { }
 
     virtual void paint(DisplayListRecordingContext&, PaintPhase) const { }
     void paint_inspector_overlay(DisplayListRecordingContext&) const;
@@ -145,15 +145,30 @@ public:
     SelectionState selection_state() const { return m_selection_state; }
     void set_selection_state(SelectionState state) { m_selection_state = state; }
 
-    virtual void resolve_paint_properties();
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-styling
+    struct TextDecorationStyle {
+        Vector<CSS::TextDecorationLine> line;
+        CSS::TextDecorationStyle style;
+        Color color;
+    };
+    struct SelectionStyle {
+        Color background_color;
+        Optional<Color> text_color;
+        Optional<Vector<ShadowData>> text_shadow;
+        Optional<TextDecorationStyle> text_decoration;
+
+        bool has_styling() const
+        {
+            return background_color.alpha() > 0 || text_color.has_value() || text_shadow.has_value() || text_decoration.has_value();
+        }
+    };
+    [[nodiscard]] SelectionStyle selection_style() const;
+
+    MUST_UPCALL virtual void resolve_paint_properties();
 
     [[nodiscard]] String debug_description() const;
 
-    virtual void finalize() override
-    {
-        if (m_list_node.is_in_list())
-            m_list_node.remove();
-    }
+    virtual void finalize() override;
 
     friend class Layout::Node;
 
@@ -163,11 +178,12 @@ protected:
     virtual void paint_inspector_overlay_internal(DisplayListRecordingContext&) const { }
     virtual void visit_edges(Cell::Visitor&) override;
 
+    Optional<GC::Ptr<PaintableBox>> mutable m_containing_block;
+
 private:
     IntrusiveListNode<Paintable> m_list_node;
     GC::Ptr<DOM::Node> m_dom_node;
     GC::Ref<Layout::Node const> m_layout_node;
-    Optional<GC::Ptr<PaintableBox>> mutable m_containing_block;
 
     SelectionState m_selection_state { SelectionState::None };
 
@@ -178,6 +194,8 @@ private:
     bool m_floating : 1 { false };
     bool m_inline : 1 { false };
     bool m_visible_for_hit_testing : 1 { true };
+
+protected:
     bool m_needs_paint_only_properties_update : 1 { true };
 };
 

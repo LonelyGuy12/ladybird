@@ -151,6 +151,7 @@ EvalError
 Event
 EventSource
 EventTarget
+External
 FederatedCredential
 File
 FileList
@@ -163,6 +164,7 @@ Float64Array
 FocusEvent
 FontFace
 FontFaceSet
+FontFaceSetLoadEvent
 FormData
 FormDataEvent
 Function
@@ -323,6 +325,7 @@ OfflineAudioContext
 OffscreenCanvas
 OffscreenCanvasRenderingContext2D
 Option
+Origin
 OscillatorNode
 PageTransitionEvent
 PannerNode
@@ -347,6 +350,7 @@ ProcessingInstruction
 ProgressEvent
 Promise
 PromiseRejectionEvent
+QuotaExceededError
 RadioNodeList
 Range
 RangeError
@@ -384,6 +388,7 @@ SVGFEBlendElement
 SVGFEColorMatrixElement
 SVGFEComponentTransferElement
 SVGFECompositeElement
+SVGFEDropShadowElement
 SVGFEFloodElement
 SVGFEFuncAElement
 SVGFEFuncBElement
@@ -437,6 +442,7 @@ SVGViewElement
 Screen
 ScreenOrientation
 ScriptProcessorNode
+ScrollTimeline
 SecurityPolicyViolationEvent
 Selection
 Serial
@@ -451,6 +457,17 @@ SharedArrayBuffer
 SharedWorker
 SourceBuffer
 SourceBufferList
+SpeechGrammar
+SpeechGrammarList
+SpeechRecognition
+SpeechRecognitionAlternative
+SpeechRecognitionEvent
+SpeechRecognitionPhrase
+SpeechRecognitionResult
+SpeechRecognitionResultList
+SpeechSynthesis
+SpeechSynthesisUtterance
+SpeechSynthesisVoice
 StaticRange
 StereoPannerNode
 Storage
@@ -543,6 +560,9 @@ XMLSerializer
 XPathEvaluator
 XPathExpression
 XPathResult
+XRSession
+XRSessionEvent
+XRSystem
 __finishTest
 __preventMultipleTestFunctions
 animationFrame

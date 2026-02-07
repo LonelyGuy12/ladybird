@@ -15,6 +15,7 @@
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShorthandStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
@@ -32,6 +33,7 @@ GC_DEFINE_ALLOCATOR(FontFaceSet);
 // https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-fontfaceset
 GC::Ref<FontFaceSet> FontFaceSet::construct_impl(JS::Realm& realm, Vector<GC::Root<FontFace>> const& initial_faces)
 {
+    HTML::TemporaryExecutionContext temporary_execution_context { realm };
     auto ready_promise = WebIDL::create_promise(realm);
     auto set_entries = JS::Set::create(realm);
 
@@ -72,8 +74,7 @@ void FontFaceSet::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-add
-WebIDL::ExceptionOr<GC::Ref<FontFaceSet>>
-FontFaceSet::add(GC::Root<FontFace> face)
+WebIDL::ExceptionOr<GC::Ref<FontFaceSet>> FontFaceSet::add(GC::Root<FontFace> face)
 {
     // 1. If font is already in the FontFaceSet’s set entries, skip to the last step of this algorithm immediately.
     if (m_set_entries->set_has(face))
@@ -84,6 +85,16 @@ FontFaceSet::add(GC::Root<FontFace> face)
         return WebIDL::InvalidModificationError::create(realm(), "Cannot add a CSS-connected FontFace to a FontFaceSet"_utf16);
     }
 
+    // NB: This method implements steps 3 and 4.
+    add_css_connected_font(*face);
+
+    // 5. Return the FontFaceSet.
+    return GC::Ref<FontFaceSet>(*this);
+}
+
+// https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-add
+void FontFaceSet::add_css_connected_font(GC::Ref<FontFace> face)
+{
     // 3. Add the font argument to the FontFaceSet’s set entries.
     m_set_entries->set_add(face);
 
@@ -98,9 +109,6 @@ FontFaceSet::add(GC::Root<FontFace> face)
         // 2. Append font to the FontFaceSet’s [[LoadingFonts]] list.
         m_loading_fonts.append(*face);
     }
-
-    // 5. Return the FontFaceSet.
-    return GC::Ref<FontFaceSet>(*this);
 }
 
 // https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-delete
@@ -131,8 +139,27 @@ bool FontFaceSet::delete_(GC::Root<FontFace> face)
 // https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-clear
 void FontFaceSet::clear()
 {
-    // FIXME: Do the actual spec steps
-    m_set_entries->set_clear();
+    // 1. Remove all non-CSS-connected items from the FontFaceSet's set entries,
+    //    its [[LoadedFonts]] list, and its [[FailedFonts]] list.
+    Vector<JS::Value> to_remove;
+    for (auto font_face_value : *m_set_entries) {
+        auto& font_face = as<FontFace>(font_face_value.key.as_object());
+        if (!font_face.is_css_connected())
+            to_remove.append(font_face_value.key);
+    }
+    for (auto const& value : to_remove)
+        m_set_entries->set_remove(value);
+
+    m_loaded_fonts.remove_all_matching([](auto const& font) { return !font->is_css_connected(); });
+    m_failed_fonts.remove_all_matching([](auto const& font) { return !font->is_css_connected(); });
+
+    // 2. If the FontFaceSet's [[LoadingFonts]] list is non-empty, remove all items from it,
+    //    then switch the FontFaceSet to loaded.
+    if (!m_loading_fonts.is_empty()) {
+        m_loading_fonts.clear();
+        if (m_loading_fonts.is_empty())
+            m_status = Bindings::FontFaceSetLoadStatus::Loaded;
+    }
 }
 
 // https://drafts.csswg.org/css-font-loading/#dom-fontfaceset-onloading
@@ -203,14 +230,22 @@ static WebIDL::ExceptionOr<GC::Ref<JS::Set>> find_matching_font_faces(JS::Realm&
     //    that this may be more than just a single font face.
     for (auto const& font_family : font_family_list.values()) {
         // FIXME: The matching below is super basic. We currently just match font family names by their string value.
-        if (!font_family->is_string())
-            continue;
+        auto maybe_font_family_name = [&]() -> Optional<FlyString> {
+            if (font_family->is_string())
+                return font_family->as_string().string_value();
 
-        auto const& font_family_name = font_family->as_string().string_value();
+            if (font_family->is_custom_ident())
+                return font_family->as_custom_ident().custom_ident();
+
+            return {};
+        }();
+
+        if (!maybe_font_family_name.has_value())
+            continue;
 
         for (auto font_face_value : *available_font_faces) {
             auto& font_face = as<FontFace>(font_face_value.key.as_object());
-            if (font_face.family() != font_family_name)
+            if (font_face.family() != maybe_font_family_name.value())
                 continue;
 
             matched_font_faces->set_add(font_face_value.key);

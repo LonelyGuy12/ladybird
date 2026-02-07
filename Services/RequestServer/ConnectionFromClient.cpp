@@ -23,18 +23,23 @@
 
 namespace RequestServer {
 
-static HashMap<int, RefPtr<ConnectionFromClient>> s_connections;
+static HashMap<int, NonnullRefPtr<ConnectionFromClient>>* g_connections;
 static IDAllocator s_client_ids;
 
 Optional<HTTP::DiskCache> g_disk_cache;
+
+void ConnectionFromClient::set_connections(HashMap<int, NonnullRefPtr<ConnectionFromClient>>& connections)
+{
+    g_connections = &connections;
+}
 
 ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transport)
     : IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint>(*this, move(transport), s_client_ids.allocate())
     , m_resolver(Resolver::default_resolver())
 {
-    s_connections.set(client_id(), *this);
+    g_connections->set(client_id(), *this);
 
-    m_alt_svc_cache_path = ByteString::formatted("{}/Ladybird/alt-svc-cache.txt", Core::StandardPaths::user_data_directory());
+    m_alt_svc_cache_path = ByteString::formatted("{}/Ladybird/alt-svc-cache.txt", Core::StandardPaths::cache_directory());
 
     m_curl_multi = curl_multi_init();
 
@@ -78,10 +83,10 @@ void ConnectionFromClient::request_complete(Badge<Request>, Request const& reque
 void ConnectionFromClient::die()
 {
     auto client_id = this->client_id();
-    s_connections.remove(client_id);
+    g_connections->remove(client_id);
     s_client_ids.deallocate(client_id);
 
-    if (s_connections.is_empty())
+    if (g_connections->is_empty())
         Core::EventLoop::current().quit(0);
 }
 
@@ -137,7 +142,7 @@ ErrorOr<IPC::File> ConnectionFromClient::create_client_socket()
         return client_socket.release_error();
     }
 
-    // Note: A ref is stored in the static s_connections map
+    // Note: A ref is stored in the g_connections map
     auto client = adopt_ref(*new ConnectionFromClient(make<IPC::Transport>(client_socket.release_value())));
 
     return IPC::File::adopt_fd(socket_fds[1]);
@@ -187,11 +192,11 @@ void ConnectionFromClient::set_use_system_dns()
     m_resolver->dns.reset_connection();
 }
 
-void ConnectionFromClient::start_request(u64 request_id, ByteString method, URL::URL url, Vector<HTTP::Header> request_headers, ByteBuffer request_body, Core::ProxyData proxy_data)
+void ConnectionFromClient::start_request(u64 request_id, ByteString method, URL::URL url, Vector<HTTP::Header> request_headers, ByteBuffer request_body, HTTP::CacheMode cache_mode, Core::ProxyData proxy_data)
 {
     dbgln_if(REQUESTSERVER_DEBUG, "RequestServer: start_request({}, {})", request_id, url);
 
-    auto request = Request::fetch(request_id, g_disk_cache, *this, m_curl_multi, m_resolver, move(url), move(method), HTTP::HeaderList::create(move(request_headers)), move(request_body), m_alt_svc_cache_path, proxy_data);
+    auto request = Request::fetch(request_id, g_disk_cache, cache_mode, *this, m_curl_multi, m_resolver, move(url), move(method), HTTP::HeaderList::create(move(request_headers)), move(request_body), m_alt_svc_cache_path, proxy_data);
     m_active_requests.set(request_id, move(request));
 }
 

@@ -97,11 +97,19 @@ private:
 
     void dump_allocators();
 
-    static bool cell_must_survive_garbage_collection(Cell const&);
+    template<typename T>
+    static consteval bool has_own_gc_allocator_marker()
+    {
+        if constexpr (requires { typename T::gc_allocator_marker; })
+            return IsSame<typename T::gc_allocator_marker, T>;
+        return false;
+    }
 
     template<typename T>
     Cell* allocate_cell()
     {
+        static_assert(has_own_gc_allocator_marker<T>(), "Cell type must declare its own allocator with either GC_DECLARE_ALLOCATOR (for type-isolated allocation) or GC_DECLARE_SIZE_BASED_ALLOCATOR (for size-based allocation)");
+
         will_allocate(sizeof(T));
         if constexpr (requires { T::cell_allocator.allocator.get().allocate_cell(*this); }) {
             if constexpr (IsSame<T, typename decltype(T::cell_allocator)::CellType>) {
@@ -114,13 +122,14 @@ private:
     void will_allocate(size_t);
 
     void find_min_and_max_block_addresses(FlatPtr& min_address, FlatPtr& max_address);
-    void gather_roots(HashMap<Cell*, HeapRoot>&);
-    void gather_conservative_roots(HashMap<Cell*, HeapRoot>&);
+    void gather_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*>& all_live_heap_blocks);
+    void gather_conservative_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*> const& all_live_heap_blocks);
     void gather_asan_fake_stack_roots(HashMap<FlatPtr, HeapRoot>&, FlatPtr, FlatPtr min_block_address, FlatPtr max_block_address);
-    void mark_live_cells(HashMap<Cell*, HeapRoot> const& live_cells);
+    void mark_live_cells(HashMap<Cell*, HeapRoot> const& live_cells, HashTable<HeapBlock*> const& all_live_heap_blocks);
     void finalize_unmarked_cells();
     void sweep_dead_cells(bool print_report, Core::ElapsedTimer const&);
     void sweep_weak_blocks();
+    void run_post_gc_tasks();
 
     ALWAYS_INLINE CellAllocator& allocator_for_size(size_t cell_size)
     {

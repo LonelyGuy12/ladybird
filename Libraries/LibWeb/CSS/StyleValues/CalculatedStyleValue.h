@@ -71,7 +71,7 @@ public:
         return adopt_ref(*new (nothrow) CalculatedStyleValue(move(calculation), move(resolved_type), move(context)));
     }
 
-    virtual String to_string(SerializationMode) const override;
+    virtual void serialize(StringBuilder&, SerializationMode) const override;
     virtual ValueComparingNonnullRefPtr<StyleValue const> absolutized(ComputationContext const&) const override;
     virtual bool equals(StyleValue const& other) const override;
 
@@ -274,6 +274,7 @@ public:
 
     virtual Vector<NonnullRefPtr<CalculationNode const>> children() const override { return {}; }
     NumericValue const& value() const { return m_value; }
+    void serialize_value(StringBuilder&) const;
     String value_to_string() const;
 
     Optional<NonFiniteValue> infinite_or_nan_value() const;
@@ -753,6 +754,7 @@ public:
     // NOTE: We don't return children here as serialization is handled ad-hoc
     virtual Vector<NonnullRefPtr<CalculationNode const>> children() const override { return {}; }
 
+    void serialize(StringBuilder&, CalculationContext const&, SerializationMode) const;
     String to_string(CalculationContext const&, SerializationMode serialization_mode) const;
 
     virtual void dump(StringBuilder&, int indent) const override;

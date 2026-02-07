@@ -42,6 +42,8 @@ class WEB_API WorkerGlobalScope
     GC_DECLARE_ALLOCATOR(WorkerGlobalScope);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     virtual ~WorkerGlobalScope() override;
 
     // ^WindowOrWorkerGlobalScopeMixin
@@ -65,6 +67,8 @@ public:
 
     // https://html.spec.whatwg.org/multipage/workers.html#dom-workerglobalscope-self
     GC::Ref<WorkerGlobalScope const> self() const { return *this; }
+
+    virtual Optional<URL::Origin> extract_an_origin() const override { return window_or_worker_global_scope_extract_an_origin(); }
 
     GC::Ref<WorkerLocation> location() const;
     GC::Ref<WorkerNavigator> navigator() const;
@@ -121,7 +125,7 @@ protected:
     GC::Ptr<MessagePort> m_internal_port;
 
 private:
-    virtual bool is_window_or_worker_global_scope_mixin() const final { return true; }
+    virtual bool is_universal_global_scope_mixin() const final { return true; }
 
     GC::Ptr<WorkerLocation> m_location;
     GC::Ptr<WorkerNavigator> m_navigator;

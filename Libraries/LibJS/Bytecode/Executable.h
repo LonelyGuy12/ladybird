@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/OwnPtr.h>
 #include <AK/Utf16FlyString.h>
@@ -70,9 +69,31 @@ struct GlobalVariableCache : public PropertyLookupCache {
     bool in_module_environment { false };
 };
 
+// https://tc39.es/ecma262/#sec-gettemplateobject
+// Template objects are cached at the call site.
+struct TemplateObjectCache {
+    GC::Ptr<Array> cached_template_object;
+};
+
+// Cache for object literal shapes.
+// When an object literal like {a: 1, b: 2} is instantiated, we cache the final shape
+// so that subsequent instantiations can allocate the object with the correct shape directly,
+// avoiding repeated shape transitions.
+// We also cache the property offsets so that subsequent property writes can bypass
+// shape lookups and write directly to the correct storage slot.
+struct ObjectShapeCache {
+    GC::Weak<Shape> shape;
+    Vector<u32> property_offsets;
+};
+
 struct SourceRecord {
     u32 source_start_offset {};
     u32 source_end_offset {};
+};
+
+struct SourceMapEntry {
+    u32 bytecode_offset {};
+    SourceRecord source_record {};
 };
 
 class JS_API Executable final : public Cell {
@@ -90,6 +111,8 @@ public:
         NonnullRefPtr<SourceCode const>,
         size_t number_of_property_lookup_caches,
         size_t number_of_global_variable_caches,
+        size_t number_of_template_object_caches,
+        size_t number_of_object_shape_caches,
         size_t number_of_registers,
         Strict);
 
@@ -99,6 +122,8 @@ public:
     Vector<u8> bytecode;
     Vector<PropertyLookupCache> property_lookup_caches;
     Vector<GlobalVariableCache> global_variable_caches;
+    Vector<TemplateObjectCache> template_object_caches;
+    Vector<ObjectShapeCache> object_shape_caches;
     NonnullOwnPtr<StringTable> string_table;
     NonnullOwnPtr<IdentifierTable> identifier_table;
     NonnullOwnPtr<PropertyKeyTable> property_key_table;
@@ -106,10 +131,11 @@ public:
     Vector<Value> constants;
 
     NonnullRefPtr<SourceCode const> source_code;
-    size_t number_of_registers { 0 };
+    u32 number_of_registers { 0 };
     bool is_strict_mode { false };
 
-    size_t registers_and_constants_and_locals_count { 0 };
+    u32 registers_and_locals_count { 0 };
+    u32 registers_and_locals_and_constants_count { 0 };
 
     struct ExceptionHandlers {
         size_t start_offset;
@@ -121,11 +147,11 @@ public:
     Vector<ExceptionHandlers> exception_handlers;
     Vector<size_t> basic_block_start_offsets;
 
-    HashMap<size_t, SourceRecord> source_map;
+    Vector<SourceMapEntry> source_map;
 
     Vector<LocalVariable> local_variable_names;
-    size_t local_index_base { 0 };
-    size_t argument_index_base { 0 };
+    u32 local_index_base { 0 };
+    u32 argument_index_base { 0 };
 
     Optional<PropertyKeyTableIndex> length_identifier;
 

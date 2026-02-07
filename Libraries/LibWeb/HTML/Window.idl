@@ -11,10 +11,12 @@
 #import <HTML/Navigation.idl>
 #import <HTML/Navigator.idl>
 #import <HTML/UniversalGlobalScope.idl>
+#import <HTML/WindowDeprecated.idl>
 #import <HTML/WindowLocalStorage.idl>
 #import <HTML/WindowOrWorkerGlobalScope.idl>
 #import <HTML/WindowSessionStorage.idl>
 #import <RequestIdleCallback/IdleRequest.idl>
+#import <Speech/SpeechSynthesis.idl>
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#window
 [Global=Window, Exposed=Window, LegacyUnenumerableNamedProperties]
@@ -94,12 +96,12 @@ interface Window : EventTarget {
     [Replaceable, ImplementedAs=scroll_x] readonly attribute double pageXOffset;
     [Replaceable] readonly attribute double scrollY;
     [Replaceable, ImplementedAs=scroll_y] readonly attribute double pageYOffset;
-    undefined scroll(optional ScrollToOptions options = {});
-    undefined scroll(unrestricted double x, unrestricted double y);
-    [ImplementedAs=scroll] undefined scrollTo(optional ScrollToOptions options = {});
-    [ImplementedAs=scroll] undefined scrollTo(unrestricted double x, unrestricted double y);
-    undefined scrollBy(optional ScrollToOptions options = {});
-    undefined scrollBy(unrestricted double x, unrestricted double y);
+    Promise<undefined> scroll(optional ScrollToOptions options = {});
+    Promise<undefined> scroll(unrestricted double x, unrestricted double y);
+    [ImplementedAs=scroll] Promise<undefined> scrollTo(optional ScrollToOptions options = {});
+    [ImplementedAs=scroll] Promise<undefined> scrollTo(unrestricted double x, unrestricted double y);
+    Promise<undefined> scrollBy(optional ScrollToOptions options = {});
+    Promise<undefined> scrollBy(unrestricted double x, unrestricted double y);
 
     // client
     [Replaceable] readonly attribute long screenX;
@@ -116,9 +118,6 @@ interface Window : EventTarget {
 
     // https://w3c.github.io/selection-api/#extensions-to-window-interface
     Selection? getSelection();
-
-    undefined captureEvents();
-    undefined releaseEvents();
 
     // This function is non-standard.
     boolean find(optional DOMString string = "");

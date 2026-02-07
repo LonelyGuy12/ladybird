@@ -7,13 +7,14 @@
  */
 
 #include <AK/Debug.h>
+#include <LibGC/RootHashMap.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Layout/AvailableSpace.h>
 #include <LibWeb/Layout/InlineNode.h>
 #include <LibWeb/Layout/LayoutState.h>
 #include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Painting/PaintableWithLines.h>
 #include <LibWeb/Painting/SVGPathPaintable.h>
-#include <LibWeb/Painting/SVGSVGPaintable.h>
 #include <LibWeb/Painting/TextPaintable.h>
 
 namespace Web::Layout {
@@ -124,7 +125,7 @@ static CSSPixelRect measure_scrollable_overflow(Box const& box)
 
     // - Additional padding added to the scrollable overflow rectangle as necessary to enable scroll positions that
     //   satisfy the requirements of both place-content: start and place-content: end alignment.
-    auto has_scrollable_overflow = !paintable_absolute_padding_box.contains(scrollable_overflow_rect);
+    auto has_scrollable_overflow = !paintable_absolute_padding_box.contains(scrollable_overflow_rect) && box.is_scroll_container();
     if (has_scrollable_overflow) {
         scrollable_overflow_rect.set_height(max(scrollable_overflow_rect.height(), content_overflow_rect.height() + paintable_box.box_model().padding.bottom));
     }
@@ -148,7 +149,7 @@ static CSSPixelRect measure_scrollable_overflow(Box const& box)
             max(scrollable_overflow_rect.x(), paintable_absolute_padding_box.x()),
             max(scrollable_overflow_rect.y(), paintable_absolute_padding_box.y()),
         });
-        has_scrollable_overflow = !paintable_absolute_padding_box.contains(scrollable_overflow_rect);
+        has_scrollable_overflow = !paintable_absolute_padding_box.contains(scrollable_overflow_rect) && box.is_scroll_container();
     }
 
     const_cast<Painting::PaintableBox&>(paintable_box).set_overflow_data({
@@ -214,6 +215,20 @@ static void build_paint_tree(Node& node, Painting::Paintable* parent_paintable =
 
 void LayoutState::commit(Box& root)
 {
+    // Cache existing paintables before clearing.
+    GC::RootHashMap<Node const*, GC::Ref<Painting::PaintableBox>> paintable_cache(root.document().heap());
+    root.for_each_in_inclusive_subtree([&](Node& node) {
+        if (auto* paintable_box = as_if<Painting::PaintableBox>(node.first_paintable())) {
+            // InlineNodes are excluded because they can span multiple lines, with a separate
+            // InlinePaintable created for each line via create_paintable_for_line_with_index().
+            // This 1:N relationship between layout node and paintables, combined with the
+            // dynamic nature of fragment relocation, makes simple 1:1 caching inapplicable.
+            if (!is<InlineNode>(node))
+                paintable_cache.set(&node, *paintable_box);
+        }
+        return TraversalDecision::Continue;
+    });
+
     // Go through the layout tree and detach all paintables. The layout tree should only point to the new paintable tree
     // which we're about to build.
     root.for_each_in_inclusive_subtree([](Node& node) {
@@ -272,7 +287,19 @@ void LayoutState::commit(Box& root)
         auto& used_values = *it.value;
         auto& node = used_values.node();
 
-        auto paintable = node.create_paintable();
+        GC::Ptr<Painting::Paintable> paintable;
+
+        // Try to reuse cached paintable for Box nodes
+        if (auto cached = paintable_cache.get(&node); cached.has_value()) {
+            auto cached_paintable = cached.value();
+            cached_paintable->reset_for_relayout();
+            paintable = cached_paintable;
+        }
+
+        // Fall back to creating new if no reusable paintable
+        if (!paintable)
+            paintable = node.create_paintable();
+
         node.add_paintable(paintable);
 
         // For boxes, transfer all the state needed for painting.
@@ -451,7 +478,7 @@ void LayoutState::commit(Box& root)
                 // For sticky positioned boxes, the inset is instead relative to the relevant scrollport’s size.
                 // Negative values are allowed.
 
-                auto sticky_insets = make<Painting::PaintableBox::StickyInsets>();
+                auto sticky_insets = make<Painting::StickyInsets>();
                 auto const& inset = node.computed_values().inset();
 
                 auto const* nearest_scrollable_ancestor = paintable_box->nearest_scrollable_ancestor();

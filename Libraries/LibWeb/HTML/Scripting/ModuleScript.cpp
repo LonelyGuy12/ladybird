@@ -10,6 +10,7 @@
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/WebIDL/QuotaExceededError.h>
 
 namespace Web::HTML {
 
@@ -103,7 +104,7 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
 
         // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
         JS::ExecutionContext* module_execution_context = nullptr;
-        ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0);
+        ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0, 0);
         module_execution_context->realm = &realm;
         module_execution_context->script_or_module = GC::Ref<JS::Module> { *record };
         vm().push_execution_context(*module_execution_context);
@@ -116,7 +117,7 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
         // then set evaluationPromise to a promise rejected with a new "QuotaExceededError" DOMException.
         if (elevation_promise_or_error.is_error()) {
             auto promise = JS::Promise::create(realm);
-            promise->reject(WebIDL::QuotaExceededError::create(realm, "Failed to evaluate module script"_utf16).ptr());
+            promise->reject(WebIDL::QuotaExceededError::create(realm, "Failed to evaluate module script"_utf16));
 
             evaluation_promise = promise;
         } else {

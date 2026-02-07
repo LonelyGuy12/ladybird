@@ -12,6 +12,7 @@
 #include <LibCore/Resource.h>
 #include <LibCore/System.h>
 #include <LibCore/SystemServerTakeover.h>
+#include <LibCrypto/OpenSSLForward.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/PathFontProvider.h>
 #include <LibIPC/ConnectionFromClient.h>
@@ -39,8 +40,14 @@
 #include <WebContent/PageClient.h>
 #include <WebContent/WebDriverConnection.h>
 
+#include <openssl/thread.h>
+
 #if defined(AK_OS_MACOS)
 #    include <LibCore/Platform/ProcessStatisticsMach.h>
+#endif
+
+#if defined(AK_OS_WINDOWS)
+#    include <objbase.h>
 #endif
 
 #include <SDL3/SDL_init.h>
@@ -57,6 +64,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 {
     AK::set_rich_debug_enabled(true);
 
+#if defined(AK_OS_WINDOWS)
+    // NOTE: We need this here otherwise SDL inits COM in the APARTMENTTHREADED model which we don't want as we need to
+    // make calls across threads which would otherwise have a high overhead. It is safe for all the objects we use.
+    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    VERIFY(SUCCEEDED(hr));
+    ScopeGuard uninitialize_com = []() { CoUninitialize(); };
+#endif
     // SDL is used for the Gamepad API.
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         dbgln("Failed to initialize SDL3: {}", SDL_GetError());
@@ -76,7 +90,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     Vector<ByteString> certificates;
     int request_server_socket { -1 };
     int image_decoder_socket { -1 };
-    bool is_layout_test_mode = false;
+    bool enable_test_mode = false;
     bool expose_internals_object = false;
     bool wait_for_debugger = false;
     bool log_all_js_exceptions = false;
@@ -97,7 +111,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(config_path, "Ladybird configuration path", "config-path", 0, "config_path");
     args_parser.add_option(request_server_socket, "File descriptor of the socket for the RequestServer connection", "request-server-socket", 'r', "request_server_socket");
     args_parser.add_option(image_decoder_socket, "File descriptor of the socket for the ImageDecoder connection", "image-decoder-socket", 'i', "image_decoder_socket");
-    args_parser.add_option(is_layout_test_mode, "Is layout test mode", "layout-test-mode");
+    args_parser.add_option(enable_test_mode, "Enable test mode", "test-mode");
     args_parser.add_option(expose_internals_object, "Expose internals object", "expose-internals-object");
     args_parser.add_option(certificates, "Path to a certificate file", "certificate", 'C', "certificate");
     args_parser.add_option(wait_for_debugger, "Wait for debugger", "wait-for-debugger");
@@ -131,8 +145,8 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     }
     font_provider.load_all_fonts_from_uri("resource://fonts"sv);
 
-    // Layout test mode implies internals object is exposed and the Skia CPU backend is used
-    if (is_layout_test_mode) {
+    // Test mode implies internals object is exposed and the Skia CPU backend is used
+    if (enable_test_mode) {
         expose_internals_object = true;
         force_cpu_painting = true;
     }
@@ -140,7 +154,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     Web::set_browser_process_command_line(command_line);
     Web::set_browser_process_executable_path(executable_path);
 
-    // Always use the CPU backend for layout tests, as the GPU backend is not deterministic
+    // Always use the CPU backend for tests, as the GPU backend is not deterministic
     WebContent::PageClient::set_use_skia_painter(force_cpu_painting ? WebContent::PageClient::UseSkiaPainter::CPUBackend : WebContent::PageClient::UseSkiaPainter::GPUBackendIfAvailable);
 
     WebContent::PageClient::set_is_headless(is_headless);
@@ -172,11 +186,14 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     }
 #endif
 
+    OPENSSL_TRY(OSSL_set_max_threads(nullptr, Core::System::hardware_concurrency()));
+
     TRY(initialize_image_decoder(image_decoder_socket));
 
+    Web::HTML::Window::set_enable_test_mode(enable_test_mode);
     Web::HTML::Window::set_internals_object_exposed(expose_internals_object);
 
-    Web::Platform::FontPlugin::install(*new WebView::FontPlugin(is_layout_test_mode, &font_provider));
+    Web::Platform::FontPlugin::install(*new WebView::FontPlugin(enable_test_mode, &font_provider));
 
     Web::Bindings::initialize_main_thread_vm(Web::Bindings::AgentType::SimilarOriginWindow);
 

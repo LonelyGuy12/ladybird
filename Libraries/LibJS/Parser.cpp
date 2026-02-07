@@ -120,7 +120,7 @@ public:
                 m_catch_parameter_names.set(identifier.string());
             }));
         } else if (parameter) {
-            m_var_names.set(parameter->string());
+            m_var_names.set(parameter->string(), parameter.ptr());
             m_bound_names.set(parameter->string());
             m_catch_parameter_names.set(parameter->string());
         }
@@ -174,7 +174,7 @@ public:
                         || pusher->m_forbidden_var_names.contains(name))
                         throw_identifier_declared(name, declaration);
 
-                    pusher->m_var_names.set(name);
+                    pusher->m_var_names.set(name, &identifier);
                     if (pusher->is_top_level())
                         break;
 
@@ -192,17 +192,17 @@ public:
                 // Only non-top levels and Module don't var declare the top functions
                 // NOTE: Nothing in the callback throws an exception.
                 MUST(declaration->for_each_bound_identifier([&](auto const& identifier) {
-                    m_var_names.set(identifier.string());
+                    m_var_names.set(identifier.string(), &identifier);
                 }));
                 m_node->add_var_scoped_declaration(move(declaration));
             } else {
                 VERIFY(is<FunctionDeclaration>(*declaration));
-                auto& function_declaration = static_cast<FunctionDeclaration const&>(*declaration);
-                auto function_name = function_declaration.name();
+                auto function_declaration = static_ptr_cast<FunctionDeclaration const>(declaration);
+                auto function_name = function_declaration->name();
                 if (m_var_names.contains(function_name) || m_lexical_names.contains(function_name))
                     throw_identifier_declared(function_name, declaration);
 
-                if (function_declaration.kind() != FunctionKind::Normal || m_parser.m_state.strict_mode) {
+                if (function_declaration->kind() != FunctionKind::Normal || m_parser.m_state.strict_mode) {
                     if (m_function_names.contains(function_name))
                         throw_identifier_declared(function_name, declaration);
 
@@ -211,9 +211,9 @@ public:
                     return;
                 }
 
-                m_function_names.set(function_name);
+                m_function_names.set(function_name, function_declaration);
                 if (!m_lexical_names.contains(function_name))
-                    m_functions_to_hoist.append(static_ptr_cast<FunctionDeclaration const>(declaration));
+                    m_functions_to_hoist.append(function_declaration);
 
                 m_node->add_lexical_declaration(move(declaration));
             }
@@ -239,7 +239,7 @@ public:
 
     [[nodiscard]] bool has_declaration(Utf16FlyString const& name) const
     {
-        return m_lexical_names.contains(name) || m_var_names.contains(name) || !m_functions_to_hoist.find_if([&name](auto& function) { return function->name() == name; }).is_end();
+        return m_lexical_names.contains(name) || m_var_names.contains(name) || m_functions_to_hoist.contains([&name](auto& function) { return function->name() == name; });
     }
 
     bool contains_direct_call_to_eval() const { return m_contains_direct_call_to_eval; }
@@ -247,6 +247,7 @@ public:
     {
         m_contains_direct_call_to_eval = true;
         m_screwed_by_eval_in_scope_chain = true;
+        m_eval_in_current_function = true;
     }
     void set_contains_access_to_arguments_object_in_non_strict_mode() { m_contains_access_to_arguments_object_in_non_strict_mode = true; }
     void set_scope_node(ScopeNode* node) { m_node = node; }
@@ -288,6 +289,13 @@ public:
             m_parent_scope->m_screwed_by_eval_in_scope_chain = true;
         }
 
+        // Propagate eval-in-current-function only through block scopes, not across function boundaries.
+        // This is used for global identifier marking - eval can only inject vars into its containing
+        // function's scope, not into parent function scopes.
+        if (m_parent_scope && m_eval_in_current_function && m_type != ScopeType::Function) {
+            m_parent_scope->m_eval_in_current_function = true;
+        }
+
         for (auto& it : m_identifier_groups) {
             auto const& identifier_group_name = it.key;
             auto& identifier_group = it.value;
@@ -315,11 +323,9 @@ public:
                 local_variable_declaration_kind = LocalVariable::DeclarationKind::CatchClauseParameter;
             }
 
-            bool hoistable_function_declaration = false;
-            for (auto const& function_declaration : m_functions_to_hoist) {
-                if (function_declaration->name() == identifier_group_name)
-                    hoistable_function_declaration = true;
-            }
+            bool hoistable_function_declaration = m_functions_to_hoist.contains([&](auto const& function_declaration) {
+                return function_declaration->name() == identifier_group_name;
+            });
 
             if (m_type == ScopeType::ClassDeclaration && m_bound_names.contains(identifier_group_name)) {
                 // NOTE: Currently, the parser cannot recognize that assigning a named function expression creates a scope with a binding for the function name.
@@ -328,8 +334,10 @@ public:
             }
 
             if (m_type == ScopeType::Function && !m_is_function_declaration && m_bound_names.contains(identifier_group_name)) {
-                // NOTE: Currently parser can't determine that named function expression assignment creates scope with binding for function name so function names are not considered as candidates to be optimized in global variables access
-                identifier_group.might_be_variable_in_lexical_scope_in_named_function_assignment = true;
+                // Named function expression: identifiers with this name inside the function may refer
+                // to the function's immutable name binding, so they cannot be optimized as globals.
+                for (auto& identifier : identifier_group.identifiers)
+                    identifier->set_is_inside_scope_with_eval();
             }
 
             if (m_type == ScopeType::ClassDeclaration) {
@@ -353,10 +361,14 @@ public:
             }
 
             if (m_type == ScopeType::Program) {
-                auto can_use_global_for_identifier = !(identifier_group.used_inside_with_statement || identifier_group.might_be_variable_in_lexical_scope_in_named_function_assignment || identifier_group.used_inside_scope_with_eval || m_parser.m_state.initiated_by_eval);
+                auto can_use_global_for_identifier = !(identifier_group.used_inside_with_statement || m_parser.m_state.initiated_by_eval);
                 if (can_use_global_for_identifier) {
-                    for (auto& identifier : identifier_group.identifiers)
-                        identifier->set_is_global();
+                    for (auto& identifier : identifier_group.identifiers) {
+                        // Only mark identifiers as global if they are not inside a function scope
+                        // that contains eval() or has eval in its scope chain.
+                        if (!identifier->is_inside_scope_with_eval())
+                            identifier->set_is_global();
+                    }
                 }
             } else if (local_variable_declaration_kind.has_value() || is_function_parameter) {
                 if (hoistable_function_declaration)
@@ -399,8 +411,15 @@ public:
                 if (m_type == ScopeType::With)
                     identifier_group.used_inside_with_statement = true;
 
-                if (m_contains_direct_call_to_eval)
-                    identifier_group.used_inside_scope_with_eval = true;
+                // Mark each identifier individually if it's inside a scope with eval.
+                // This allows per-identifier optimization decisions at Program scope.
+                // We use m_eval_in_current_function instead of m_screwed_by_eval_in_scope_chain
+                // because eval can only inject vars into its containing function's scope,
+                // not into parent function scopes.
+                if (m_eval_in_current_function) {
+                    for (auto& identifier : identifier_group.identifiers)
+                        identifier->set_is_inside_scope_with_eval();
+                }
 
                 if (m_parent_scope) {
                     if (auto maybe_parent_scope_identifier_group = m_parent_scope->m_identifier_groups.get(identifier_group_name); maybe_parent_scope_identifier_group.has_value()) {
@@ -409,10 +428,6 @@ public:
                             maybe_parent_scope_identifier_group.value().captured_by_nested_function = true;
                         if (identifier_group.used_inside_with_statement)
                             maybe_parent_scope_identifier_group.value().used_inside_with_statement = true;
-                        if (identifier_group.might_be_variable_in_lexical_scope_in_named_function_assignment)
-                            maybe_parent_scope_identifier_group.value().might_be_variable_in_lexical_scope_in_named_function_assignment = true;
-                        if (identifier_group.used_inside_scope_with_eval)
-                            maybe_parent_scope_identifier_group.value().used_inside_scope_with_eval = true;
                     } else {
                         m_parent_scope->m_identifier_groups.set(identifier_group_name, identifier_group);
                     }
@@ -430,6 +445,62 @@ public:
                 if (!m_parent_scope->m_lexical_names.contains(function_declaration->name()) && !m_parent_scope->m_function_names.contains(function_declaration->name()))
                     m_parent_scope->m_functions_to_hoist.append(move(m_functions_to_hoist[i]));
             }
+        }
+
+        // Build FunctionScopeData for function scopes to cache information needed by SharedFunctionInstanceData.
+        if (m_type == ScopeType::Function && m_function_parameters) {
+            auto data = make<FunctionScopeData>();
+
+            // Extract functions_to_initialize from var-scoped function declarations (in reverse order, deduplicated).
+            // This matches what for_each_var_function_declaration_in_reverse_order does.
+            HashTable<Utf16FlyString> seen_function_names;
+            for (ssize_t i = m_node->var_declaration_count() - 1; i >= 0; i--) {
+                auto const& declaration = m_node->var_declarations()[i];
+                if (is<FunctionDeclaration>(declaration)) {
+                    auto& function_decl = static_cast<FunctionDeclaration const&>(*declaration);
+                    if (seen_function_names.set(function_decl.name()) == AK::HashSetResult::InsertedNewEntry)
+                        data->functions_to_initialize.append(static_ptr_cast<FunctionDeclaration const>(declaration));
+                }
+            }
+
+            // Check if "arguments" is a function name.
+            data->has_function_named_arguments = seen_function_names.contains("arguments"_utf16_fly_string);
+
+            // Check if "arguments" is a parameter name.
+            data->has_argument_parameter = m_forbidden_lexical_names.contains("arguments"_utf16_fly_string);
+
+            // Check if "arguments" is lexically declared.
+            MUST(m_node->for_each_lexically_declared_identifier([&](auto const& identifier) {
+                if (identifier.string() == "arguments"_utf16_fly_string)
+                    data->has_lexically_declared_arguments = true;
+            }));
+
+            // Extract vars_to_initialize from m_var_names values with flags.
+            // Also count non-local vars for environment size pre-computation.
+            for (auto& [name, identifier] : m_var_names) {
+                bool is_parameter = m_forbidden_lexical_names.contains(name);
+                bool is_non_local = !identifier->is_local();
+
+                data->vars_to_initialize.append({
+                    .identifier = *identifier,
+                    .is_parameter = is_parameter,
+                    .is_function_name = seen_function_names.contains(name),
+                });
+
+                // Store var name for AnnexB checks.
+                data->var_names.set(name);
+
+                // Count non-local vars for environment size calculation.
+                // Note: vars named "arguments" may be skipped at runtime if arguments object is needed,
+                // but we count them here and adjust at runtime.
+                if (is_non_local) {
+                    data->non_local_var_count_for_parameter_expressions++;
+                    if (!is_parameter)
+                        data->non_local_var_count++;
+                }
+            }
+
+            m_node->set_function_scope_data(move(data));
         }
 
         VERIFY(m_parser.m_state.current_scope_pusher == this);
@@ -515,8 +586,8 @@ private:
     ScopePusher* m_top_level_scope { nullptr };
 
     HashTable<Utf16FlyString> m_lexical_names;
-    HashTable<Utf16FlyString> m_var_names;
-    HashTable<Utf16FlyString> m_function_names;
+    HashMap<Utf16FlyString, Identifier const*> m_var_names;
+    HashMap<Utf16FlyString, NonnullRefPtr<FunctionDeclaration const>> m_function_names;
     HashTable<Utf16FlyString> m_catch_parameter_names;
 
     HashTable<Utf16FlyString> m_forbidden_lexical_names;
@@ -529,8 +600,6 @@ private:
     struct IdentifierGroup {
         bool captured_by_nested_function { false };
         bool used_inside_with_statement { false };
-        bool used_inside_scope_with_eval { false };
-        bool might_be_variable_in_lexical_scope_in_named_function_assignment { false };
         Vector<NonnullRefPtr<Identifier>> identifiers;
         Optional<DeclarationKind> declaration_kind;
     };
@@ -542,6 +611,10 @@ private:
     bool m_contains_direct_call_to_eval { false };
     bool m_contains_await_expression { false };
     bool m_screwed_by_eval_in_scope_chain { false };
+
+    // Tracks eval within the current function (propagates through block scopes but not across function boundaries).
+    // Used for global identifier marking - eval can't inject vars into parent function scopes.
+    bool m_eval_in_current_function { false };
 
     // Function uses this binding from function environment if:
     // 1. It's an arrow function or establish parent scope for an arrow function
@@ -860,12 +933,8 @@ void Parser::parse_module(Program& program)
                 if (identifier.string() == exported_name)
                     found = true;
             }));
-            for (auto& import : program.imports()) {
-                if (import->has_bound_name(exported_name.value())) {
-                    found = true;
-                    break;
-                }
-            }
+            if (program.imports().contains([&](auto& import) { return import->has_bound_name(exported_name.value()); }))
+                found = true;
 
             if (!found)
                 syntax_error(MUST(String::formatted("'{}' in export is not declared", exported_name)), export_statement->source_range().start);
@@ -1649,6 +1718,7 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
 
     if (constructor.is_null()) {
         auto constructor_body = create_ast_node<BlockStatement>({ m_source_code, rule_start.position(), position() });
+
         if (!super_class.is_null()) {
             // Set constructor to the result of parsing the source text
             // constructor(... args){ super (...args);}
@@ -2249,7 +2319,7 @@ NonnullRefPtr<TemplateLiteral const> Parser::parse_template_literal(bool is_tagg
     consume(TokenType::TemplateLiteralStart);
 
     Vector<NonnullRefPtr<Expression const>> expressions;
-    Vector<NonnullRefPtr<Expression const>> raw_strings;
+    Vector<NonnullRefPtr<StringLiteral const>> raw_strings;
 
     auto append_empty_string = [this, &rule_start, &expressions, &raw_strings, is_tagged]() {
         auto string_literal = create_ast_node<StringLiteral>({ m_source_code, rule_start.position(), position() }, Utf16String {});
@@ -2364,14 +2434,6 @@ NonnullRefPtr<Expression const> Parser::parse_expression(int min_precedence, Ass
         syntax_error("'super' keyword unexpected here"_string);
 
     check_for_invalid_object_property(expression);
-
-    if (is<CallExpression>(*expression) && m_state.current_scope_pusher) {
-        auto& callee = static_ptr_cast<CallExpression const>(expression)->callee();
-        if (is<Identifier>(callee) && static_cast<Identifier const&>(callee).string() == "eval"sv) {
-            m_state.current_scope_pusher->set_contains_direct_call_to_eval();
-            m_state.current_scope_pusher->set_uses_this();
-        }
-    }
 
     if (match(TokenType::Comma) && min_precedence <= 1) {
         Vector<NonnullRefPtr<Expression const>> expressions;
@@ -2712,7 +2774,17 @@ NonnullRefPtr<Expression const> Parser::parse_call_expression(NonnullRefPtr<Expr
     if (is<SuperExpression>(*lhs))
         return create_ast_node<SuperCall>({ m_source_code, rule_start.position(), position() }, move(arguments));
 
-    return CallExpression::create({ m_source_code, rule_start.position(), position() }, move(lhs), arguments.span(), InvocationStyleEnum::Parenthesized, InsideParenthesesEnum::NotInsideParentheses);
+    auto call_expression = CallExpression::create({ m_source_code, rule_start.position(), position() }, move(lhs), arguments.span(), InvocationStyleEnum::Parenthesized, InsideParenthesesEnum::NotInsideParentheses);
+
+    if (m_state.current_scope_pusher) {
+        auto& callee = call_expression->callee();
+        if (is<Identifier>(callee) && static_cast<Identifier const&>(callee).string() == "eval"sv) {
+            m_state.current_scope_pusher->set_contains_direct_call_to_eval();
+            m_state.current_scope_pusher->set_uses_this();
+        }
+    }
+
+    return call_expression;
 }
 
 NonnullRefPtr<NewExpression const> Parser::parse_new_expression()
@@ -3250,7 +3322,7 @@ RefPtr<BindingPattern const> Parser::parse_binding_pattern(Parser::AllowDuplicat
                         return {};
                     alias = binding_pattern.release_nonnull();
                 } else if (match_identifier_name()) {
-                    alias = create_identifier_and_register_in_current_scope({ m_source_code, rule_start.position(), position() }, consume().fly_string_value());
+                    alias = create_identifier_and_register_in_current_scope({ m_source_code, rule_start.position(), position() }, consume_identifier().fly_string_value());
                 } else {
                     expected("identifier or binding pattern");
                     return {};

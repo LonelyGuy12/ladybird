@@ -149,13 +149,6 @@ GC::RootVector<GC::Ref<CSSRule>> Parser::convert_rules(Vector<Rule> const& raw_r
 
             m_declared_namespaces.set(as<CSSNamespaceRule>(*rule).prefix());
             break;
-        case CSSRule::Type::Property: {
-            auto& property_rule = as<CSSPropertyRule>(*rule);
-            if (m_document) {
-                const_cast<DOM::Document*>(m_document.ptr())->registered_custom_properties().set(property_rule.name(), property_rule);
-            }
-            [[fallthrough]];
-        }
         default:
             import_rules_valid = false;
             namespace_rules_valid = false;
@@ -1460,6 +1453,10 @@ Vector<Descriptor> Parser::parse_as_descriptor_declaration_block(AtRuleID at_rul
             return RuleContext::AtPage;
         case AtRuleID::Property:
             return RuleContext::AtProperty;
+        case AtRuleID::CounterStyle:
+            // NB: We don't actually have a `CSSDescriptors` for `@counter-style` so this function shouldn't ever be
+            //     called with `AtRuleID::CounterStyle`.
+            VERIFY_NOT_REACHED();
         }
         VERIFY_NOT_REACHED();
     }();
@@ -1516,6 +1513,7 @@ bool Parser::is_valid_in_the_current_context(Declaration const&) const
         // Grouping rules can contain declarations if they are themselves inside a style rule
         return m_rule_context.contains_slow(RuleContext::Style);
 
+    case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
     case RuleContext::AtPage:
     case RuleContext::AtProperty:
@@ -1568,6 +1566,7 @@ bool Parser::is_valid_in_the_current_context(AtRule const& at_rule) const
         // @page rules can contain margin rules
         return is_margin_rule_name(at_rule.name);
 
+    case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
     case RuleContext::AtKeyframes:
     case RuleContext::Keyframe:
@@ -1611,6 +1610,7 @@ bool Parser::is_valid_in_the_current_context(QualifiedRule const&) const
         // @supports cannot check qualified rules
         return false;
 
+    case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
     case RuleContext::AtPage:
     case RuleContext::AtProperty:
@@ -1747,7 +1747,7 @@ bool Parser::context_allows_tree_counting_functions() const
 bool Parser::context_allows_random_functions() const
 {
     // For now we only allow random functions within property contexts, see https://drafts.csswg.org/css-values-5/#issue-cd071f29
-    return m_value_context.find_first_index_if([](ValueParsingContext context) { return context.has<PropertyID>(); }).has_value();
+    return m_value_context.contains([](ValueParsingContext context) { return context.has<PropertyID>(); });
 }
 
 FlyString Parser::random_value_sharing_auto_name() const
@@ -1857,7 +1857,7 @@ LengthOrCalculated Parser::parse_as_sizes_attribute(DOM::Element const& element,
             //        Should this use some of the methods from FormattingContext?
             auto concrete_size = run_default_sizing_algorithm(
                 img->width(), img->height(),
-                img->natural_width(), img->natural_height(), img->intrinsic_aspect_ratio(),
+                { img->natural_width(), img->natural_height(), img->intrinsic_aspect_ratio() },
                 // NOTE: https://html.spec.whatwg.org/multipage/rendering.html#img-contain-size
                 CSSPixelSize { 300, 150 });
             size = Length::make_px(concrete_size.width());

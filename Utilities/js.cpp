@@ -7,7 +7,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/JsonValue.h>
 #include <AK/NeverDestroyed.h>
 #include <AK/Platform.h>
 #include <AK/StringBuilder.h>
@@ -45,6 +44,7 @@ GC::Root<JS::Value> g_last_value = GC::make_root(JS::js_undefined());
 
 class ReplObject final : public JS::GlobalObject {
     JS_OBJECT(ReplObject, JS::GlobalObject);
+    GC_DECLARE_ALLOCATOR(ReplObject);
 
 public:
     ReplObject(JS::Realm& realm)
@@ -64,8 +64,11 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(print);
 };
 
+GC_DEFINE_ALLOCATOR(ReplObject);
+
 class ScriptObject final : public JS::GlobalObject {
     JS_OBJECT(ScriptObject, JS::GlobalObject);
+    GC_DECLARE_ALLOCATOR(ScriptObject);
 
 public:
     ScriptObject(JS::Realm& realm)
@@ -80,6 +83,8 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(load_json);
     JS_DECLARE_NATIVE_FUNCTION(print);
 };
+
+GC_DEFINE_ALLOCATOR(ScriptObject);
 
 static bool s_dump_ast = false;
 static bool s_as_module = false;
@@ -290,11 +295,7 @@ static JS::ThrowCompletionOr<JS::Value> load_json_impl(JS::VM& vm)
     if (file_contents_or_error.is_error())
         return vm.throw_completion<JS::Error>(TRY_OR_THROW_OOM(vm, String::formatted("Failed to read '{}': {}", filename, file_contents_or_error.error())));
 
-    auto json = JsonValue::from_string(file_contents_or_error.value());
-    if (json.is_error())
-        return vm.throw_completion<JS::SyntaxError>(JS::ErrorType::JsonMalformed);
-
-    return JS::JSONObject::parse_json_value(vm, json.value());
+    return JS::JSONObject::parse_json(vm, file_contents_or_error.value());
 }
 
 void ReplObject::initialize(JS::Realm& realm)
@@ -445,8 +446,8 @@ public:
             if (!trace.label.is_empty())
                 builder.appendff("{}\033[36;1m{}\033[0m\n", indent, trace.label);
 
-            for (auto& function_name : trace.stack)
-                builder.appendff("{}-> {}\n", indent, function_name);
+            for (auto& frame : trace.stack)
+                builder.appendff("{}-> {}\n", indent, frame.function_name);
 
             outln("{}", builder.string_view());
             return JS::js_undefined();

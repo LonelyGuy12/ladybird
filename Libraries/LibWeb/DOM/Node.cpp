@@ -747,6 +747,15 @@ void Node::insert_before(GC::Ref<Node> node, GC::Ptr<Node> child, bool suppress_
                 signal_a_slot_change(*this_slot_element);
         }
 
+        // AD-HOC: Register any slot elements in the inserted subtree with the shadow root’s slot registry
+        //         before running assign_slottables_for_a_tree, so the registry is up-to-date.
+        if (auto* shadow_root = as_if<ShadowRoot>(node_to_insert->root())) {
+            node_to_insert->for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto& slot) {
+                shadow_root->register_slot(slot);
+                return TraversalDecision::Continue;
+            });
+        }
+
         // 6. Run assign slottables for a tree with node’s root.
         assign_slottables_for_a_tree(node_to_insert->root());
 
@@ -977,10 +986,15 @@ void Node::remove(bool suppress_observers)
 
     // 10. If node has an inclusive descendant that is a slot, then:
     auto has_descendent_slot = false;
+    auto* shadow_root = as_if<ShadowRoot>(parent_root);
 
-    for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto const&) {
+    for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto& slot) {
         has_descendent_slot = true;
-        return TraversalDecision::Break;
+        if (!shadow_root)
+            return TraversalDecision::Break;
+        // AD-HOC: Unregister slot from the shadow root's registry before assign_slottables_for_a_tree.
+        shadow_root->unregister_slot(slot);
+        return TraversalDecision::Continue;
     });
 
     if (has_descendent_slot) {
@@ -1284,10 +1298,15 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
 
     // 16. If node has an inclusive descendant that is a slot:
     auto has_descendent_slot = false;
+    auto* shadow_root = as_if<ShadowRoot>(old_parent_root);
 
-    for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto const&) {
+    for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto& slot) {
         has_descendent_slot = true;
-        return TraversalDecision::Break;
+        if (!shadow_root)
+            return TraversalDecision::Break;
+        // AD-HOC: Unregister slot from the shadow root's registry before assign_slottables_for_a_tree.
+        shadow_root->unregister_slot(slot);
+        return TraversalDecision::Continue;
     });
 
     if (has_descendent_slot) {
@@ -1342,6 +1361,15 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
 
         if (is_named_shadow_host && this_element.is_slottable())
             assign_a_slot(this_element.as_slottable());
+    }
+
+    // AD-HOC: Register any slot elements in the moved subtree with the shadow root's slot registry so the registry is
+    //         up-to-date.
+    if (auto* new_shadow_root = as_if<ShadowRoot>(root())) {
+        for_each_in_inclusive_subtree_of_type<HTML::HTMLSlotElement>([&](auto& slot) {
+            new_shadow_root->register_slot(slot);
+            return TraversalDecision::Continue;
+        });
     }
 
     // 22. If newParent’s root is a shadow root, and newParent is a slot whose assigned nodes is empty, then run signal a slot change for newParent.
@@ -1669,7 +1697,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
             // NOTE: We check some conditions here to avoid debug spam in documents that don't do layout.
             auto navigable = this->navigable();
             bool any_ancestor_needs_layout_tree_update = false;
-            for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+            for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
                 if (ancestor->needs_layout_tree_update()) {
                     any_ancestor_needs_layout_tree_update = true;
                     break;
@@ -1689,7 +1717,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     }
 
     if (m_needs_layout_tree_update) {
-        for (auto* ancestor = parent_or_shadow_host(); ancestor; ancestor = ancestor->parent_or_shadow_host()) {
+        for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
             if (ancestor->m_child_needs_layout_tree_update)
                 break;
             ancestor->m_child_needs_layout_tree_update = true;
@@ -1773,6 +1801,35 @@ Element* Node::parent_or_shadow_host_element()
     if (is<ShadowRoot>(*parent()))
         return static_cast<ShadowRoot&>(*parent()).host();
     return nullptr;
+}
+
+ParentNode* Node::flat_tree_parent()
+{
+    // If we're assigned to a slot, that slot is our flat tree parent.
+    if (is_slottable()) {
+        auto& slottable = as_slottable().visit([](auto& node) -> SlottableMixin& { return *node; });
+        if (auto slot = slottable.assigned_slot())
+            return slot;
+    }
+
+    // Otherwise, this is the parent or shadow host.
+    return parent_or_shadow_host();
+}
+
+Element* Node::flat_tree_parent_element()
+{
+    for (auto* parent = flat_tree_parent(); parent; parent = parent->flat_tree_parent()) {
+        if (auto* element = as_if<Element>(parent))
+            return element;
+    }
+    return nullptr;
+}
+
+Node const* Node::parent_or_shadow_host_node() const
+{
+    if (is<ShadowRoot>(*this))
+        return static_cast<ShadowRoot const&>(*this).host();
+    return parent();
 }
 
 Slottable Node::as_slottable()
@@ -2215,7 +2272,7 @@ bool Node::is_equal_node(Node const* other_node) const
             || this_element.local_name() != other_element.local_name()
             || this_element.attribute_list_size() != other_element.attribute_list_size())
             return false;
-        // If A is an element, each attribute in its attribute list has an attribute that equals an attribute in B’s attribute list.
+        // If A is an element, each attribute in its attribute list equals an attribute in B’s attribute list.
         bool has_same_attributes = true;
         this_element.for_each_attribute([&](auto const& attribute) {
             if (other_element.get_attribute_ns(attribute.namespace_uri(), attribute.local_name()) != attribute.value())
@@ -2277,6 +2334,71 @@ bool Node::is_equal_node(Node const* other_node) const
     }
 
     return true;
+}
+
+Vector<FlyString> Node::get_in_scope_prefixes() const
+{
+    // https://html.spec.whatwg.org/multipage/xhtml.html#parsing-xhtml-fragments
+    // "A namespace prefix is in scope if the DOM lookupNamespaceURI() method on the element would return a non-null value for that prefix."
+
+    Vector<FlyString> prefixes;
+    HashTable<FlyString> seen_prefixes;
+
+    auto add_prefix = [&](FlyString const& prefix) {
+        if (!seen_prefixes.contains(prefix)) {
+            prefixes.append(prefix);
+            seen_prefixes.set(prefix);
+            VERIFY(lookup_namespace_uri(prefix.to_string()).has_value());
+        }
+    };
+
+    add_prefix("xml"_fly_string);
+    add_prefix("xmlns"_fly_string);
+
+    Element const* current = nullptr;
+
+    if (is<Element>(*this)) {
+        current = static_cast<Element const*>(this);
+    } else if (is<Document>(*this)) {
+        current = static_cast<Document const*>(this)->document_element();
+    } else if (is<Attr>(*this)) {
+        current = static_cast<Attr const*>(this)->owner_element();
+    } else {
+        current = parent_element();
+    }
+
+    while (current) {
+        if (current->namespace_uri().has_value()) {
+            auto prefix = current->prefix().value_or(""_fly_string);
+            add_prefix(prefix);
+        }
+
+        if (auto attributes = current->attributes()) {
+            for (size_t i = 0; i < attributes->length(); ++i) {
+                auto const* attr = attributes->item(i);
+                if (attr->namespace_uri() != Web::Namespace::XMLNS)
+                    continue;
+
+                Optional<FlyString> declared_prefix;
+
+                if (!attr->prefix().has_value() && attr->local_name() == "xmlns"_fly_string) {
+                    declared_prefix = ""_fly_string;
+                } else if (attr->prefix() == "xmlns"_fly_string) {
+                    declared_prefix = attr->local_name();
+                } else {
+                    continue;
+                }
+
+                if (!attr->value().is_empty())
+                    add_prefix(*declared_prefix);
+                seen_prefixes.set(*declared_prefix); // Mark as seen even if the value is empty
+            }
+        }
+
+        current = current->parent_element();
+    }
+
+    return prefixes;
 }
 
 // https://dom.spec.whatwg.org/#locate-a-namespace
@@ -2611,7 +2733,7 @@ void Node::queue_mutation_record(FlyString const& type, Optional<FlyString> cons
     }
 
     // 5. Queue a mutation observer microtask.
-    Bindings::queue_mutation_observer_microtask(document);
+    Bindings::queue_mutation_observer_microtask();
 
     // AD-HOC: Notify the UI if it is interested in DOM mutations (i.e. for DevTools).
     if (page.listen_for_dom_mutations())
@@ -3000,7 +3122,7 @@ ErrorOr<String> Node::name_or_description(NameOrDescription target, Document con
             //    following the “iii. For each child node of the current node” code.
             if (auto before = element->get_pseudo_element_node(CSS::PseudoElement::Before)) {
                 if (before->computed_values().content().alt_text.has_value()) {
-                    total_accumulated_text.append(before->computed_values().content().alt_text.release_value());
+                    total_accumulated_text.append(before->computed_values().content().alt_text.value());
                 } else {
                     for (auto& item : before->computed_values().content().data) {
                         if (auto const* string = item.get_pointer<String>())
@@ -3060,7 +3182,7 @@ ErrorOr<String> Node::name_or_description(NameOrDescription target, Document con
             // NOTE: See step ii.b above.
             if (auto after = element->get_pseudo_element_node(CSS::PseudoElement::After)) {
                 if (after->computed_values().content().alt_text.has_value()) {
-                    total_accumulated_text.append(after->computed_values().content().alt_text.release_value());
+                    total_accumulated_text.append(after->computed_values().content().alt_text.value());
                 } else {
                     for (auto& item : after->computed_values().content().data) {
                         if (auto const* string = item.get_pointer<String>())

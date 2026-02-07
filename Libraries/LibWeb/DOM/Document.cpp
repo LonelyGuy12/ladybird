@@ -2,7 +2,7 @@
  * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021-2025, Luke Wilde <luke@ladybird.org>
- * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2024, Matthew Olsson <mattco@serenityos.org>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
@@ -14,12 +14,12 @@
 #include <AK/Debug.h>
 #include <AK/GenericLexer.h>
 #include <AK/InsertionSort.h>
+#include <AK/Random.h>
 #include <AK/StringBuilder.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <AK/Utf8View.h>
 #include <LibCore/Timer.h>
-#include <LibCrypto/SecureRandom.h>
 #include <LibGC/RootVector.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/FunctionObject.h>
@@ -134,6 +134,7 @@
 #include <LibWeb/HTML/MessageEvent.h>
 #include <LibWeb/HTML/MessagePort.h>
 #include <LibWeb/HTML/Navigable.h>
+#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/HTML/Navigation.h>
 #include <LibWeb/HTML/NavigationParams.h>
 #include <LibWeb/HTML/Numbers.h>
@@ -162,7 +163,11 @@
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/DisplayList.h>
+#include <LibWeb/Painting/DisplayListCommand.h>
+#include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/Painting/StackingContext.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
 #include <LibWeb/PermissionsPolicy/AutoplayAllowlist.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
@@ -525,6 +530,8 @@ void Document::initialize(JS::Realm& realm)
     m_list_of_available_images = realm.create<HTML::ListOfAvailableImages>();
 
     page().client().page_did_create_new_document(*this);
+
+    ensure_cookie_version_index(m_url);
 }
 
 // https://html.spec.whatwg.org/multipage/document-lifecycle.html#populate-with-html/head/body
@@ -644,7 +651,6 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_render_blocking_elements);
     visitor.visit(m_policy_container);
     visitor.visit(m_style_invalidator);
-    visitor.visit(m_registered_custom_properties);
 }
 
 // https://w3c.github.io/selection-api/#dom-document-getselection
@@ -1160,6 +1166,19 @@ Vector<CSS::BackgroundLayerData> const* Document::background_layers() const
     return &body_layout_node->background_layers();
 }
 
+CSS::ImageRendering Document::background_image_rendering() const
+{
+    auto* body_element = body();
+    if (!body_element)
+        return CSS::ImageRendering::Auto;
+
+    auto body_layout_node = body_element->layout_node();
+    if (!body_layout_node)
+        return CSS::ImageRendering::Auto;
+
+    return body_layout_node->computed_values().image_rendering();
+}
+
 void Document::update_base_element(Badge<HTML::HTMLBaseElement>)
 {
     GC::Ptr<HTML::HTMLBaseElement> base_element_with_href = nullptr;
@@ -1220,6 +1239,8 @@ void Document::set_url(URL::URL const& url)
     // OPTIMIZATION: Avoid unnecessary work if the URL is already set.
     if (m_url == url)
         return;
+
+    ensure_cookie_version_index(url, m_url);
 
     // To set the URL for a Document document to a URL record url:
 
@@ -1361,6 +1382,7 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
     viewport_computed_values.set_overflow_y(overflow_y_to_apply);
 
     // The element from which the value is propagated must then have a used overflow value of visible.
+    // FIXME: Apply this to the used values, not the computed ones.
     overflow_origin_computed_values.set_overflow_x(CSS::Overflow::Visible);
     overflow_origin_computed_values.set_overflow_y(CSS::Overflow::Visible);
 }
@@ -1413,9 +1435,6 @@ void Document::update_layout(UpdateLayoutReason reason)
     });
 
     m_layout_root->for_each_in_inclusive_subtree_of_type<Layout::Box>([&](auto& child) {
-        if (child.needs_layout_update()) {
-            child.reset_cached_intrinsic_sizes();
-        }
         child.clear_contained_abspos_children();
         return TraversalDecision::Continue;
     });
@@ -1471,9 +1490,8 @@ void Document::update_layout(UpdateLayoutReason reason)
 
     paintable()->assign_scroll_frames();
 
-    // assign_clip_frames() needs border-radius be resolved
+    set_needs_accumulated_visual_contexts_update(true);
     update_paint_and_hit_testing_properties_if_needed();
-    paintable()->assign_clip_frames();
 
     if (auto range = get_selection()->range()) {
         paintable()->recompute_selection_states(*range);
@@ -1506,7 +1524,7 @@ void Document::update_layout(UpdateLayoutReason reason)
     }
 }
 
-[[nodiscard]] static CSS::RequiredInvalidationAfterStyleChange update_style_recursively(Node& node, CSS::StyleComputer& style_computer, bool needs_inherited_style_update, bool recompute_elements_depending_on_custom_properties)
+[[nodiscard]] static CSS::RequiredInvalidationAfterStyleChange update_style_recursively(Node& node, CSS::StyleComputer& style_computer, bool needs_inherited_style_update, bool recompute_elements_depending_on_custom_properties, bool parent_display_changed)
 {
     bool const needs_full_style_update = node.document().needs_full_style_update();
     CSS::RequiredInvalidationAfterStyleChange invalidation;
@@ -1523,7 +1541,7 @@ void Document::update_layout(UpdateLayoutReason reason)
     CSS::RequiredInvalidationAfterStyleChange node_invalidation;
     if (is<Element>(node)) {
         auto& element = static_cast<Element&>(node);
-        if (needs_full_style_update || node.needs_style_update() || (recompute_elements_depending_on_custom_properties && element.style_uses_var_css_function())) {
+        if (needs_full_style_update || node.needs_style_update() || parent_display_changed || (recompute_elements_depending_on_custom_properties && element.style_uses_var_css_function())) {
             node_invalidation = element.recompute_style(did_change_custom_properties);
         } else if (needs_inherited_style_update) {
             node_invalidation = element.recompute_inherited_style();
@@ -1550,11 +1568,14 @@ void Document::update_layout(UpdateLayoutReason reason)
     }
 
     bool children_need_inherited_style_update = !invalidation.is_none();
-    if (needs_full_style_update || node.child_needs_style_update() || children_need_inherited_style_update || recompute_elements_depending_on_custom_properties) {
+    // NB: When display changes to/from flex/grid/contents, children may need to be blockified or un-blockified.
+    //     This requires a full style recompute, not just inherited style update.
+    bool children_need_full_style_recompute = node_invalidation.rebuild_layout_tree;
+    if (needs_full_style_update || node.child_needs_style_update() || children_need_inherited_style_update || recompute_elements_depending_on_custom_properties || children_need_full_style_recompute) {
         if (node.is_element()) {
             if (auto shadow_root = static_cast<DOM::Element&>(node).shadow_root()) {
                 if (needs_full_style_update || shadow_root->needs_style_update() || shadow_root->child_needs_style_update()) {
-                    auto subtree_invalidation = update_style_recursively(*shadow_root, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties);
+                    auto subtree_invalidation = update_style_recursively(*shadow_root, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute);
                     if (!is_display_none)
                         invalidation |= subtree_invalidation;
                 }
@@ -1562,8 +1583,8 @@ void Document::update_layout(UpdateLayoutReason reason)
         }
 
         node.for_each_child([&](auto& child) {
-            if (needs_full_style_update || child.needs_style_update() || children_need_inherited_style_update || child.child_needs_style_update() || recompute_elements_depending_on_custom_properties) {
-                auto subtree_invalidation = update_style_recursively(child, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties);
+            if (needs_full_style_update || child.needs_style_update() || children_need_inherited_style_update || child.child_needs_style_update() || recompute_elements_depending_on_custom_properties || children_need_full_style_recompute) {
+                auto subtree_invalidation = update_style_recursively(child, style_computer, children_need_inherited_style_update, recompute_elements_depending_on_custom_properties, children_need_full_style_recompute);
                 if (!is_display_none)
                     invalidation |= subtree_invalidation;
             }
@@ -1614,11 +1635,18 @@ void Document::update_style()
 
     evaluate_media_rules();
 
+    style_computer().reset_has_result_cache();
     style_computer().reset_ancestor_filter();
 
-    auto invalidation = update_style_recursively(*this, style_computer(), false, false);
+    build_registered_properties_cache();
+
+    auto invalidation = update_style_recursively(*this, style_computer(), false, false, false);
     if (!invalidation.is_none())
         invalidate_display_list();
+
+    if (invalidation.rebuild_accumulated_visual_contexts)
+        set_needs_accumulated_visual_contexts_update(true);
+
     if (invalidation.rebuild_stacking_context_tree)
         invalidate_stacking_context_tree();
     m_needs_full_style_update = false;
@@ -1649,11 +1677,18 @@ void Document::update_paint_and_hit_testing_properties_if_needed()
         paintable->refresh_scroll_state();
     }
 
-    if (!m_needs_to_resolve_paint_only_properties)
-        return;
-    m_needs_to_resolve_paint_only_properties = false;
-    if (auto* paintable = this->paintable()) {
-        paintable->resolve_paint_only_properties();
+    if (m_needs_to_resolve_paint_only_properties) {
+        m_needs_to_resolve_paint_only_properties = false;
+        if (auto* paintable = this->paintable()) {
+            paintable->resolve_paint_only_properties();
+        }
+    }
+
+    if (m_needs_accumulated_visual_contexts_update) {
+        m_needs_accumulated_visual_contexts_update = false;
+        if (auto* paintable = this->paintable()) {
+            paintable->assign_accumulated_visual_contexts();
+        }
     }
 }
 
@@ -1889,7 +1924,19 @@ void Document::invalidate_style_for_elements_affected_by_pseudo_class_change(CSS
             style_computer.pop_ancestor(static_cast<Element&>(node));
     };
 
-    invalidate_affected_elements_recursively(root);
+    // Seed the ancestor filter with ancestors above the starting node,
+    // so that ancestor-dependent selectors can still be correctly rejected.
+    for (auto* ancestor = old_new_common_ancestor.parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->is_element())
+            style_computer.push_ancestor(static_cast<Element&>(*ancestor));
+    }
+
+    invalidate_affected_elements_recursively(old_new_common_ancestor);
+
+    for (auto* ancestor = old_new_common_ancestor.parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->is_element())
+            style_computer.pop_ancestor(static_cast<Element&>(*ancestor));
+    }
 }
 
 void Document::set_hovered_node(GC::Ptr<Node> node)
@@ -2507,11 +2554,13 @@ void Document::set_focused_area(GC::Ptr<Node> node)
 
     // Scroll the viewport if necessary to make the newly focused element visible.
     if (new_focused_element) {
-        new_focused_element->queue_an_element_task(HTML::Task::Source::UserInteraction, [&] {
+        new_focused_element->queue_an_element_task(HTML::Task::Source::UserInteraction, [new_focused_element] {
+            if (new_focused_element->document().focused_area().ptr() != new_focused_element)
+                return;
             ScrollIntoViewOptions scroll_options;
             scroll_options.block = Bindings::ScrollLogicalPosition::Nearest;
             scroll_options.inline_ = Bindings::ScrollLogicalPosition::Nearest;
-            (void)as<Element>(*m_focused_area).scroll_into_view(scroll_options);
+            (void)new_focused_element->scroll_into_view(scroll_options);
         });
     }
 
@@ -2714,6 +2763,10 @@ void Document::dispatch_events_for_transition(GC::Ref<CSS::CSSTransition> transi
         case Animations::TimeValue::Type::Milliseconds:
             elapsed_time_output = elapsed_time.value / 1000;
             break;
+        case Animations::TimeValue::Type::Percentage:
+            // FIXME: The spec doesn't specify how to handle this case
+            elapsed_time_output = 0;
+            break;
         }
 
         append_pending_animation_event({
@@ -2813,6 +2866,10 @@ void Document::dispatch_events_for_animation_if_necessary(GC::Ref<Animations::An
         switch (elapsed_time.type) {
         case Animations::TimeValue::Type::Milliseconds:
             elapsed_time_output = elapsed_time.value / 1000;
+            break;
+        case Animations::TimeValue::Type::Percentage:
+            // FIXME: The spec doesn't specify how to handle this case
+            elapsed_time_output = 0;
             break;
         }
 
@@ -2971,7 +3028,7 @@ void Document::scroll_to_the_beginning_of_the_document()
 {
     // FIXME: Actually implement this algorithm
     if (auto navigable = this->navigable())
-        navigable->perform_scroll_of_viewport({ 0, 0 });
+        navigable->perform_scroll_of_viewport_scrolling_box({ 0, 0 });
 }
 
 StringView Document::ready_state() const
@@ -3144,7 +3201,19 @@ WebIDL::ExceptionOr<String> Document::cookie(Cookie::Source source)
 
     // Otherwise, the user agent must return the cookie-string for the document's URL for a "non-HTTP" API, decoded using
     // UTF-8 decode without BOM.
-    return page().client().page_did_request_cookie(m_url, source);
+    if (m_cookie_version_index.has_value()) {
+        if (m_cookie_version == page().client().page_did_request_document_cookie_version(*m_cookie_version_index))
+            return m_cookie;
+    }
+
+    auto [cookie_version, cookie] = page().client().page_did_request_cookie(m_url, source);
+
+    if (cookie_version.has_value()) {
+        m_cookie_version = *cookie_version;
+        m_cookie = cookie;
+    }
+
+    return cookie;
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#dom-document-cookie
@@ -3537,8 +3606,39 @@ bool Document::has_focus_for_bindings() const
 // https://html.spec.whatwg.org/multipage/interaction.html#has-focus-steps
 bool Document::has_focus() const
 {
-    // FIXME: Implement this algorithm.
-    return true;
+    // 1. If target's node navigable's top-level traversable does not have system focus, then return false.
+    auto navigable = this->navigable();
+    if (!navigable)
+        return false;
+
+    auto traversable = navigable->traversable_navigable();
+    if (!traversable || !traversable->is_focused())
+        return false;
+
+    // 2. Let candidate be target's node navigable's top-level traversable's active document.
+    auto candidate = traversable->active_document();
+
+    // 3. While true:
+    while (candidate) {
+        // 3.1. If candidate is target, then return true.
+        if (candidate == this)
+            return true;
+
+        // 3.2. If the focused area of candidate is a navigable container with a non-null content navigable,
+        //      then set candidate to the active document of that navigable container's content navigable.
+        auto focused_area = candidate->focused_area();
+        if (auto* navigable_container = as_if<HTML::NavigableContainer>(focused_area.ptr())) {
+            if (auto content_navigable = navigable_container->content_navigable()) {
+                candidate = content_navigable->active_document();
+                continue;
+            }
+        }
+
+        // 3.3. Otherwise, return false.
+        return false;
+    }
+
+    return false;
 }
 
 // https://html.spec.whatwg.org/multipage/interaction.html#allow-focus-steps
@@ -4184,6 +4284,7 @@ void Document::make_unsalvageable([[maybe_unused]] String reason)
 
 struct DocumentDestructionState : public GC::Cell {
     GC_CELL(DocumentDestructionState, GC::Cell);
+    GC_DECLARE_ALLOCATOR(DocumentDestructionState);
 
     static constexpr int TIMEOUT_MS = 15000;
 
@@ -4225,6 +4326,8 @@ struct DocumentDestructionState : public GC::Cell {
     GC::Ptr<GC::Function<void()>> after_all;
     GC::Ref<Platform::Timer> timeout;
 };
+
+GC_DEFINE_ALLOCATOR(DocumentDestructionState);
 
 // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document-and-its-descendants
 void Document::destroy_a_document_and_its_descendants(GC::Ptr<GC::Function<void()>> after_all_destruction)
@@ -4355,6 +4458,8 @@ GC::Ptr<HTML::HTMLParser> Document::active_parser()
 
 void Document::set_browsing_context(GC::Ptr<HTML::BrowsingContext> browsing_context)
 {
+    if (browsing_context)
+        m_has_been_browsing_context_associated = true;
     m_browsing_context = browsing_context;
 }
 
@@ -4519,6 +4624,9 @@ bool Document::is_allowed_to_use_feature(PolicyControlledFeature feature) const
         // FIXME: Implement allowlist for this.
         return true;
     case PolicyControlledFeature::Gamepad:
+        // FIXME: Implement allowlist for this.
+        return true;
+    case PolicyControlledFeature::WindowManagement:
         // FIXME: Implement allowlist for this.
         return true;
     }
@@ -5361,11 +5469,28 @@ void Document::update_animations_and_send_events(Optional<double> const& timesta
     for (auto const& timeline : timelines_to_update)
         timeline->update_current_time(timestamp.value_or(0.0));
 
-    // 2. Remove replaced animations for doc.
-    remove_replaced_animations();
+    {
+        HTML::TemporaryExecutionContext temporary_execution_context { realm() };
+        // 1. Update the current time of all timelines associated with doc passing now as the timestamp.
+        //
+        // Note: Due to the hierarchical nature of the timing model, updating the current time of a timeline also involves:
+        // - Updating the current time of any animations associated with the timeline.
+        // - Running the update an animation’s finished state procedure for any animations whose current time has been
+        //   updated.
+        // - Queueing animation events for any such animations.
+        for (auto const& timeline : timelines_to_update) {
+            timeline->update_current_time(timestamp);
 
-    // 3. Perform a microtask checkpoint.
-    HTML::perform_a_microtask_checkpoint();
+            for (auto const& animation : timeline->associated_animations())
+                animation->update();
+        }
+
+        // 2. Remove replaced animations for doc.
+        remove_replaced_animations();
+
+        // 3. Perform a microtask checkpoint.
+        // NB: This is executed by the destructor of the TemporaryExecutionContext above.
+    }
 
     // 4. Let events to dispatch be a copy of doc’s pending animation event queue.
     auto events_to_dispatch = GC::ConservativeVector<Document::PendingAnimationEvent> { vm().heap() };
@@ -5417,7 +5542,7 @@ void Document::update_animations_and_send_events(Optional<double> const& timesta
     for (auto& timeline : timelines_to_update) {
         auto animations_to_dispatch = GC::RootVector { heap(), timeline->associated_animations().values() };
         for (auto& animation : animations_to_dispatch)
-            dispatch_events_for_animation_if_necessary(animation);
+            dispatch_events_for_animation_if_necessary(animation.as_nonnull());
     }
 }
 
@@ -5448,7 +5573,7 @@ void Document::remove_replaced_animations()
             if (!animation->effect()->is_keyframe_effect())
                 continue;
 
-            replaceable_animations.append(animation);
+            replaceable_animations.append(animation.as_nonnull());
         }
     }
 
@@ -5485,8 +5610,8 @@ void Document::remove_replaced_animations()
             // - Set removeEvent’s timelineTime attribute to the current time of the timeline with which animation is
             //   associated.
             Animations::AnimationPlaybackEventInit init;
-            init.current_time = animation->current_time().map([](auto const& value) { return value.as_css_numberish(); });
-            init.timeline_time = animation->timeline()->current_time().map([](auto const& value) { return value.as_css_numberish(); });
+            init.current_time = animation->current_time().map([&](auto const& value) { return value.as_css_numberish(realm()); });
+            init.timeline_time = animation->timeline()->current_time().map([&](auto const& value) { return value.as_css_numberish(realm()); });
             auto remove_event = Animations::AnimationPlaybackEvent::create(realm(), HTML::EventNames::remove, init);
 
             // - If animation has a document for timing, then append removeEvent to its document for timing's pending
@@ -5653,12 +5778,9 @@ WebIDL::ExceptionOr<void> Document::set_design_mode(String const& design_mode)
         // 1. Set this's design mode enabled to true.
         set_design_mode_enabled_state(true);
         // 2. Reset this's active range's start and end boundary points to be at the start of this.
-        if (auto selection = get_selection(); selection) {
-            if (auto active_range = selection->range(); active_range) {
-                TRY(active_range->set_start(*this, 0));
-                TRY(active_range->set_end(*this, 0));
-                update_layout(UpdateLayoutReason::DocumentSetDesignMode);
-            }
+        if (auto selection = get_selection()) {
+            TRY(selection->collapse(this, 0));
+            update_layout(UpdateLayoutReason::DocumentSetDesignMode);
         }
         // 3. Run the focusing steps for this's document element, if non-null.
         if (auto* document_element = this->document_element(); document_element)
@@ -5669,6 +5791,17 @@ WebIDL::ExceptionOr<void> Document::set_design_mode(String const& design_mode)
         set_design_mode_enabled_state(false);
     }
     return {};
+}
+
+static Element* retarget_from_ua_internal_shadow_root(Element& element)
+{
+    auto* result = &element;
+    while (auto shadow_root = result->containing_shadow_root()) {
+        if (!shadow_root->is_user_agent_internal())
+            break;
+        result = shadow_root->host();
+    }
+    return result;
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-document-elementfrompoint
@@ -5688,19 +5821,20 @@ Element const* Document::element_from_point(double x, double y)
 
     // 2. If there is a box in the viewport that would be a target for hit testing at coordinates x,y, when applying the transforms
     //    that apply to the descendants of the viewport, return the associated element and terminate these steps.
-    Optional<Painting::HitTestResult> hit_test_result;
-    if (auto const* paintable_box = this->paintable_box(); paintable_box) {
+    GC::Ptr<Element> hit_element;
+    if (auto const* paintable_box = this->paintable_box()) {
         (void)paintable_box->hit_test(position, Painting::HitTestType::Exact, [&](Painting::HitTestResult result) {
-            auto* dom_node = result.dom_node();
-            if (dom_node && dom_node->is_element()) {
-                hit_test_result = result;
+            if (auto* element = as_if<Element>(result.dom_node())) {
+                hit_element = element;
                 return TraversalDecision::Break;
             }
             return TraversalDecision::Continue;
         });
     }
-    if (hit_test_result.has_value())
-        return static_cast<Element*>(hit_test_result->dom_node());
+    if (hit_element) {
+        // AD-HOC: If element is inside a UA internal shadow root, retarget to the host.
+        return retarget_from_ua_internal_shadow_root(*hit_element);
+    }
 
     // 3. If the document has a root element, return the root element and terminate these steps.
     if (auto const* root_element = document_element())
@@ -5733,8 +5867,13 @@ GC::RootVector<GC::Ref<Element>> Document::elements_from_point(double x, double 
     //    apply to the descendants of the viewport, append the associated element to sequence.
     if (auto const* paintable_box = this->paintable_box()) {
         (void)paintable_box->hit_test(position, Painting::HitTestType::Exact, [&](Painting::HitTestResult result) {
-            if (auto* element = as_if<Element>(result.dom_node()))
-                sequence.append(*element);
+            if (auto* element = as_if<Element>(result.dom_node())) {
+                // AD-HOC: If element is inside a UA internal shadow root, retarget to the host.
+                element = retarget_from_ua_internal_shadow_root(*element);
+                // AD-HOC: Avoid adding duplicates when multiple internal elements retarget to the same host.
+                if (sequence.is_empty() || sequence.last() != element)
+                    sequence.append(*element);
+            }
             return TraversalDecision::Continue;
         });
     }
@@ -5755,7 +5894,7 @@ GC::Ptr<Element const> Document::scrolling_element() const
     if (in_quirks_mode()) {
         // 1. If the body element exists, and it is not potentially scrollable, return the body element and abort these steps.
         //    For this purpose, a value of overflow:clip on the the body element’s parent element must be treated as overflow:hidden.
-        if (auto const* body_element = body(); body_element && !body_element->is_potentially_scrollable())
+        if (auto const* body_element = body(); body_element && !body_element->is_potentially_scrollable(Element::TreatOverflowClipOnBodyParentAsOverflowHidden::Yes))
             return body_element;
 
         // 2. Return null and abort these steps.
@@ -6438,18 +6577,20 @@ WebIDL::ExceptionOr<GC::Root<DOM::Document>> Document::parse_html_unsafe(JS::VM&
     return document;
 }
 
-InputEventsTarget* Document::active_input_events_target()
+InputEventsTarget* Document::active_input_events_target(Node const* for_node)
 {
     auto focused_area = this->focused_area();
     if (!focused_area)
-        return {};
+        return nullptr;
 
-    if (auto* input_element = as_if<HTML::HTMLInputElement>(*focused_area))
-        return input_element;
-    if (auto* text_area_element = as_if<HTML::HTMLTextAreaElement>(*focused_area))
-        return text_area_element;
-    if (focused_area->is_editable_or_editing_host())
-        return m_editing_host_manager;
+    if (focused_area->is_editable_or_editing_host()) {
+        if (!for_node || m_editing_host_manager->is_within_active_contenteditable(*for_node))
+            return m_editing_host_manager;
+    }
+    if (auto* form_text_element = as_if<HTML::FormAssociatedTextControlElement>(*focused_area)) {
+        if (!for_node || for_node->find_in_shadow_including_ancestry([&](Node const& it) { return &it == focused_area; }))
+            return form_text_element;
+    }
     return nullptr;
 }
 
@@ -6561,19 +6702,8 @@ RefPtr<Painting::DisplayList> Document::cached_display_list() const
 
 RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig config)
 {
-    auto update_visual_viewport_transform = [&](Painting::DisplayList& display_list) {
-        auto transform = visual_viewport()->transform();
-        auto matrix = transform.to_matrix();
-        matrix[0, 3] *= display_list.device_pixels_per_css_pixel();
-        matrix[1, 3] *= display_list.device_pixels_per_css_pixel();
-        matrix[2, 3] *= display_list.device_pixels_per_css_pixel();
-        display_list.set_visual_viewport_transform(matrix);
-    };
-
-    if (m_cached_display_list && m_cached_display_list_paint_config == config) {
-        update_visual_viewport_transform(*m_cached_display_list);
+    if (m_cached_display_list && m_cached_display_list_paint_config == config)
         return m_cached_display_list;
-    }
 
     auto display_list = Painting::DisplayList::create(page().client().device_pixels_per_css_pixel());
     Painting::DisplayListRecorder display_list_recorder(display_list);
@@ -6615,7 +6745,7 @@ RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig co
         VERIFY_NOT_REACHED();
     }
 
-    Web::DisplayListRecordingContext context(display_list_recorder, page().palette(), page().client().device_pixels_per_css_pixel());
+    Web::DisplayListRecordingContext context(display_list_recorder, page().palette(), page().client().device_pixels_per_css_pixel(), page().chrome_metrics());
     context.set_device_viewport_rect(viewport_rect);
     context.set_should_show_line_box_borders(config.should_show_line_box_borders);
     context.set_should_paint_overlay(config.paint_overlay);
@@ -6623,8 +6753,6 @@ RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig co
     update_paint_and_hit_testing_properties_if_needed();
 
     auto& viewport_paintable = *paintable();
-
-    viewport_paintable.refresh_scroll_state();
 
     viewport_paintable.paint_all_phases(context);
 
@@ -6635,7 +6763,6 @@ RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig co
     m_cached_display_list = display_list;
     m_cached_display_list_paint_config = config;
 
-    update_visual_viewport_transform(*m_cached_display_list);
     return display_list;
 }
 
@@ -6838,10 +6965,97 @@ ElementByIdMap& Document::element_by_id() const
 String Document::dump_display_list()
 {
     update_layout(UpdateLayoutReason::DumpDisplayList);
+
+    auto* viewport_paintable = paintable();
+    if (!viewport_paintable)
+        return "No paintable"_string;
+
     auto display_list = record_display_list(HTML::PaintConfig {});
     if (!display_list)
-        return {};
-    return display_list->dump();
+        return "No display list"_string;
+
+    HashMap<size_t, Painting::PaintableBox const*> context_id_to_paintable;
+    viewport_paintable->for_each_in_inclusive_subtree_of_type<Painting::PaintableBox>([&](auto const& paintable_box) {
+        if (auto context = paintable_box.accumulated_visual_context())
+            (void)context_id_to_paintable.try_set(context->id(), &paintable_box);
+        return TraversalDecision::Continue;
+    });
+
+    HashTable<Painting::AccumulatedVisualContext const*> visited;
+    HashMap<Painting::AccumulatedVisualContext const*, Vector<Painting::AccumulatedVisualContext const*>> children;
+    Vector<Painting::AccumulatedVisualContext const*> root_contexts;
+
+    for (auto const& item : display_list->commands()) {
+        if (!item.context)
+            continue;
+        for (auto const* node = item.context.ptr(); node && !visited.contains(node); node = node->parent().ptr()) {
+            visited.set(node);
+            if (auto const* parent = node->parent().ptr())
+                children.ensure(parent).append(node);
+            else if (!root_contexts.contains_slow(node))
+                root_contexts.append(node);
+        }
+    }
+
+    StringBuilder builder;
+    builder.append("AccumulatedVisualContext Tree:\n"sv);
+    Function<void(Painting::AccumulatedVisualContext const*, size_t)> dump_context = [&](auto const* node, size_t indent) {
+        builder.append_repeated(' ', indent * 2);
+        builder.appendff("[{}] ", node->id());
+        node->dump(builder);
+        if (auto it = context_id_to_paintable.find(node->id()); it != context_id_to_paintable.end())
+            builder.appendff(" ({})", it->value->debug_description());
+        builder.append('\n');
+        for (auto const* child : children.get(node).value_or({}))
+            dump_context(child, indent + 1);
+    };
+
+    for (auto const* root : root_contexts)
+        dump_context(root, 1);
+
+    builder.append("\nDisplayList:\n"sv);
+    int indent = 0;
+    for (auto const& item : display_list->commands()) {
+        int nesting_change = item.command.visit([](auto const& cmd) {
+            if constexpr (requires { cmd.nesting_level_change; })
+                return cmd.nesting_level_change;
+            return 0;
+        });
+
+        if (nesting_change < 0)
+            indent = max(0, indent + nesting_change);
+
+        builder.append_repeated(' ', indent * 2);
+        item.command.visit([&](auto const& command) {
+            builder.appendff("{}@{}", command.command_name, item.context ? item.context->id() : 0);
+            command.dump(builder);
+        });
+        builder.append('\n');
+
+        if (nesting_change > 0)
+            indent += nesting_change;
+    }
+
+    return builder.to_string_without_validation();
+}
+
+String Document::dump_stacking_context_tree()
+{
+    update_layout(UpdateLayoutReason::DumpDisplayList);
+
+    auto* viewport_paintable = paintable();
+    if (!viewport_paintable)
+        return "No paintable"_string;
+
+    viewport_paintable->build_stacking_context_tree_if_needed();
+
+    auto* stacking_context = viewport_paintable->stacking_context();
+    if (!stacking_context)
+        return "No stacking context"_string;
+
+    StringBuilder builder;
+    stacking_context->dump(builder);
+    return builder.to_string_without_validation();
 }
 
 Optional<Vector<CSS::Parser::ComponentValue>> Document::environment_variable_value(CSS::EnvironmentVariable environment_variable, Span<i64> indices) const
@@ -6887,9 +7101,9 @@ Optional<Vector<CSS::Parser::ComponentValue>> Document::environment_variable_val
     VERIFY_NOT_REACHED();
 }
 
-HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& Document::registered_custom_properties()
+HashMap<FlyString, CSS::CustomPropertyRegistration>& Document::registered_property_set()
 {
-    return m_registered_custom_properties;
+    return m_registered_property_set;
 }
 
 WebIDL::ExceptionOr<GC::Ref<XPath::XPathExpression>> Document::create_expression(String const& expression, GC::Ptr<XPath::XPathNSResolver> resolver)
@@ -6909,19 +7123,61 @@ GC::Ref<DOM::Node> Document::create_ns_resolver(GC::Ref<DOM::Node> node_resolver
     return node_resolver;
 }
 
+// https://drafts.css-houdini.org/css-properties-values-api/#determining-registration
+Optional<CSS::CustomPropertyRegistration const&> Document::get_registered_custom_property(FlyString const& name) const
+{
+    // If the Document’s [[registeredPropertySet]] slot contains a record with the custom property’s name, the
+    // registration is that record.
+    if (auto registered_property = m_registered_property_set.get(name); registered_property.has_value())
+        return registered_property;
+
+    // Otherwise, if the Document’s active stylesheets contain at least one valid @property rule representing a
+    // registration with the custom property’s name, the last such one in document order is the registration.
+    if (auto registered_property = m_cached_registered_properties_from_css_property_rules.get(name); registered_property.has_value())
+        return registered_property;
+
+    // Otherwise there is no registration, and the custom property is not a registered custom property.
+    return {};
+}
+
 NonnullRefPtr<CSS::StyleValue const> Document::custom_property_initial_value(FlyString const& name) const
 {
-    auto maybe_custom_property = m_registered_custom_properties.get(name);
+    auto maybe_custom_property = get_registered_custom_property(name);
     if (maybe_custom_property.has_value()) {
-        auto parsed_value = maybe_custom_property.value()->initial_style_value();
-        if (!parsed_value)
-            return CSS::GuaranteedInvalidStyleValue::create();
-        return parsed_value.release_nonnull();
+        if (maybe_custom_property->initial_value)
+            return *maybe_custom_property->initial_value;
+        return CSS::GuaranteedInvalidStyleValue::create();
     }
 
     // For non-registered properties, the initial value is the guaranteed-invalid value.
     // See: https://drafts.csswg.org/css-variables/#propdef-
     return CSS::GuaranteedInvalidStyleValue::create();
+}
+
+void Document::build_registered_properties_cache()
+{
+    m_cached_registered_properties_from_css_property_rules.clear_with_capacity();
+    for_each_active_css_style_sheet([&](CSS::CSSStyleSheet const& style_sheet) {
+        style_sheet.for_each_effective_rule(TraversalOrder::Preorder, [&](CSS::CSSRule const& rule) {
+            if (auto* property_rule = as_if<CSS::CSSPropertyRule>(rule))
+                m_cached_registered_properties_from_css_property_rules.set(property_rule->name(), property_rule->to_registration());
+        });
+    });
+}
+
+void Document::ensure_cookie_version_index(URL::URL const& new_url, URL::URL const& old_url)
+{
+    auto new_domain = Cookie::canonicalize_domain(new_url);
+    if (!new_domain.has_value()) {
+        m_cookie_version_index = {};
+        return;
+    }
+
+    if (m_cookie_version_index.has_value() && *new_domain == Cookie::canonicalize_domain(old_url))
+        return;
+
+    page().client().page_did_request_document_cookie_version_index(unique_id(), *new_domain);
+    m_cookie_version_index = {};
 }
 
 GC::Ptr<Element> ElementByIdMap::get(FlyString const& element_id) const

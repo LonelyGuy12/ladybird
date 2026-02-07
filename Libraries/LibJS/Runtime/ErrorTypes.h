@@ -26,6 +26,7 @@
     M(BindingNotInitialized, "Binding {} is not initialized")                                                                       \
     M(BufferOutOfBounds, "{} contains a property which references a value at an index not contained within its buffer's bounds")    \
     M(ByteLengthExceedsMaxByteLength, "ArrayBuffer byte length of {} exceeds the max byte length of {}")                            \
+    M(ByteLengthLessThanPreviousByteLength, "SharedArrayBuffer byte length of {} is less than the previous byte length of {}")      \
     M(CallStackSizeExceeded, "Call stack size limit exceeded")                                                                      \
     M(CannotBeHeldWeakly, "{} cannot be held weakly")                                                                               \
     M(CannotDeclareGlobalFunction, "Cannot declare global function of name '{}'")                                                   \
@@ -267,6 +268,7 @@
     M(TemporalInvalidPlainMonthDay, "Invalid plain month day")                                                                      \
     M(TemporalInvalidPlainTime, "Invalid plain time")                                                                               \
     M(TemporalInvalidPlainYearMonth, "Invalid plain year month")                                                                    \
+    M(TemporalInvalidPlainYearMonthAddition, "Only years and months may be {} Temporal.PlainYearMonth")                             \
     M(TemporalInvalidTime, "Invalid time")                                                                                          \
     M(TemporalInvalidTimeLikeField, "Invalid value {} for time field '{}'")                                                         \
     M(TemporalInvalidTimeZoneName, "Invalid time zone name '{}'")                                                                   \

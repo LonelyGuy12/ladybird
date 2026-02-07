@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
@@ -16,6 +17,7 @@
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
 #include <LibCore/Forward.h>
+#include <LibCore/SharedVersion.h>
 #include <LibJS/Console.h>
 #include <LibJS/Forward.h>
 #include <LibURL/Origin.h>
@@ -23,6 +25,7 @@
 #include <LibUnicode/Forward.h>
 #include <LibWeb/CSS/CSSPropertyRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
+#include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/EnvironmentVariable.h>
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetList.h>
@@ -113,6 +116,7 @@ enum class InvalidateLayoutTreeReason {
     X(EventHandlerHandleMouseMove)            \
     X(EventHandlerHandleMouseUp)              \
     X(EventHandlerHandleMouseWheel)           \
+    X(EventHandlerHandleTripleClick)          \
     X(HTMLElementGetTheTextSteps)             \
     X(HTMLElementOffsetHeight)                \
     X(HTMLElementOffsetLeft)                  \
@@ -123,6 +127,8 @@ enum class InvalidateLayoutTreeReason {
     X(HTMLEventLoopRenderingUpdate)           \
     X(HTMLImageElementHeight)                 \
     X(HTMLImageElementWidth)                  \
+    X(HTMLImageElementX)                      \
+    X(HTMLImageElementY)                      \
     X(HTMLInputElementHeight)                 \
     X(HTMLInputElementWidth)                  \
     X(InternalsHitTest)                       \
@@ -178,6 +184,7 @@ enum class PolicyControlledFeature : u8 {
     EncryptedMedia,
     FocusWithoutUserActivation,
     Gamepad,
+    WindowManagement,
 };
 
 class WEB_API Document
@@ -187,6 +194,8 @@ class WEB_API Document
     GC_DECLARE_ALLOCATOR(Document);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     enum class Type {
         XML,
         HTML
@@ -222,6 +231,9 @@ public:
     WebIDL::ExceptionOr<void> set_cookie(StringView, Cookie::Source = Cookie::Source::NonHttp);
     bool is_cookie_averse() const;
     void enable_cookies_on_file_domains(Badge<Internals::Internals>) { m_enable_cookies_on_file_domains = true; }
+
+    void set_cookie_version_index(Core::SharedVersionIndex cookie_version_index) { m_cookie_version_index = cookie_version_index; }
+    void reset_cookie_version() { m_cookie_version = Core::INVALID_SHARED_VERSION; }
 
     String fg_color() const;
     void set_fg_color(String const&);
@@ -346,6 +358,7 @@ public:
 
     Color background_color() const;
     Vector<CSS::BackgroundLayerData> const* background_layers() const;
+    CSS::ImageRendering background_image_rendering() const;
 
     Optional<Color> normal_link_color() const;
     void set_normal_link_color(Color);
@@ -465,7 +478,7 @@ public:
     HTML::FocusTrigger last_focus_trigger() const { return m_last_focus_trigger; }
     void set_last_focus_trigger(HTML::FocusTrigger trigger) { m_last_focus_trigger = trigger; }
 
-    Element const* active_element() const { return m_active_element.ptr(); }
+    Element const* active_element() const { return m_active_element ? m_active_element.ptr() : body(); }
     void set_active_element(GC::Ptr<Element>);
 
     Element const* target_element() const { return m_target_element.ptr(); }
@@ -675,6 +688,8 @@ public:
 
     [[nodiscard]] bool has_been_destroyed() const { return m_has_been_destroyed; }
 
+    [[nodiscard]] bool has_been_browsing_context_associated() const { return m_has_been_browsing_context_associated; }
+
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document
     void destroy();
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document-and-its-descendants
@@ -807,6 +822,9 @@ public:
     void set_needs_to_resolve_paint_only_properties() { m_needs_to_resolve_paint_only_properties = true; }
     void set_needs_animated_style_update() { m_needs_animated_style_update = true; }
 
+    void set_needs_accumulated_visual_contexts_update(bool value) { m_needs_accumulated_visual_contexts_update = value; }
+    bool needs_accumulated_visual_contexts_update() const { return m_needs_accumulated_visual_contexts_update; }
+
     virtual JS::Value named_item_value(FlyString const& name) const override;
     virtual Vector<FlyString> supported_property_names() const override;
     Vector<GC::Ref<DOM::Element>> const& potentially_named_elements() const { return m_potentially_named_elements; }
@@ -861,7 +879,7 @@ public:
     void set_console_client(GC::Ptr<JS::ConsoleClient> console_client) { m_console_client = console_client; }
     GC::Ptr<JS::ConsoleClient> console_client() const { return m_console_client; }
 
-    InputEventsTarget* active_input_events_target();
+    InputEventsTarget* active_input_events_target(DOM::Node const* for_node = nullptr);
     GC::Ptr<DOM::Position> cursor_position() const;
 
     bool cursor_blink_state() const { return m_cursor_blink_state; }
@@ -959,6 +977,7 @@ public:
     auto const& script_blocking_style_sheet_set() const { return m_script_blocking_style_sheet_set; }
 
     String dump_display_list();
+    String dump_stacking_context_tree();
 
     StyleInvalidator& style_invalidator() { return m_style_invalidator; }
 
@@ -1034,6 +1053,10 @@ private:
 
     void run_csp_initialization() const;
 
+    void build_registered_properties_cache();
+
+    void ensure_cookie_version_index(URL::URL const& new_url, URL::URL const& old_url = {});
+
     GC::Ref<Page> m_page;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
     GC::Ptr<CSS::FontComputer> m_font_computer;
@@ -1062,6 +1085,8 @@ private:
     bool m_active_parser_was_aborted { false };
 
     bool m_has_been_destroyed { false };
+
+    bool m_has_been_browsing_context_associated { false };
 
     String m_source;
 
@@ -1281,6 +1306,7 @@ private:
     bool m_design_mode_enabled { false };
 
     bool m_needs_to_resolve_paint_only_properties { true };
+    bool m_needs_accumulated_visual_contexts_update { false };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
@@ -1321,6 +1347,10 @@ private:
 
     // NOTE: This is GC::Weak, not GC::Ptr, on purpose. We don't want the document to keep some old detached navigable alive.
     GC::Weak<HTML::Navigable> m_cached_navigable;
+
+    Core::SharedVersion m_cookie_version { Core::INVALID_SHARED_VERSION };
+    Optional<Core::SharedVersionIndex> m_cookie_version_index;
+    String m_cookie;
 
     bool m_enable_cookies_on_file_domains { false };
 
@@ -1375,7 +1405,8 @@ private:
     GC::Ref<StyleInvalidator> m_style_invalidator;
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
-    HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>> m_registered_custom_properties;
+    HashMap<FlyString, CSS::CustomPropertyRegistration> m_registered_property_set;
+    HashMap<FlyString, CSS::CustomPropertyRegistration> m_cached_registered_properties_from_css_property_rules;
 
     CSS::StyleScope m_style_scope;
 

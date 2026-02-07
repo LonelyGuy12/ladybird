@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ComputationContext.h>
 
 namespace Web::CSS {
 
@@ -18,7 +19,8 @@ public:
 
     virtual bool equals(StyleValue const&) const override;
     virtual Optional<Color> to_color(ColorResolutionContext) const override;
-    virtual String to_string(SerializationMode) const override;
+    virtual ValueComparingNonnullRefPtr<StyleValue const> absolutized(ComputationContext const&) const override;
+    virtual void serialize(StringBuilder&, SerializationMode) const override;
 
     virtual bool is_color_function() const override { return true; }
 

@@ -22,6 +22,7 @@ set(SOURCES
     Animations/DocumentTimeline.cpp
     Animations/KeyframeEffect.cpp
     Animations/PseudoElementParsing.cpp
+    Animations/ScrollTimeline.cpp
     ARIA/AriaData.cpp
     ARIA/ARIAMixin.cpp
     ARIA/AttributeNames.cpp
@@ -88,7 +89,9 @@ set(SOURCES
     CredentialManagement/Credential.cpp
     CredentialManagement/CredentialsContainer.cpp
     CredentialManagement/FederatedCredential.cpp
+    CredentialManagement/FederatedCredentialOperations.cpp
     CredentialManagement/PasswordCredential.cpp
+    CredentialManagement/PasswordCredentialOperations.cpp
     Crypto/Crypto.cpp
     Crypto/CryptoAlgorithms.cpp
     Crypto/CryptoBindings.cpp
@@ -166,6 +169,8 @@ set(SOURCES
     CSS/FontComputer.cpp
     CSS/FontFace.cpp
     CSS/FontFaceSet.cpp
+    CSS/FontFaceSetLoadEvent.cpp
+    CSS/FontFeatureData.cpp
     CSS/Frequency.cpp
     CSS/GridTrackPlacement.cpp
     CSS/GridTrackSize.cpp
@@ -222,6 +227,7 @@ set(SOURCES
     CSS/StyleSheetIdentifier.cpp
     CSS/StyleSheetList.cpp
     CSS/StyleValues/AbstractImageStyleValue.cpp
+    CSS/StyleValues/AddFunctionStyleValue.cpp
     CSS/StyleValues/AnchorStyleValue.cpp
     CSS/StyleValues/AnchorSizeStyleValue.cpp
     CSS/StyleValues/AngleStyleValue.cpp
@@ -229,6 +235,7 @@ set(SOURCES
     CSS/StyleValues/BasicShapeStyleValue.cpp
     CSS/StyleValues/BorderImageSliceStyleValue.cpp
     CSS/StyleValues/BorderRadiusStyleValue.cpp
+    CSS/StyleValues/BorderRadiusRectStyleValue.cpp
     CSS/StyleValues/CalculatedStyleValue.cpp
     CSS/StyleValues/ColorFunctionStyleValue.cpp
     CSS/StyleValues/ColorMixStyleValue.cpp
@@ -237,6 +244,7 @@ set(SOURCES
     CSS/StyleValues/ConicGradientStyleValue.cpp
     CSS/StyleValues/ContentStyleValue.cpp
     CSS/StyleValues/CounterDefinitionsStyleValue.cpp
+    CSS/StyleValues/CounterStyleSystemStyleValue.cpp
     CSS/StyleValues/CounterStyleValue.cpp
     CSS/StyleValues/CursorStyleValue.cpp
     CSS/StyleValues/CustomIdentStyleValue.cpp
@@ -261,7 +269,6 @@ set(SOURCES
     CSS/StyleValues/LengthStyleValue.cpp
     CSS/StyleValues/LightDarkStyleValue.cpp
     CSS/StyleValues/LinearGradientStyleValue.cpp
-    CSS/StyleValues/MathDepthStyleValue.cpp
     CSS/StyleValues/NumberStyleValue.cpp
     CSS/StyleValues/OpenTypeTaggedStyleValue.cpp
     CSS/StyleValues/PositionStyleValue.cpp
@@ -340,6 +347,7 @@ set(SOURCES
     DOM/Range.cpp
     DOM/ShadowRoot.cpp
     DOM/Slot.cpp
+    DOM/SlotRegistry.cpp
     DOM/Slottable.cpp
     DOM/StaticNodeList.cpp
     DOM/StaticRange.cpp
@@ -350,6 +358,7 @@ set(SOURCES
     DOM/Utils.cpp
     DOM/XMLDocument.cpp
     DOMURL/DOMURL.cpp
+    DOMURL/Origin.cpp
     DOMURL/URLSearchParams.cpp
     DOMURL/URLSearchParamsIterator.cpp
     Dump.cpp
@@ -484,6 +493,7 @@ set(SOURCES
     HTML/EventLoop/TaskQueue.cpp
     HTML/EventNames.cpp
     HTML/EventSource.cpp
+    HTML/External.cpp
     HTML/FileFilter.cpp
     HTML/Focus.cpp
     HTML/FormAssociatedElement.cpp
@@ -740,7 +750,6 @@ set(SOURCES
     Layout/InlineFormattingContext.cpp
     Layout/InlineLevelIterator.cpp
     Layout/InlineNode.cpp
-    Layout/Label.cpp
     Layout/LabelableNode.cpp
     Layout/LayoutState.cpp
     Layout/LegendBox.cpp
@@ -767,6 +776,8 @@ set(SOURCES
     Layout/TableFormattingContext.cpp
     Layout/TableGrid.cpp
     Layout/TableWrapper.cpp
+    Layout/TextAreaBox.cpp
+    Layout/TextInputBox.cpp
     Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
     Layout/VideoBox.cpp
@@ -799,9 +810,11 @@ set(SOURCES
     NavigationTiming/PerformanceTiming.cpp
     NotificationsAPI/Notification.cpp
     Page/DragAndDropEventHandler.cpp
+    Page/ElementResizeAction.cpp
     Page/EventHandler.cpp
     Page/InputEvent.cpp
     Page/Page.cpp
+    Painting/AccumulatedVisualContext.cpp
     Painting/AudioPaintable.cpp
     Painting/BackgroundPainting.cpp
     Painting/BackingStoreManager.cpp
@@ -812,7 +825,6 @@ set(SOURCES
     Painting/BoxModelMetrics.cpp
     Painting/CanvasPaintable.cpp
     Painting/CheckBoxPaintable.cpp
-    Painting/ClipFrame.cpp
     Painting/DisplayList.cpp
     Painting/DisplayListCommand.cpp
     Painting/DisplayListPlayerSkia.cpp
@@ -828,7 +840,9 @@ set(SOURCES
     Painting/Paintable.cpp
     Painting/PaintableBox.cpp
     Painting/PaintableFragment.cpp
+    Painting/PaintableWithLines.cpp
     Painting/RadioButtonPaintable.cpp
+    Painting/ResolvedCSSFilter.cpp
     Painting/ScrollFrame.cpp
     Painting/ScrollState.cpp
     Painting/ShadowPainting.cpp
@@ -877,6 +891,17 @@ set(SOURCES
     ServiceWorker/ServiceWorkerGlobalScope.cpp
     ServiceWorker/ServiceWorkerRecord.cpp
     ServiceWorker/ServiceWorkerRegistration.cpp
+    Speech/SpeechGrammar.cpp
+    Speech/SpeechGrammarList.cpp
+    Speech/SpeechRecognition.cpp
+    Speech/SpeechRecognitionAlternative.cpp
+    Speech/SpeechRecognitionEvent.cpp
+    Speech/SpeechRecognitionPhrase.cpp
+    Speech/SpeechRecognitionResult.cpp
+    Speech/SpeechRecognitionResultList.cpp
+    Speech/SpeechSynthesis.cpp
+    Speech/SpeechSynthesisUtterance.cpp
+    Speech/SpeechSynthesisVoice.cpp
     SRI/SRI.cpp
     StorageAPI/NavigatorStorage.cpp
     StorageAPI/StorageBottle.cpp
@@ -935,6 +960,7 @@ set(SOURCES
     SVG/SVGFEColorMatrixElement.cpp
     SVG/SVGFEComponentTransferElement.cpp
     SVG/SVGFECompositeElement.cpp
+    SVG/SVGFEDropShadowElement.cpp
     SVG/SVGFEFloodElement.cpp
     SVG/SVGFEFuncAElement.cpp
     SVG/SVGFEFuncBElement.cpp
@@ -1027,6 +1053,7 @@ set(SOURCES
     WebAudio/ChannelMergerNode.cpp
     WebAudio/ChannelSplitterNode.cpp
     WebAudio/ConstantSourceNode.cpp
+    WebAudio/ControlMessageQueue.cpp
     WebAudio/DelayNode.cpp
     WebAudio/DynamicsCompressorNode.cpp
     WebAudio/GainNode.cpp
@@ -1062,6 +1089,7 @@ set(SOURCES
     WebGL/Extensions/EXTRenderSnorm.cpp
     WebGL/Extensions/EXTTextureFilterAnisotropic.cpp
     WebGL/Extensions/EXTTextureNorm16.cpp
+    WebGL/Extensions/OESElementIndexUint.cpp
     WebGL/Extensions/OESStandardDerivatives.cpp
     WebGL/Extensions/OESVertexArrayObject.cpp
     WebGL/Extensions/WebGLCompressedTextureS3tc.cpp
@@ -1101,10 +1129,14 @@ set(SOURCES
     WebIDL/ObservableArray.cpp
     WebIDL/OverloadResolution.cpp
     WebIDL/Promise.cpp
+    WebIDL/QuotaExceededError.cpp
     WebIDL/Tracing.cpp
     WebSockets/WebSocket.cpp
     WebVTT/VTTCue.cpp
     WebVTT/VTTRegion.cpp
+    WebXR/XRSession.cpp
+    WebXR/XRSessionEvent.cpp
+    WebXR/XRSystem.cpp
     Worker/WebWorkerClient.cpp
     XHR/EventNames.cpp
     XHR/FormData.cpp

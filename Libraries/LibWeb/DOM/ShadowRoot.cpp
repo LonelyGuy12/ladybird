@@ -10,6 +10,8 @@
 #include <LibWeb/DOM/DocumentOrShadowRoot.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/SlotRegistry.h>
+#include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Layout/BlockContainer.h>
@@ -230,7 +232,27 @@ ElementByIdMap& ShadowRoot::element_by_id() const
     return *m_element_by_id;
 }
 
-// https://drafts.csswg.org/css-shadow-parts/#shadow-root-part-element-map
+void ShadowRoot::register_slot(HTML::HTMLSlotElement& slot)
+{
+    if (!m_slot_registry)
+        m_slot_registry = make<SlotRegistry>();
+    m_slot_registry->add(slot);
+}
+
+void ShadowRoot::unregister_slot(HTML::HTMLSlotElement& slot)
+{
+    if (m_slot_registry)
+        m_slot_registry->remove(slot);
+}
+
+GC::Ptr<HTML::HTMLSlotElement> ShadowRoot::first_slot_with_name(FlyString const& name) const
+{
+    if (!m_slot_registry)
+        return nullptr;
+    return m_slot_registry->first_slot_with_name(name);
+}
+
+// https://drafts.csswg.org/css-shadow-1/#shadow-root-part-element-map
 ShadowRoot::PartElementMap const& ShadowRoot::part_element_map() const
 {
     // FIXME: dom_tree_version() is crude and invalidates more than necessary.
@@ -242,7 +264,7 @@ ShadowRoot::PartElementMap const& ShadowRoot::part_element_map() const
     return m_part_element_map;
 }
 
-// https://drafts.csswg.org/css-shadow-parts/#calculate-the-part-element-map
+// https://drafts.csswg.org/css-shadow-1/#calculate-the-part-element-map
 void ShadowRoot::calculate_part_element_map()
 {
     // To calculate the part element map of a shadow root, outerRoot:

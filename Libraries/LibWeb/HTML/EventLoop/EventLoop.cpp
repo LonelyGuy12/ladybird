@@ -304,6 +304,8 @@ void EventLoop::process_input_events() const
                         return page.handle_mousewheel(mouse_event.position, mouse_event.screen_position, mouse_event.button, mouse_event.buttons, mouse_event.modifiers, mouse_event.wheel_delta_x, mouse_event.wheel_delta_y);
                     case MouseEvent::Type::DoubleClick:
                         return page.handle_doubleclick(mouse_event.position, mouse_event.screen_position, mouse_event.button, mouse_event.buttons, mouse_event.modifiers);
+                    case MouseEvent::Type::TripleClick:
+                        return page.handle_tripleclick(mouse_event.position, mouse_event.screen_position, mouse_event.button, mouse_event.buttons, mouse_event.modifiers);
                     }
                     VERIFY_NOT_REACHED();
                 },
@@ -559,7 +561,7 @@ TaskID queue_a_task(HTML::Task::Source source, GC::Ptr<EventLoop> event_loop, GC
     // 9. Append task to queue.
     queue.add(task);
 
-    return queue.last_added_task()->id();
+    return task->id();
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#queue-a-global-task
@@ -595,7 +597,7 @@ void queue_a_microtask(DOM::Document const* document, GC::Ref<GC::Function<void(
     // FIXME: 7. Set microtask's script evaluation environment settings object set to an empty set.
 
     // 8. Enqueue microtask on event loop's microtask queue.
-    event_loop.microtask_queue().enqueue(microtask);
+    (void)event_loop.microtask_queue().enqueue(microtask);
 }
 
 void perform_a_microtask_checkpoint()

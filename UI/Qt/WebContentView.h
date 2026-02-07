@@ -63,6 +63,7 @@ public:
 
     void set_viewport_rect(Gfx::IntRect);
     void set_device_pixel_ratio(double);
+    void set_zoom_level(double);
     void set_maximum_frames_per_second(double);
 
     enum class PaletteMode {
@@ -107,6 +108,10 @@ private:
     QTimer m_tooltip_hover_timer;
 
     Gfx::IntSize m_viewport_size;
+
+    u64 m_last_click_timestamp { 0 };
+    QPointF m_last_click_position;
+    u8 m_click_count { 0 };
 
     QMenu* m_select_dropdown { nullptr };
 };

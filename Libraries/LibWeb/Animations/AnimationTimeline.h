@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/TimeValue.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 
@@ -17,9 +18,11 @@ class AnimationTimeline : public Bindings::PlatformObject {
     GC_DECLARE_ALLOCATOR(AnimationTimeline);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     NullableCSSNumberish current_time_for_bindings() const
     {
-        return NullableCSSNumberish::from_optional_css_numberish_time(current_time());
+        return NullableCSSNumberish::from_optional_css_numberish_time(realm(), current_time());
     }
     Optional<TimeValue> current_time() const;
 
@@ -33,6 +36,7 @@ public:
 
     virtual bool is_inactive() const;
     bool is_monotonically_increasing() const { return m_is_monotonically_increasing; }
+    virtual bool is_progress_based() const { return false; }
 
     // https://www.w3.org/TR/web-animations-1/#timeline-time-to-origin-relative-time
     virtual Optional<double> convert_a_timeline_time_to_an_origin_relative_time(Optional<TimeValue>) { VERIFY_NOT_REACHED(); }
@@ -40,7 +44,7 @@ public:
 
     void associate_with_animation(GC::Ref<Animation> value) { m_associated_animations.set(value); }
     void disassociate_with_animation(GC::Ref<Animation> value) { m_associated_animations.remove(value); }
-    HashTable<GC::Ref<Animation>> const& associated_animations() const { return m_associated_animations; }
+    HashTable<GC::Weak<Animation>> const& associated_animations() const { return m_associated_animations; }
 
 protected:
     AnimationTimeline(JS::Realm&);
@@ -60,7 +64,7 @@ protected:
     // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
     GC::Ptr<DOM::Document> m_associated_document {};
 
-    HashTable<GC::Ref<Animation>> m_associated_animations {};
+    HashTable<GC::Weak<Animation>> m_associated_animations {};
 };
 
 }

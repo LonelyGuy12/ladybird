@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2023, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2021-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -8,6 +8,7 @@
 
 #include <AK/String.h>
 #include <AK/Time.h>
+#include <LibCore/SharedVersion.h>
 #include <LibIPC/Forward.h>
 #include <LibURL/URL.h>
 #include <LibWeb/Export.h>
@@ -45,11 +46,20 @@ struct WEB_API Cookie {
     bool persistent { false };
 };
 
+struct VersionedCookie {
+    Optional<Core::SharedVersion> cookie_version;
+    String cookie;
+};
+
 WEB_API StringView same_site_to_string(SameSite same_site_mode);
 WEB_API SameSite same_site_from_string(StringView same_site_mode);
 
 WEB_API Optional<String> canonicalize_domain(URL::URL const& url);
+WEB_API bool domain_matches(StringView string, StringView domain_string);
 WEB_API bool path_matches(StringView request_path, StringView cookie_path);
+WEB_API String default_path(URL::URL const&);
+
+WEB_API bool cookie_matches_url(Cookie const&, URL::URL const&, String const& retrieval_host_canonical, Optional<Source> = {});
 
 }
 
@@ -60,5 +70,11 @@ WEB_API ErrorOr<void> encode(Encoder&, Web::Cookie::Cookie const&);
 
 template<>
 WEB_API ErrorOr<Web::Cookie::Cookie> decode(Decoder&);
+
+template<>
+WEB_API ErrorOr<void> encode(Encoder&, Web::Cookie::VersionedCookie const&);
+
+template<>
+WEB_API ErrorOr<Web::Cookie::VersionedCookie> decode(Decoder&);
 
 }

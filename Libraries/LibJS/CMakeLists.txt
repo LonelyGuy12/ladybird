@@ -65,6 +65,7 @@ set(SOURCES
     Runtime/BooleanObject.cpp
     Runtime/BooleanPrototype.cpp
     Runtime/BoundFunction.cpp
+    Runtime/ClassFieldDefinition.cpp
     Runtime/Completion.cpp
     Runtime/CompletionCell.cpp
     Runtime/ConsoleObjectPrototype.cpp
@@ -275,6 +276,10 @@ generate_bytecode_def_derived()
 set(GENERATED_SOURCES Bytecode/Op.cpp)
 
 ladybird_lib(LibJS js EXPLICIT_SYMBOL_EXPORT)
+
+find_package(simdjson CONFIG REQUIRED)
+target_link_libraries(LibJS PRIVATE simdjson::simdjson)
+
 target_link_libraries(LibJS PRIVATE LibCore LibCrypto LibFileSystem LibRegex LibSyntax LibGC)
 
 # Link LibUnicode publicly to ensure ICU data (which is in libicudata.a) is available in any process using LibJS.
@@ -295,7 +300,7 @@ endif()
 
 target_link_libraries(LibJS PUBLIC JSClangPlugin)
 
-if (ENABLE_WINDOWS_CI)
+if (WIN32 AND ENABLE_ADDRESS_SANITIZER)
     # FIXME: Fix address sanitizer stack-overflow error when running test-js.
     # Even tripling the stack size for this target to 24MB didn't fix it, so it is most likely some ASAN related bug/quirk given test-js passes using the 8MB stack without ASAN
     # ==9948==ERROR: AddressSanitizer: stack-overflow on address 0x7ffd983a6f47 (pc 0x7ffd983a6f47 bp 0x004e514053e0 sp 0x004e51405348 T0)

@@ -28,7 +28,6 @@
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
-#include <LibWeb/CSS/StyleValues/MathDepthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
@@ -268,76 +267,20 @@ Size ComputedProperties::size_value(PropertyID id) const
     return Size::make_auto();
 }
 
-Optional<LengthPercentage> ComputedProperties::length_percentage(PropertyID id, Layout::NodeWithStyle const& layout_node, ClampNegativeLengths disallow_negative_lengths) const
-{
-    auto const& value = property(id);
-
-    if (value.is_calculated())
-        return LengthPercentage { value.as_calculated() };
-
-    if (value.is_percentage()) {
-        auto percentage = value.as_percentage().percentage();
-
-        // FIXME: This value can be negative as interpolation does not yet clamp values to allowed ranges - remove this
-        //        once we do that.
-        if (disallow_negative_lengths == ClampNegativeLengths::Yes && percentage.as_fraction() < 0)
-            return {};
-
-        return percentage;
-    }
-
-    if (value.is_length()) {
-        auto length = value.as_length().length();
-
-        // FIXME: This value can be negative as interpolation does not yet clamp values to allowed ranges - remove this
-        //        once we do that.
-        if (disallow_negative_lengths == ClampNegativeLengths::Yes && length.to_px(layout_node) < 0)
-            return {};
-
-        return length;
-    }
-
-    return {};
-}
-
 Length ComputedProperties::length(PropertyID property_id) const
 {
     return property(property_id).as_length().length();
 }
 
-LengthBox ComputedProperties::length_box(PropertyID left_id, PropertyID top_id, PropertyID right_id, PropertyID bottom_id, Layout::NodeWithStyle const& layout_node, ClampNegativeLengths disallow_negative_lengths, LengthPercentageOrAuto const& default_value) const
+LengthBox ComputedProperties::length_box(PropertyID left_id, PropertyID top_id, PropertyID right_id, PropertyID bottom_id, LengthPercentageOrAuto const& default_value) const
 {
     auto length_box_side = [&](PropertyID id) -> LengthPercentageOrAuto {
         auto const& value = property(id);
 
-        if (value.is_calculated())
-            return LengthPercentage { value.as_calculated() };
+        if (value.is_calculated() || value.is_percentage() || value.is_length() || value.has_auto())
+            return LengthPercentageOrAuto::from_style_value(value);
 
-        if (value.is_percentage()) {
-            auto percentage = value.as_percentage().percentage();
-
-            // FIXME: This value can be negative as interpolation does not yet clamp values to allowed ranges - remove this
-            //        once we do that.
-            if (disallow_negative_lengths == ClampNegativeLengths::Yes && percentage.as_fraction() < 0)
-                return default_value;
-
-            return percentage;
-        }
-
-        if (value.is_length()) {
-            auto length = value.as_length().length();
-
-            // FIXME: This value can be negative as interpolation does not yet clamp values to allowed ranges - remove this
-            //        once we do that.
-            if (disallow_negative_lengths == ClampNegativeLengths::Yes && length.to_px(layout_node) < 0)
-                return default_value;
-
-            return value.as_length().length();
-        }
-
-        if (value.has_auto())
-            return LengthPercentageOrAuto::make_auto();
-
+        // FIXME: Handle anchor sizes
         return default_value;
     };
 
@@ -360,20 +303,13 @@ Color ComputedProperties::color_or_fallback(PropertyID id, ColorResolutionContex
 Position ComputedProperties::position_value(PropertyID id) const
 {
     auto const& position = property(id).as_position();
-    Position position_value;
-    auto const& edge_x = position.edge_x();
-    auto const& edge_y = position.edge_y();
-    if (edge_x->is_edge()) {
-        auto const& edge = edge_x->as_edge();
-        position_value.edge_x = edge.edge().value_or(PositionEdge::Left);
-        position_value.offset_x = edge.offset();
-    }
-    if (edge_y->is_edge()) {
-        auto const& edge = edge_y->as_edge();
-        position_value.edge_y = edge.edge().value_or(PositionEdge::Top);
-        position_value.offset_y = edge.offset();
-    }
-    return position_value;
+    auto const& edge_x = position.edge_x()->as_edge();
+    auto const& edge_y = position.edge_y()->as_edge();
+
+    return {
+        .offset_x = LengthPercentage::from_style_value(edge_x.offset()),
+        .offset_y = LengthPercentage::from_style_value(edge_y.offset()),
+    };
 }
 
 // https://drafts.csswg.org/css-values-4/#linked-properties
@@ -635,6 +571,12 @@ ImageRendering ComputedProperties::image_rendering() const
 // https://drafts.csswg.org/css-backgrounds-4/#layering
 Vector<BackgroundLayerData> ComputedProperties::background_layers() const
 {
+    auto const& background_image_values = property(PropertyID::BackgroundImage).as_value_list().values();
+
+    // OPTIMIZATION: If all background-image values are `none`, we can skip computing the layers entirely
+    if (all_of(background_image_values, [](auto const& value) { return value->to_keyword() == Keyword::None; }))
+        return {};
+
     auto coordinated_value_list = assemble_coordinated_value_list(
         PropertyID::BackgroundImage,
         {
@@ -654,34 +596,32 @@ Vector<BackgroundLayerData> ComputedProperties::background_layers() const
     layers.ensure_capacity(coordinated_value_list.get(PropertyID::BackgroundImage)->size());
 
     for (size_t i = 0; i < coordinated_value_list.get(PropertyID::BackgroundImage)->size(); i++) {
+        auto const& background_image_value = coordinated_value_list.get(PropertyID::BackgroundImage)->at(i);
+
+        if (background_image_value->to_keyword() == Keyword::None)
+            continue;
+
         auto const& background_attachment_value = coordinated_value_list.get(PropertyID::BackgroundAttachment)->at(i);
         auto const& background_blend_mode_value = coordinated_value_list.get(PropertyID::BackgroundBlendMode)->at(i);
         auto const& background_clip_value = coordinated_value_list.get(PropertyID::BackgroundClip)->at(i);
-        auto const& background_image_value = coordinated_value_list.get(PropertyID::BackgroundImage)->at(i);
         auto const& background_origin_value = coordinated_value_list.get(PropertyID::BackgroundOrigin)->at(i);
         auto const& background_position_x_value = coordinated_value_list.get(PropertyID::BackgroundPositionX)->at(i);
         auto const& background_position_y_value = coordinated_value_list.get(PropertyID::BackgroundPositionY)->at(i);
         auto const& background_repeat_value = coordinated_value_list.get(PropertyID::BackgroundRepeat)->at(i);
         auto const& background_size_value = coordinated_value_list.get(PropertyID::BackgroundSize)->at(i);
 
-        BackgroundLayerData layer;
+        BackgroundLayerData layer {
+            .background_image = background_image_value->as_abstract_image()
+        };
 
         layer.attachment = keyword_to_background_attachment(background_attachment_value->to_keyword()).value();
         layer.blend_mode = keyword_to_mix_blend_mode(background_blend_mode_value->to_keyword()).value();
         layer.clip = keyword_to_background_box(background_clip_value->to_keyword()).value();
 
-        if (background_image_value->is_abstract_image())
-            layer.background_image = background_image_value->as_abstract_image();
-        else
-            VERIFY(background_image_value->to_keyword() == Keyword::None);
-
         layer.origin = keyword_to_background_box(background_origin_value->to_keyword()).value();
 
-        layer.position_edge_x = background_position_x_value->as_edge().edge().value_or(PositionEdge::Left);
-        layer.position_offset_x = background_position_x_value->as_edge().offset();
-
-        layer.position_edge_y = background_position_y_value->as_edge().edge().value_or(PositionEdge::Top);
-        layer.position_offset_y = background_position_y_value->as_edge().offset();
+        layer.position_x = LengthPercentage::from_style_value(background_position_x_value->as_edge().offset());
+        layer.position_y = LengthPercentage::from_style_value(background_position_y_value->as_edge().offset());
 
         layer.repeat_x = background_repeat_value->as_repeat_style().repeat_x();
         layer.repeat_y = background_repeat_value->as_repeat_style().repeat_y();
@@ -710,6 +650,21 @@ Vector<BackgroundLayerData> ComputedProperties::background_layers() const
     }
 
     return layers;
+}
+
+BackgroundBox ComputedProperties::background_color_clip() const
+{
+    // The background color is clipped according to the final layer's background-clip value. We propagate this
+    // separately to allow us to avoid computing layer data in the case a layer's `background-image` is `none`
+
+    auto const& background_image_values = property(PropertyID::BackgroundImage).as_value_list().values();
+    auto const& background_clip_values = property(PropertyID::BackgroundClip).as_value_list().values();
+
+    // Background clip values are coordinated against background image values so the value used for the final layer is
+    // not necessarily the last specified one.
+    auto final_layer_index = (background_image_values.size() - 1) % background_clip_values.size();
+
+    return keyword_to_background_box(background_clip_values[final_layer_index]->to_keyword()).value();
 }
 
 Length ComputedProperties::border_spacing_horizontal(Layout::Node const& layout_node) const
@@ -1541,275 +1496,20 @@ Optional<FlyString> ComputedProperties::font_language_override() const
     return {};
 }
 
-Gfx::ShapeFeatures ComputedProperties::font_features() const
+FontFeatureData ComputedProperties::font_feature_data() const
 {
-    HashMap<StringView, u8> merged_features;
-
-    auto font_variant_features = [&]() {
-        HashMap<StringView, u8> features;
-
-        // 6.4 https://drafts.csswg.org/css-fonts/#font-variant-ligatures-prop
-        auto ligature_or_null = font_variant_ligatures();
-
-        auto disable_all_ligatures = [&]() {
-            features.set("liga"sv, 0);
-            features.set("clig"sv, 0);
-            features.set("dlig"sv, 0);
-            features.set("hlig"sv, 0);
-            features.set("calt"sv, 0);
-        };
-
-        if (ligature_or_null.has_value()) {
-            auto ligature = ligature_or_null.release_value();
-            if (ligature.none) {
-                // Specifies that all types of ligatures and contextual forms covered by this property are explicitly disabled.
-                disable_all_ligatures();
-            } else {
-                switch (ligature.common) {
-                case Gfx::FontVariantLigatures::Common::Common:
-                    // Enables display of common ligatures (OpenType features: liga, clig).
-                    features.set("liga"sv, 1);
-                    features.set("clig"sv, 1);
-                    break;
-                case Gfx::FontVariantLigatures::Common::NoCommon:
-                    // Disables display of common ligatures (OpenType features: liga, clig).
-                    features.set("liga"sv, 0);
-                    features.set("clig"sv, 0);
-                    break;
-                case Gfx::FontVariantLigatures::Common::Unset:
-                    break;
-                }
-
-                switch (ligature.discretionary) {
-                case Gfx::FontVariantLigatures::Discretionary::Discretionary:
-                    // Enables display of discretionary ligatures (OpenType feature: dlig).
-                    features.set("dlig"sv, 1);
-                    break;
-                case Gfx::FontVariantLigatures::Discretionary::NoDiscretionary:
-                    // Disables display of discretionary ligatures (OpenType feature: dlig).
-                    features.set("dlig"sv, 0);
-                    break;
-                case Gfx::FontVariantLigatures::Discretionary::Unset:
-                    break;
-                }
-
-                switch (ligature.historical) {
-                case Gfx::FontVariantLigatures::Historical::Historical:
-                    // Enables display of historical ligatures (OpenType feature: hlig).
-                    features.set("hlig"sv, 1);
-                    break;
-                case Gfx::FontVariantLigatures::Historical::NoHistorical:
-                    // Disables display of historical ligatures (OpenType feature: hlig).
-                    features.set("hlig"sv, 0);
-                    break;
-                case Gfx::FontVariantLigatures::Historical::Unset:
-                    break;
-                }
-
-                switch (ligature.contextual) {
-                case Gfx::FontVariantLigatures::Contextual::Contextual:
-                    // Enables display of contextual ligatures (OpenType feature: calt).
-                    features.set("calt"sv, 1);
-                    break;
-                case Gfx::FontVariantLigatures::Contextual::NoContextual:
-                    // Disables display of contextual ligatures (OpenType feature: calt).
-                    features.set("calt"sv, 0);
-                    break;
-                case Gfx::FontVariantLigatures::Contextual::Unset:
-                    break;
-                }
-            }
-        } else if (text_rendering() == CSS::TextRendering::Optimizespeed) {
-            // AD-HOC: Disable ligatures if font-variant-ligatures is set to normal and text rendering is set to optimize speed.
-            disable_all_ligatures();
-        } else {
-            // A value of normal specifies that common default features are enabled, as described in detail in the next section.
-            features.set("liga"sv, 1);
-            features.set("clig"sv, 1);
-        }
-
-        // 6.5 https://drafts.csswg.org/css-fonts/#font-variant-position-prop
-        switch (font_variant_position()) {
-        case CSS::FontVariantPosition::Normal:
-            // None of the features listed below are enabled.
-            break;
-        case CSS::FontVariantPosition::Sub:
-            // Enables display of subscripts (OpenType feature: subs).
-            features.set("subs"sv, 1);
-            break;
-        case CSS::FontVariantPosition::Super:
-            // Enables display of superscripts (OpenType feature: sups).
-            features.set("sups"sv, 1);
-            break;
-        default:
-            break;
-        }
-
-        // 6.6 https://drafts.csswg.org/css-fonts/#font-variant-caps-prop
-        switch (font_variant_caps()) {
-        case CSS::FontVariantCaps::Normal:
-            // None of the features listed below are enabled.
-            break;
-        case CSS::FontVariantCaps::SmallCaps:
-            // Enables display of small capitals (OpenType feature: smcp). Small-caps glyphs typically use the form of uppercase letters but are reduced to the size of lowercase letters.
-            features.set("smcp"sv, 1);
-            break;
-        case CSS::FontVariantCaps::AllSmallCaps:
-            // Enables display of small capitals for both upper and lowercase letters (OpenType features: c2sc, smcp).
-            features.set("c2sc"sv, 1);
-            features.set("smcp"sv, 1);
-            break;
-        case CSS::FontVariantCaps::PetiteCaps:
-            // Enables display of petite capitals (OpenType feature: pcap).
-            features.set("pcap"sv, 1);
-            break;
-        case CSS::FontVariantCaps::AllPetiteCaps:
-            // Enables display of petite capitals for both upper and lowercase letters (OpenType features: c2pc, pcap).
-            features.set("c2pc"sv, 1);
-            features.set("pcap"sv, 1);
-            break;
-        case CSS::FontVariantCaps::Unicase:
-            // Enables display of mixture of small capitals for uppercase letters with normal lowercase letters (OpenType feature: unic).
-            features.set("unic"sv, 1);
-            break;
-        case CSS::FontVariantCaps::TitlingCaps:
-            // Enables display of titling capitals (OpenType feature: titl).
-            features.set("titl"sv, 1);
-            break;
-        default:
-            break;
-        }
-
-        // 6.7 https://drafts.csswg.org/css-fonts/#font-variant-numeric-prop
-        auto numeric_or_null = font_variant_numeric();
-        if (numeric_or_null.has_value()) {
-            auto numeric = numeric_or_null.release_value();
-            if (numeric.figure == Gfx::FontVariantNumeric::Figure::Oldstyle) {
-                // Enables display of old-style numerals (OpenType feature: onum).
-                features.set("onum"sv, 1);
-            } else if (numeric.figure == Gfx::FontVariantNumeric::Figure::Lining) {
-                // Enables display of lining numerals (OpenType feature: lnum).
-                features.set("lnum"sv, 1);
-            }
-
-            if (numeric.spacing == Gfx::FontVariantNumeric::Spacing::Proportional) {
-                // Enables display of proportional numerals (OpenType feature: pnum).
-                features.set("pnum"sv, 1);
-            } else if (numeric.spacing == Gfx::FontVariantNumeric::Spacing::Tabular) {
-                // Enables display of tabular numerals (OpenType feature: tnum).
-                features.set("tnum"sv, 1);
-            }
-
-            if (numeric.fraction == Gfx::FontVariantNumeric::Fraction::Diagonal) {
-                // Enables display of diagonal fractions (OpenType feature: frac).
-                features.set("frac"sv, 1);
-            } else if (numeric.fraction == Gfx::FontVariantNumeric::Fraction::Stacked) {
-                // Enables display of stacked fractions (OpenType feature: afrc).
-                features.set("afrc"sv, 1);
-                features.set("afrc"sv, 1);
-            }
-
-            if (numeric.ordinal) {
-                // Enables display of letter forms used with ordinal numbers (OpenType feature: ordn).
-                features.set("ordn"sv, 1);
-            }
-            if (numeric.slashed_zero) {
-                // Enables display of slashed zeros (OpenType feature: zero).
-                features.set("zero"sv, 1);
-            }
-        }
-
-        // 6.10 https://drafts.csswg.org/css-fonts/#font-variant-east-asian-prop
-        auto east_asian_or_null = font_variant_east_asian();
-        if (east_asian_or_null.has_value()) {
-            auto east_asian = east_asian_or_null.release_value();
-            switch (east_asian.variant) {
-            case Gfx::FontVariantEastAsian::Variant::Jis78:
-                // Enables display of JIS78 forms (OpenType feature: jp78).
-                features.set("jp78"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Variant::Jis83:
-                // Enables display of JIS83 forms (OpenType feature: jp83).
-                features.set("jp83"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Variant::Jis90:
-                // Enables display of JIS90 forms (OpenType feature: jp90).
-                features.set("jp90"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Variant::Jis04:
-                // Enables display of JIS04 forms (OpenType feature: jp04).
-                features.set("jp04"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Variant::Simplified:
-                // Enables display of simplified forms (OpenType feature: smpl).
-                features.set("smpl"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Variant::Traditional:
-                // Enables display of traditional forms (OpenType feature: trad).
-                features.set("trad"sv, 1);
-                break;
-            default:
-                break;
-            }
-            switch (east_asian.width) {
-            case Gfx::FontVariantEastAsian::Width::FullWidth:
-                // Enables display of full-width forms (OpenType feature: fwid).
-                features.set("fwid"sv, 1);
-                break;
-            case Gfx::FontVariantEastAsian::Width::Proportional:
-                // Enables display of proportional-width forms (OpenType feature: pwid).
-                features.set("pwid"sv, 1);
-                break;
-            default:
-                break;
-            }
-            if (east_asian.ruby) {
-                // Enables display of ruby forms (OpenType feature: ruby).
-                features.set("ruby"sv, 1);
-            }
-        }
-
-        // FIXME: vkrn should be enabled for vertical text.
-        switch (font_kerning()) {
-        case CSS::FontKerning::Auto:
-            // AD-HOC: Disable kerning if font-kerning is set to normal and text rendering is set to optimize speed.
-            features.set("kern"sv, text_rendering() != CSS::TextRendering::Optimizespeed ? 1 : 0);
-            break;
-        case CSS::FontKerning::Normal:
-            features.set("kern"sv, 1);
-            break;
-        case CSS::FontKerning::None:
-            features.set("kern"sv, 0);
-            break;
-        default:
-            break;
-        }
-
-        return features;
+    return {
+        .font_variant_alternates = font_variant_alternates(),
+        .font_variant_caps = font_variant_caps(),
+        .font_variant_east_asian = font_variant_east_asian(),
+        .font_variant_emoji = font_variant_emoji(),
+        .font_variant_ligatures = font_variant_ligatures(),
+        .font_variant_numeric = font_variant_numeric(),
+        .font_variant_position = font_variant_position(),
+        .font_feature_settings = font_feature_settings(),
+        .font_kerning = font_kerning(),
+        .text_rendering = text_rendering(),
     };
-
-    // https://www.w3.org/TR/css-fonts-3/#feature-precedence
-
-    // FIXME: 1. Font features enabled by default, including features required for a given script.
-
-    // FIXME: 2. If the font is defined via an @font-face rule, the font features implied by the font-feature-settings descriptor in the @font-face rule.
-
-    // 3. Font features implied by the value of the ‘font-variant’ property, the related ‘font-variant’ subproperties and any other CSS property that uses OpenType features (e.g. the ‘font-kerning’ property).
-    merged_features.update(font_variant_features());
-
-    // FIXME: 4. Feature settings determined by properties other than ‘font-variant’ or ‘font-feature-settings’. For example, setting a non-default value for the ‘letter-spacing’ property disables common ligatures.
-
-    // 5. Font features implied by the value of ‘font-feature-settings’ property.
-    merged_features.update(font_feature_settings());
-
-    Gfx::ShapeFeatures shape_features;
-    shape_features.ensure_capacity(merged_features.size());
-
-    for (auto& it : merged_features) {
-        shape_features.unchecked_append({ { it.key[0], it.key[1], it.key[2], it.key[3] }, static_cast<u32>(it.value) });
-    }
-
-    return shape_features;
 }
 
 Optional<Gfx::FontVariantAlternates> ComputedProperties::font_variant_alternates() const
@@ -2010,7 +1710,7 @@ FontVariantPosition ComputedProperties::font_variant_position() const
     return keyword_to_font_variant_position(value.to_keyword()).release_value();
 }
 
-HashMap<StringView, u8> ComputedProperties::font_feature_settings() const
+HashMap<FlyString, u8> ComputedProperties::font_feature_settings() const
 {
     auto const& value = property(PropertyID::FontFeatureSettings);
 
@@ -2019,7 +1719,7 @@ HashMap<StringView, u8> ComputedProperties::font_feature_settings() const
 
     if (value.is_value_list()) {
         auto const& feature_tags = value.as_value_list().values();
-        HashMap<StringView, u8> result;
+        HashMap<FlyString, u8> result;
         result.ensure_capacity(feature_tags.size());
         for (auto const& tag_value : feature_tags) {
             auto const& feature_tag = tag_value->as_open_type_tagged();
@@ -2350,6 +2050,12 @@ Optional<FlyString> ComputedProperties::view_transition_name() const
 
 Vector<ComputedProperties::AnimationProperties> ComputedProperties::animations() const
 {
+    auto const& animation_name_values = property(PropertyID::AnimationName).as_value_list().values();
+
+    // OPTIMIZATION: If all animation names are 'none', there are no animations to process
+    if (all_of(animation_name_values, [](auto const& value) { return value->to_keyword() == Keyword::None; }))
+        return {};
+
     // CSS Animations are defined by binding keyframes to an element using the animation-* properties. These list-valued
     // properties, which are all longhands of the animation shorthand, form a coordinating list property group with
     // animation-name as the coordinating list base property and each item in the coordinated value list defining the
@@ -2453,17 +2159,72 @@ Vector<ComputedProperties::AnimationProperties> ComputedProperties::animations()
     return animations;
 }
 
+Vector<TransitionProperties> ComputedProperties::transitions() const
+{
+    auto const& coordinated_properties = assemble_coordinated_value_list(
+        PropertyID::TransitionProperty,
+        { PropertyID::TransitionProperty, PropertyID::TransitionDuration, PropertyID::TransitionTimingFunction, PropertyID::TransitionDelay, PropertyID::TransitionBehavior });
+
+    auto const& property_values = coordinated_properties.get(PropertyID::TransitionProperty).value();
+    auto const& duration_values = coordinated_properties.get(PropertyID::TransitionDuration).value();
+    auto const& timing_function_values = coordinated_properties.get(PropertyID::TransitionTimingFunction).value();
+    auto const& delay_values = coordinated_properties.get(PropertyID::TransitionDelay).value();
+    auto const& behavior_values = coordinated_properties.get(PropertyID::TransitionBehavior).value();
+
+    Vector<TransitionProperties> transitions;
+    transitions.ensure_capacity(property_values.size());
+
+    for (size_t i = 0; i < property_values.size(); i++) {
+        auto properties = [&]() -> Vector<PropertyID> {
+            auto const& property_value = property_values[i];
+
+            if (property_value->is_keyword() && property_value->to_keyword() == Keyword::None)
+                return {};
+
+            auto maybe_property = property_id_from_string(property_value->as_custom_ident().custom_ident());
+            if (!maybe_property.has_value())
+                return {};
+
+            Vector<PropertyID> properties;
+
+            auto const append_property_mapping_logical_aliases = [&](PropertyID property_id) {
+                if (property_is_logical_alias(property_id))
+                    properties.append(map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { writing_mode(), direction() }));
+                else if (property_id != PropertyID::Custom)
+                    properties.append(property_id);
+            };
+
+            auto transition_property = maybe_property.release_value();
+            if (property_is_shorthand(transition_property)) {
+                auto expanded_longhands = expanded_longhands_for_shorthand(transition_property);
+
+                properties.ensure_capacity(expanded_longhands.size());
+
+                for (auto const& prop : expanded_longhands_for_shorthand(transition_property))
+                    append_property_mapping_logical_aliases(prop);
+            } else {
+                append_property_mapping_logical_aliases(transition_property);
+            }
+
+            return properties;
+        }();
+
+        transitions.append(TransitionProperties {
+            .properties = properties,
+            .duration = Time::from_style_value(duration_values[i], {}).to_milliseconds(),
+            .timing_function = EasingFunction::from_style_value(timing_function_values[i]),
+            .delay = Time::from_style_value(delay_values[i], {}).to_milliseconds(),
+            .transition_behavior = keyword_to_transition_behavior(behavior_values[i]->to_keyword()).value(),
+        });
+    }
+
+    return transitions;
+}
+
 MaskType ComputedProperties::mask_type() const
 {
     auto const& value = property(PropertyID::MaskType);
     return keyword_to_mask_type(value.to_keyword()).release_value();
-}
-
-void ComputedProperties::set_math_depth(int math_depth)
-{
-    m_math_depth = math_depth;
-    // Make our children inherit our computed value, not our specified value.
-    set_property(PropertyID::MathDepth, MathDepthStyleValue::create_integer(IntegerStyleValue::create(math_depth)));
 }
 
 QuotesData ComputedProperties::quotes() const
@@ -2552,6 +2313,12 @@ ScrollbarWidth ComputedProperties::scrollbar_width() const
     return keyword_to_scrollbar_width(value.to_keyword()).release_value();
 }
 
+Resize ComputedProperties::resize() const
+{
+    auto const& value = property(PropertyID::Resize);
+    return keyword_to_resize(value.to_keyword()).release_value();
+}
+
 ShapeRendering ComputedProperties::shape_rendering() const
 {
     auto const& value = property(PropertyID::ShapeRendering);
@@ -2638,7 +2405,7 @@ WillChange ComputedProperties::will_change() const
 ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> ComputedProperties::computed_font_list(FontComputer const& font_computer) const
 {
     if (!m_cached_computed_font_list) {
-        const_cast<ComputedProperties*>(this)->m_cached_computed_font_list = font_computer.compute_font_for_style_values(property(PropertyID::FontFamily), font_size(), font_slope(), font_weight(), font_width(), font_variation_settings());
+        const_cast<ComputedProperties*>(this)->m_cached_computed_font_list = font_computer.compute_font_for_style_values(property(PropertyID::FontFamily), font_size(), font_slope(), font_weight(), font_width(), font_optical_sizing(), font_variation_settings(), font_feature_data());
         VERIFY(!m_cached_computed_font_list->is_empty());
     }
 
@@ -2654,6 +2421,16 @@ ValueComparingNonnullRefPtr<Gfx::Font const> ComputedProperties::first_available
     }
 
     return *m_cached_first_available_computed_font;
+}
+
+MathStyle ComputedProperties::math_style() const
+{
+    return keyword_to_math_style(property(PropertyID::MathStyle).to_keyword()).value();
+}
+
+int ComputedProperties::math_depth() const
+{
+    return property(PropertyID::MathDepth).as_integer().integer();
 }
 
 CSSPixels ComputedProperties::font_size() const
@@ -2674,6 +2451,12 @@ Percentage ComputedProperties::font_width() const
 int ComputedProperties::font_slope() const
 {
     return property(PropertyID::FontStyle).as_font_style().to_font_slope();
+}
+
+FontOpticalSizing ComputedProperties::font_optical_sizing() const
+{
+    auto const& value = property(PropertyID::FontOpticalSizing);
+    return keyword_to_font_optical_sizing(value.to_keyword()).release_value();
 }
 
 }

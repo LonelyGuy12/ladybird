@@ -20,6 +20,7 @@ namespace Web {
 class CSSPixels;
 class DisplayListRecordingContext;
 class DragAndDropEventHandler;
+class ElementResizeAction;
 class EventHandler;
 class InputEventsTarget;
 class LoadRequest;
@@ -60,6 +61,7 @@ class AnimationPlaybackEvent;
 class AnimationTimeline;
 class DocumentTimeline;
 class KeyframeEffect;
+class ScrollTimeline;
 
 }
 
@@ -208,6 +210,7 @@ class SubtleCrypto;
 namespace Web::CSS {
 
 class AbstractImageStyleValue;
+class AddFunctionStyleValue;
 class AnchorStyleValue;
 class AnchorSizeStyleValue;
 class Angle;
@@ -217,6 +220,7 @@ class AngleStyleValue;
 class BackgroundSizeStyleValue;
 class BasicShapeStyleValue;
 class BorderImageSliceStyleValue;
+class BorderRadiusRectStyleValue;
 class BorderRadiusStyleValue;
 class CalculatedStyleValue;
 class CalculationNode;
@@ -230,10 +234,12 @@ class ComputedProperties;
 class ConicGradientStyleValue;
 class ContentStyleValue;
 class CounterDefinitionsStyleValue;
+class CounterStyleSystemStyleValue;
 class CounterStyleValue;
 class CountersSet;
 class CSSAnimation;
 class CSSConditionRule;
+class CSSCounterStyleRule;
 class CSSDescriptors;
 class CSSFontFaceDescriptors;
 class CSSFontFaceRule;
@@ -332,7 +338,6 @@ class LengthPercentage;
 class LengthPercentageOrAuto;
 class LengthStyleValue;
 class LinearGradientStyleValue;
-class MathDepthStyleValue;
 class MediaFeatureValue;
 class MediaList;
 class MediaQuery;
@@ -415,10 +420,14 @@ struct GridRepeatParams;
 struct LogicalAliasMappingContext;
 struct RandomCachingKey;
 struct StyleSheetIdentifier;
+struct TransitionProperties;
+template<typename T>
+struct ValueComparingNonnullRefPtr;
 
 // https://drafts.css-houdini.org/css-typed-om-1/#typedefdef-cssnumberish
 using CSSNumberish = Variant<double, GC::Root<CSSNumericValue>>;
 using PaintOrderList = Array<PaintOrder, 3>;
+using StyleValueVector = Vector<ValueComparingNonnullRefPtr<StyleValue const>>;
 
 }
 
@@ -484,6 +493,7 @@ class PseudoElement;
 class Range;
 class RegisteredObserver;
 class ShadowRoot;
+class SlotRegistry;
 class StaticNodeList;
 class StaticRange;
 class StyleInvalidator;
@@ -639,6 +649,7 @@ class ErrorEvent;
 class EventHandler;
 class EventLoop;
 class EventSource;
+class External;
 class FormAssociatedElement;
 class FormDataEvent;
 class History;
@@ -1057,6 +1068,22 @@ class ServiceWorkerRegistration;
 
 }
 
+namespace Web::Speech {
+
+class SpeechGrammar;
+class SpeechGrammarList;
+class SpeechRecognition;
+class SpeechRecognitionAlternative;
+class SpeechRecognitionEvent;
+class SpeechRecognitionPhrase;
+class SpeechRecognitionResult;
+class SpeechRecognitionResultList;
+class SpeechSynthesis;
+class SpeechSynthesisUtterance;
+class SpeechSynthesisVoice;
+
+}
+
 namespace Web::Streams {
 
 class ByteLengthQueuingStrategy;
@@ -1216,6 +1243,7 @@ class AudioParam;
 class AudioScheduledSourceNode;
 class BaseAudioContext;
 class BiquadFilterNode;
+class ControlMessageQueue;
 class DynamicsCompressorNode;
 class GainNode;
 class OfflineAudioCompletionEvent;
@@ -1264,6 +1292,7 @@ class EXTColorBufferFloat;
 class EXTRenderSnorm;
 class EXTTextureFilterAnisotropic;
 class EXTTextureNorm16;
+class OESElementIndexUint;
 class OESStandardDerivatives;
 class OESVertexArrayObject;
 class WebGLCompressedTextureS3tc;
@@ -1306,6 +1335,14 @@ namespace Web::WebVTT {
 
 class VTTCue;
 class VTTRegion;
+
+}
+
+namespace Web::WebXR {
+
+class XRSession;
+class XRSessionEvent;
+class XRSystem;
 
 }
 

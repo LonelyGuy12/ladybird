@@ -28,7 +28,12 @@ public:
     using OnResult = Function<void(StatementID)>;
 
     ErrorOr<StatementID> prepare_statement(StringView statement);
-    void execute_statement(StatementID, OnResult on_result);
+
+    void execute_statement(StatementID statement_id, OnResult on_result)
+    {
+        VERIFY(bound_parameter_count(statement_id) == 0);
+        execute_statement_internal(statement_id, move(on_result));
+    }
 
     template<typename... PlaceholderValues>
     void execute_statement(StatementID statement_id, OnResult on_result, PlaceholderValues&&... placeholder_values)
@@ -36,14 +41,39 @@ public:
         int index = 1;
         (apply_placeholder(statement_id, index++, forward<PlaceholderValues>(placeholder_values)), ...);
 
-        execute_statement(statement_id, move(on_result));
+        VERIFY(bound_parameter_count(statement_id) == index - 1);
+        execute_statement_internal(statement_id, move(on_result));
     }
 
     template<typename ValueType>
     ValueType result_column(StatementID, int column);
 
+    // https://www.sqlite.org/pragma.html#pragma_journal_mode
+    enum class JournalMode {
+        Delete,
+        Truncate,
+        Persist,
+        Memory,
+        WriteAheadLog,
+        Off,
+    };
+    ErrorOr<void> set_journal_mode_pragma(JournalMode);
+
+    // https://www.sqlite.org/pragma.html#pragma_synchronous
+    enum class Synchronous {
+        Off,
+        Normal,
+        Full,
+        Extra,
+    };
+    ErrorOr<void> set_synchronous_pragma(Synchronous);
+
 private:
     explicit Database(sqlite3*);
+
+    void execute_statement_internal(StatementID, OnResult);
+
+    int bound_parameter_count(StatementID);
 
     template<typename ValueType>
     void apply_placeholder(StatementID statement_id, int index, ValueType const& value);
