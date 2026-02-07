@@ -29,22 +29,26 @@ namespace Web::WebGL {
 static constexpr int COMPRESSED_TEXTURE_FORMATS = 0x86A3;
 static constexpr int UNPACK_FLIP_Y_WEBGL = 0x9240;
 static constexpr int UNPACK_PREMULTIPLY_ALPHA_WEBGL = 0x9241;
+static constexpr int UNPACK_COLORSPACE_CONVERSION_WEBGL = 0x9243;
+static constexpr int BROWSER_DEFAULT_WEBGL = 0x9244;
 static constexpr int MAX_CLIENT_WAIT_TIMEOUT_WEBGL = 0x9247;
 
 // NOTE: This is the Variant created by the IDL wrapper generator, and needs to be updated accordingly.
 using TexImageSource = Variant<GC::Root<HTML::ImageBitmap>, GC::Root<HTML::ImageData>, GC::Root<HTML::HTMLImageElement>, GC::Root<HTML::HTMLCanvasElement>, GC::Root<HTML::OffscreenCanvas>, GC::Root<HTML::HTMLVideoElement>>;
 
-// FIXME: This object should inherit from Bindings::PlatformObject and implement the WebGLRenderingContextBase IDL interface.
-//        We should make WebGL code generator to produce implementation for this interface.
-class WebGLRenderingContextBase {
+class WebGLRenderingContextBase : public Bindings::PlatformObject {
+    WEB_PLATFORM_OBJECT(WebGLRenderingContextBase, Bindings::PlatformObject);
+
 public:
     using Float32List = Variant<GC::Root<JS::Float32Array>, Vector<float>>;
     using Int32List = Variant<GC::Root<JS::Int32Array>, Vector<WebIDL::Long>>;
     using Uint32List = Variant<GC::Root<JS::Uint32Array>, Vector<WebIDL::UnsignedLong>>;
 
-    virtual GC::Cell const* gc_cell() const = 0;
-    virtual void visit_edges(JS::Cell::Visitor&) = 0;
     virtual OpenGLContext& context() = 0;
+
+protected:
+    WebGLRenderingContextBase(JS::Realm&);
+
     virtual bool ext_texture_filter_anisotropic_extension_enabled() const = 0;
     virtual bool angle_instanced_arrays_extension_enabled() const = 0;
     virtual bool oes_standard_derivatives_extension_enabled() const = 0;
@@ -125,7 +129,6 @@ public:
 
     Optional<Gfx::BitmapExportResult> read_and_pixel_convert_texture_image_source(TexImageSource const& source, WebIDL::UnsignedLong format, WebIDL::UnsignedLong type, Optional<int> destination_width = OptionalNone {}, Optional<int> destination_height = OptionalNone {});
 
-protected:
     static Vector<GLchar> null_terminated_string(StringView string)
     {
         Vector<GLchar> result;
@@ -150,6 +153,15 @@ protected:
     //      if present, is multiplied into the color channels during the data transfer. The initial value is false.
     //      Any non-zero value is interpreted as true.
     bool m_unpack_premultiply_alpha { false };
+
+    // UNPACK_COLORSPACE_CONVERSION_WEBGL of type unsigned long
+    //      If set to BROWSER_DEFAULT_WEBGL, then the browser's default colorspace conversion (e.g. converting a display-p3
+    //      image to srgb) is applied during subsequent texture data upload calls (e.g. texImage2D and texSubImage2D) that
+    //      take an argument of TexImageSource. The precise conversions may be specific to both the browser and file type.
+    //      If set to NONE, no colorspace conversion is applied, other than conversion to RGBA. (For example, a rec709 YUV
+    //      video is still converted to rec709 RGB data, but not then converted to e.g. srgb RGB data) The initial value is
+    //      BROWSER_DEFAULT_WEBGL.
+    GLenum m_unpack_colorspace_conversion { BROWSER_DEFAULT_WEBGL };
 
 private:
     GLenum m_error { 0 };

@@ -35,42 +35,56 @@ public:
     using FontFaceSource = Variant<String, GC::Root<WebIDL::BufferSource>>;
 
     [[nodiscard]] static GC::Ref<FontFace> construct_impl(JS::Realm&, String family, FontFaceSource source, FontFaceDescriptors const& descriptors);
+    [[nodiscard]] static GC::Ref<FontFace> create_css_connected(JS::Realm&, CSSFontFaceRule&);
     virtual ~FontFace() override;
 
     String family() const { return m_family; }
     WebIDL::ExceptionOr<void> set_family(String const&);
+    void set_family_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String style() const { return m_style; }
     WebIDL::ExceptionOr<void> set_style(String const&);
+    void set_style_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String weight() const { return m_weight; }
     WebIDL::ExceptionOr<void> set_weight(String const&);
+    void set_weight_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String stretch() const { return m_stretch; }
     WebIDL::ExceptionOr<void> set_stretch(String const&);
+    void set_stretch_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String unicode_range() const { return m_unicode_range; }
     WebIDL::ExceptionOr<void> set_unicode_range(String const&);
+    void set_unicode_range_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String feature_settings() const { return m_feature_settings; }
     WebIDL::ExceptionOr<void> set_feature_settings(String const&);
+    void set_feature_settings_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String variation_settings() const { return m_variation_settings; }
     WebIDL::ExceptionOr<void> set_variation_settings(String const&);
+    void set_variation_settings_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String display() const { return m_display; }
     WebIDL::ExceptionOr<void> set_display(String const&);
+    void set_display_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String ascent_override() const { return m_ascent_override; }
     WebIDL::ExceptionOr<void> set_ascent_override(String const&);
+    void set_ascent_override_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String descent_override() const { return m_descent_override; }
     WebIDL::ExceptionOr<void> set_descent_override(String const&);
+    void set_descent_override_impl(NonnullRefPtr<StyleValue const> const& value);
 
     String line_gap_override() const { return m_line_gap_override; }
     WebIDL::ExceptionOr<void> set_line_gap_override(String const&);
+    void set_line_gap_override_impl(NonnullRefPtr<StyleValue const> const& value);
 
-    bool is_css_connected() const { return m_is_css_connected; }
+    bool is_css_connected() const { return m_css_font_face_rule != nullptr; }
+    void disconnect_from_css_rule();
+    void reparse_connected_css_font_face_rule_descriptors();
 
     Bindings::FontFaceLoadStatus status() const { return m_status; }
 
@@ -110,8 +124,7 @@ private:
     RefPtr<Gfx::Typeface const> m_parsed_font;
     RefPtr<Core::Promise<NonnullRefPtr<Gfx::Typeface const>>> m_font_load_promise;
 
-    // https://drafts.csswg.org/css-font-loading/#css-connected
-    bool m_is_css_connected { false };
+    GC::Ptr<CSSFontFaceRule> m_css_font_face_rule;
 };
 
 bool font_format_is_supported(FlyString const& name);

@@ -19,9 +19,13 @@ public:
         Space,
         Comma,
     };
-    static ValueComparingNonnullRefPtr<StyleValueList> create(StyleValueVector&& values, Separator separator)
+    enum class Collapsible {
+        Yes,
+        No,
+    };
+    static ValueComparingNonnullRefPtr<StyleValueList> create(StyleValueVector&& values, Separator separator, Collapsible collapsible = Collapsible::Yes)
     {
-        return adopt_ref(*new (nothrow) StyleValueList(move(values), separator));
+        return adopt_ref(*new (nothrow) StyleValueList(move(values), separator, collapsible));
     }
 
     size_t size() const { return m_properties.values.size(); }
@@ -33,7 +37,7 @@ public:
         return m_properties.values[i];
     }
 
-    virtual String to_string(SerializationMode) const override;
+    virtual void serialize(StringBuilder&, SerializationMode) const override;
     virtual Vector<Parser::ComponentValue> tokenize() const override;
     virtual GC::Ref<CSSStyleValue> reify(JS::Realm&, FlyString const& associated_property) const override;
     virtual StyleValueVector subdivide_into_iterations(PropertyNameAndID const&) const override;
@@ -47,14 +51,19 @@ public:
     virtual void set_style_sheet(GC::Ptr<CSSStyleSheet>) override;
 
 private:
-    StyleValueList(StyleValueVector&& values, Separator separator)
+    StyleValueList(StyleValueVector&& values, Separator separator, Collapsible collapsible = Collapsible::Yes)
         : StyleValueWithDefaultOperators(Type::ValueList)
-        , m_properties { .separator = separator, .values = move(values) }
+        , m_properties {
+            .separator = separator,
+            .collapsible = collapsible,
+            .values = move(values),
+        }
     {
     }
 
     struct Properties {
         Separator separator;
+        Collapsible collapsible;
         StyleValueVector values;
         bool operator==(Properties const&) const;
     } m_properties;

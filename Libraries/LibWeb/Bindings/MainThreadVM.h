@@ -43,6 +43,6 @@ WEB_API void shutdown_python_engine();
 
 void queue_mutation_observer_microtask(DOM::Document const&);
 WEB_API NonnullOwnPtr<JS::ExecutionContext> create_a_new_javascript_realm(JS::VM&, Function<JS::Object*(JS::Realm&)> create_global_object, Function<JS::Object*(JS::Realm&)> create_global_this_value);
-WEB_API void invoke_custom_element_reactions(Vector<GC::Root<DOM::Element>>& element_queue);
+WEB_API void invoke_custom_element_reactions(Vector<GC::Weak<DOM::Element>>& element_queue);
 
 }

@@ -9,6 +9,7 @@
 
 #include <AK/Optional.h>
 #include <AK/StringView.h>
+#include <LibJS/Bytecode/Builtins.h>
 #include <LibJS/LocalVariable.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/PrivateEnvironment.h>
@@ -24,7 +25,7 @@ public:
 
     // Table 5: Additional Essential Internal Methods of Function Objects, https://tc39.es/ecma262/#table-additional-essential-internal-methods-of-function-objects
 
-    virtual ThrowCompletionOr<void> get_stack_frame_size([[maybe_unused]] size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count) { return {}; }
+    virtual ThrowCompletionOr<void> get_stack_frame_size([[maybe_unused]] size_t& registers_and_locals_count, [[maybe_unused]] size_t& constants_count, [[maybe_unused]] size_t& argument_count) { return {}; }
     virtual ThrowCompletionOr<Value> internal_call(ExecutionContext&, Value this_argument) = 0;
     virtual ThrowCompletionOr<GC::Ref<Object>> internal_construct(ExecutionContext&, [[maybe_unused]] FunctionObject& new_target) { VERIFY_NOT_REACHED(); }
 
@@ -44,11 +45,20 @@ public:
 
     virtual Utf16String name_for_call_stack() const = 0;
 
+    bool is_array_prototype_next_builtin() const { return m_builtin.has_value() && *m_builtin == Bytecode::Builtin::ArrayIteratorPrototypeNext; }
+    bool is_map_prototype_next_builtin() const { return m_builtin.has_value() && *m_builtin == Bytecode::Builtin::MapIteratorPrototypeNext; }
+    bool is_set_prototype_next_builtin() const { return m_builtin.has_value() && *m_builtin == Bytecode::Builtin::SetIteratorPrototypeNext; }
+    bool is_string_prototype_next_builtin() const { return m_builtin.has_value() && *m_builtin == Bytecode::Builtin::StringIteratorPrototypeNext; }
+
+    Optional<Bytecode::Builtin> builtin() const { return m_builtin; }
+
 protected:
     explicit FunctionObject(Realm&, Object* prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
     explicit FunctionObject(Object& prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
 
     [[nodiscard]] GC::Ref<PrimitiveString> make_function_name(Variant<PropertyKey, PrivateName> const&, Optional<StringView> const& prefix);
+
+    Optional<Bytecode::Builtin> m_builtin;
 
 private:
     virtual bool is_function() const override { return true; }

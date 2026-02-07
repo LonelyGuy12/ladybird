@@ -85,8 +85,9 @@ public:
     WebIDL::ExceptionOr<void> set_value(Utf16String const&);
 
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
-    virtual Utf16String relevant_value() override { return value(); }
+    virtual Utf16String relevant_value() const override { return value(); }
     WebIDL::ExceptionOr<void> set_relevant_value(Utf16String const& value) override { return set_value(value); }
+    virtual Optional<Utf16String> selected_text_for_stringifier() const override;
 
     virtual void set_dirty_value_flag(bool flag) override { m_dirty_value = flag; }
 
@@ -221,6 +222,7 @@ public:
     bool multiple_applies() const;
     bool required_applies() const;
     bool checked_applies() const;
+    static bool checked_applies(TypeAttributeState);
     bool has_selectable_text() const;
 
     bool supports_a_picker() const;
@@ -232,7 +234,7 @@ public:
     Optional<String> selection_direction_binding() { return selection_direction(); }
 
     // ^FormAssociatedTextControlElement
-    virtual void did_edit_text_node() override;
+    virtual void did_edit_text_node(FlyString const& input_type, Optional<Utf16String> const& data) override;
     virtual GC::Ptr<DOM::Text> form_associated_element_to_text_node() override { return m_text_node; }
 
     // https://html.spec.whatwg.org/multipage/input.html#has-a-periodic-domain/
@@ -261,6 +263,7 @@ private:
 
     virtual bool is_presentational_hint(FlyString const&) const override;
     virtual void apply_presentational_hints(GC::Ref<CSS::CascadedProperties>) const override;
+    virtual EventResult handle_return_key(FlyString const& ui_input_type) override;
 
     // ^DOM::Node
     virtual bool is_html_input_element() const final { return true; }
@@ -326,7 +329,7 @@ private:
     void handle_maxlength_attribute();
     WebIDL::ExceptionOr<void> handle_src_attribute(String const& value);
 
-    void user_interaction_did_change_input_value();
+    void user_interaction_did_change_input_value(FlyString const& input_type = {}, Optional<Utf16String> const& data = {});
 
     // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
     Utf16String value_sanitization_algorithm(Utf16String const&) const;

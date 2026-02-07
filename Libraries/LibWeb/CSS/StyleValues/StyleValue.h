@@ -14,7 +14,9 @@
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <AK/String.h>
+#include <AK/StringBuilder.h>
 #include <AK/StringView.h>
+#include <AK/ValueComparingRefPtr.h>
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
 #include <LibGfx/Color.h>
@@ -31,6 +33,7 @@
 namespace Web::CSS {
 
 #define ENUMERATE_CSS_STYLE_VALUE_TYPES                                                                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(AddFunction, add_function, AddFunctionStyleValue)                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Anchor, anchor, AnchorStyleValue)                                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(AnchorSize, anchor_size, AnchorSizeStyleValue)                                   \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Angle, angle, AngleStyleValue)                                                   \
@@ -38,6 +41,7 @@ namespace Web::CSS {
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(BasicShape, basic_shape, BasicShapeStyleValue)                                   \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderImageSlice, border_image_slice, BorderImageSliceStyleValue)                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderRadius, border_radius, BorderRadiusStyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderRadiusRect, border_radius_rect, BorderRadiusRectStyleValue)                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Calculated, calculated, CalculatedStyleValue)                                    \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(ColorScheme, color_scheme, ColorSchemeStyleValue)                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Color, color, ColorStyleValue)                                                   \
@@ -45,6 +49,7 @@ namespace Web::CSS {
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Content, content, ContentStyleValue)                                             \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Counter, counter, CounterStyleValue)                                             \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(CounterDefinitions, counter_definitions, CounterDefinitionsStyleValue)           \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(CounterStyleSystem, counter_style_system, CounterStyleSystemStyleValue)          \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Cursor, cursor, CursorStyleValue)                                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(CustomIdent, custom_ident, CustomIdentStyleValue)                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Display, display, DisplayStyleValue)                                             \
@@ -66,7 +71,6 @@ namespace Web::CSS {
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Keyword, keyword, KeywordStyleValue)                                             \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Length, length, LengthStyleValue)                                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(LinearGradient, linear_gradient, LinearGradientStyleValue)                       \
-    __ENUMERATE_CSS_STYLE_VALUE_TYPE(MathDepth, math_depth, MathDepthStyleValue)                                      \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(Number, number, NumberStyleValue)                                                \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(OpenTypeTagged, open_type_tagged, OpenTypeTaggedStyleValue)                      \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(PendingSubstitution, pending_substitution, PendingSubstitutionStyleValue)        \
@@ -97,63 +101,10 @@ namespace Web::CSS {
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(ValueList, value_list, StyleValueList)                                           \
     __ENUMERATE_CSS_STYLE_VALUE_TYPE(ViewFunction, view_function, ViewFunctionStyleValue)
 
-template<typename T>
-struct ValueComparingNonnullRefPtr : public NonnullRefPtr<T> {
-    using NonnullRefPtr<T>::NonnullRefPtr;
-
-    ValueComparingNonnullRefPtr(NonnullRefPtr<T> const& other)
-        : NonnullRefPtr<T>(other)
-    {
-    }
-
-    ValueComparingNonnullRefPtr(NonnullRefPtr<T>&& other)
-        : NonnullRefPtr<T>(move(other))
-    {
-    }
-
-    bool operator==(ValueComparingNonnullRefPtr const& other) const
-    {
-        return this->ptr() == other.ptr() || this->ptr()->equals(*other);
-    }
-
-private:
-    using NonnullRefPtr<T>::operator==;
-};
-
-template<typename T>
-struct ValueComparingRefPtr : public RefPtr<T> {
-    using RefPtr<T>::RefPtr;
-
-    ValueComparingRefPtr(RefPtr<T> const& other)
-        : RefPtr<T>(other)
-    {
-    }
-
-    ValueComparingRefPtr(RefPtr<T>&& other)
-        : RefPtr<T>(move(other))
-    {
-    }
-
-    template<typename U>
-    bool operator==(ValueComparingNonnullRefPtr<U> const& other) const
-    {
-        return this->ptr() == other.ptr() || (this->ptr() && this->ptr()->equals(*other));
-    }
-
-    bool operator==(ValueComparingRefPtr const& other) const
-    {
-        return this->ptr() == other.ptr() || (this->ptr() && other.ptr() && this->ptr()->equals(*other));
-    }
-
-private:
-    using RefPtr<T>::operator==;
-};
-
-using StyleValueVector = Vector<ValueComparingNonnullRefPtr<StyleValue const>>;
-
 struct ColorResolutionContext {
     Optional<PreferredColorScheme> color_scheme;
     Optional<Color> current_color;
+    Optional<Color> accent_color;
     GC::Ptr<DOM::Document const> document;
     CalculationResolutionContext calculation_resolution_context;
 
@@ -213,7 +164,8 @@ public:
     virtual Optional<Color> to_color(ColorResolutionContext) const { return {}; }
     Keyword to_keyword() const;
 
-    virtual String to_string(SerializationMode) const = 0;
+    String to_string(SerializationMode) const;
+    virtual void serialize(StringBuilder&, SerializationMode) const = 0;
     virtual Vector<Parser::ComponentValue> tokenize() const;
     virtual GC::Ref<CSSStyleValue> reify(JS::Realm&, FlyString const& associated_property) const;
     virtual StyleValueVector subdivide_into_iterations(PropertyNameAndID const&) const;

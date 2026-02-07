@@ -57,6 +57,11 @@ op ToInt32 < Instruction
     m_value: Operand
 endop
 
+op ToString < Instruction
+    m_dst: Operand
+    m_value: Operand
+endop
+
 op BitwiseXor < Instruction
     m_dst: Operand
     m_lhs: Operand
@@ -375,6 +380,15 @@ op GetPrivateById < Instruction
     m_dst: Operand
     m_base: Operand
     m_property: IdentifierTableIndex
+endop
+
+op GetTemplateObject < Instruction
+    @nothrow
+    m_length: u32
+    m_dst: Operand
+    m_strings_count: u32
+    m_cache_index: u32
+    m_strings: Operand[]
 endop
 
 op GetBinding < Instruction
@@ -697,6 +711,7 @@ endop
 op NewObject < Instruction
     @nothrow
     m_dst: Operand
+    m_cache_index: u32
 endop
 
 op NewObjectWithNoPrototype < Instruction
@@ -1052,5 +1067,20 @@ op Yield < Instruction
     @nothrow
     m_continuation_label: Optional<Label>
     m_value: Operand
+endop
+
+op CacheObjectShape < Instruction
+    @nothrow
+    m_object: Operand
+    m_cache_index: u32
+endop
+
+op InitObjectLiteralProperty < Instruction
+    @nothrow
+    m_object: Operand
+    m_property: PropertyKeyTableIndex
+    m_src: Operand
+    m_shape_cache_index: u32
+    m_property_slot: u32
 endop
 

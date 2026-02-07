@@ -49,8 +49,15 @@ void Internals::initialize(JS::Realm& realm)
     Base::initialize(realm);
 }
 
+void Internals::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_gamepads);
+}
+
 void Internals::signal_test_is_done(String const& text)
 {
+    perform_per_test_cleanup();
     page().client().page_did_finish_test(text);
 }
 
@@ -112,6 +119,29 @@ WebIDL::ExceptionOr<void> Internals::load_reference_test_metadata()
     return {};
 }
 
+// https://web-platform-tests.org/writing-tests/testharness.html#variants
+WebIDL::ExceptionOr<void> Internals::load_test_variants()
+{
+    auto& page = this->page();
+
+    auto* document = page.top_level_browsing_context().active_document();
+    if (!document)
+        return vm().throw_completion<JS::InternalError>("No active document available"sv);
+
+    auto variant_nodes = TRY(document->query_selector_all("meta[name=variant]"sv));
+
+    JsonArray variants;
+    for (size_t i = 0; i < variant_nodes->length(); ++i) {
+        auto const* variant_node = variant_nodes->item(i);
+        auto content = as<DOM::Element>(variant_node)->get_attribute_value(HTML::AttributeNames::content);
+        variants.must_append(content);
+    }
+
+    // Always fire callback so test runner knows variant check is complete.
+    page.client().page_did_receive_test_variant_metadata(variants);
+    return {};
+}
+
 void Internals::gc()
 {
     vm().heap().collect_garbage();
@@ -145,13 +175,64 @@ JS::Object* Internals::hit_test(double x, double y)
     return nullptr;
 }
 
+struct WebDriverKeyData {
+    UIEvents::KeyCode key_code;
+    u32 additional_modifiers;
+    u32 code_point_to_send;
+};
+
+// Maps WebDriver-style key codes (0xE000-0xE05D) to KeyCode and modifiers.
+// https://w3c.github.io/webdriver/#keyboard-actions
+static constexpr Optional<WebDriverKeyData> webdriver_key_to_key_code(u32 code_point)
+{
+    switch (code_point) {
+    case 0xE003: // Backspace
+        return WebDriverKeyData { UIEvents::Key_Backspace, 0, '\b' };
+    case 0xE004: // Tab
+        return WebDriverKeyData { UIEvents::Key_Tab, 0, '\t' };
+    case 0xE006: // Return (main keyboard)
+        return WebDriverKeyData { UIEvents::Key_Return, 0, '\n' };
+    case 0xE007: // Enter (numpad)
+        return WebDriverKeyData { UIEvents::Key_Return, UIEvents::Mod_Keypad, '\n' };
+    case 0xE008: // Shift
+        return WebDriverKeyData { UIEvents::Key_LeftShift, UIEvents::Mod_Shift, 0 };
+    case 0xE009: // Control
+        return WebDriverKeyData { UIEvents::Key_LeftControl, UIEvents::Mod_Ctrl, 0 };
+    case 0xE00A: // Alt
+        return WebDriverKeyData { UIEvents::Key_LeftAlt, UIEvents::Mod_Alt, 0 };
+    case 0xE00D: // Space
+        return WebDriverKeyData { UIEvents::Key_Space, 0, ' ' };
+    case 0xE010: // End
+        return WebDriverKeyData { UIEvents::Key_End, 0, 0 };
+    case 0xE011: // Home
+        return WebDriverKeyData { UIEvents::Key_Home, 0, 0 };
+    case 0xE012: // Left Arrow
+        return WebDriverKeyData { UIEvents::Key_Left, 0, 0 };
+    case 0xE013: // Up Arrow
+        return WebDriverKeyData { UIEvents::Key_Up, 0, 0 };
+    case 0xE014: // Right Arrow
+        return WebDriverKeyData { UIEvents::Key_Right, 0, 0 };
+    case 0xE015: // Down Arrow
+        return WebDriverKeyData { UIEvents::Key_Down, 0, 0 };
+    case 0xE017: // Delete
+        return WebDriverKeyData { UIEvents::Key_Delete, 0, 0 };
+    case 0xE03D: // Meta
+        return WebDriverKeyData { UIEvents::Key_LeftSuper, UIEvents::Mod_Super, 0 };
+    }
+    return {};
+}
+
 void Internals::send_text(HTML::HTMLElement& target, String const& text, WebIDL::UnsignedShort modifiers)
 {
     auto& page = this->page();
     target.focus();
 
-    for (auto code_point : text.code_points())
-        page.handle_keydown(UIEvents::code_point_to_key_code(code_point), modifiers, code_point, false);
+    for (auto code_point : text.code_points()) {
+        if (auto data = webdriver_key_to_key_code(code_point); data.has_value())
+            page.handle_keydown(data->key_code, modifiers | data->additional_modifiers, data->code_point_to_send, false);
+        else
+            page.handle_keydown(UIEvents::code_point_to_key_code(code_point), modifiers, code_point, false);
+    }
 }
 
 void Internals::send_key(HTML::HTMLElement& target, String const& key_name, WebIDL::UnsignedShort modifiers)
@@ -175,51 +256,62 @@ void Internals::commit_text()
     page().handle_keydown(UIEvents::Key_Return, 0, 0x0d, false);
 }
 
-void Internals::click(double x, double y)
+UIEvents::MouseButton Internals::button_from_unsigned_short(WebIDL::UnsignedShort button)
 {
-    click(x, y, UIEvents::MouseButton::Primary);
+    switch (button) {
+    case BUTTON_MIDDLE:
+        return UIEvents::MouseButton::Middle;
+    case BUTTON_RIGHT:
+        return UIEvents::MouseButton::Secondary;
+    default:
+        return UIEvents::MouseButton::Primary;
+    }
 }
 
-void Internals::doubleclick(double x, double y)
-{
-    auto& page = this->page();
-
-    auto position = page.css_to_device_point({ x, y });
-    page.handle_doubleclick(position, position, UIEvents::MouseButton::Primary, 0, 0);
-}
-
-void Internals::middle_click(double x, double y)
-{
-    click(x, y, UIEvents::MouseButton::Middle);
-}
-
-void Internals::click(double x, double y, UIEvents::MouseButton button)
-{
-    auto& page = this->page();
-
-    auto position = page.css_to_device_point({ x, y });
-    page.handle_mousedown(position, position, button, 0, 0);
-    page.handle_mouseup(position, position, button, 0, 0);
-}
-
-void Internals::mouse_down(double x, double y)
-{
-    mouse_down(x, y, UIEvents::MouseButton::Primary);
-}
-
-void Internals::mouse_down(double x, double y, UIEvents::MouseButton button)
+void Internals::mouse_down(double x, double y, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
 {
     auto& page = this->page();
     auto position = page.css_to_device_point({ x, y });
-    page.handle_mousedown(position, position, button, 0, 0);
+    page.handle_mousedown(position, position, button_from_unsigned_short(button), 0, modifiers);
 }
 
-void Internals::move_pointer_to(double x, double y)
+void Internals::mouse_up(double x, double y, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
 {
     auto& page = this->page();
-
     auto position = page.css_to_device_point({ x, y });
-    page.handle_mousemove(position, position, 0, 0);
+    page.handle_mouseup(position, position, button_from_unsigned_short(button), 0, modifiers);
+}
+
+void Internals::mouse_move(double x, double y, WebIDL::UnsignedShort modifiers)
+{
+    auto& page = this->page();
+    auto position = page.css_to_device_point({ x, y });
+    page.handle_mousemove(position, position, 0, modifiers);
+}
+
+void Internals::click(double x, double y, WebIDL::UnsignedShort click_count, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
+{
+    click_and_hold(x, y, click_count, button, modifiers);
+    mouse_up(x, y, button, modifiers);
+}
+
+void Internals::click_and_hold(double x, double y, WebIDL::UnsignedShort click_count, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
+{
+    auto& page = this->page();
+    auto position = page.css_to_device_point({ x, y });
+    auto mouse_button = button_from_unsigned_short(button);
+
+    switch (click_count) {
+    case 2:
+        page.handle_doubleclick(position, position, mouse_button, 0, modifiers);
+        break;
+    case 3:
+        page.handle_tripleclick(position, position, mouse_button, 0, modifiers);
+        break;
+    default:
+        page.handle_mousedown(position, position, mouse_button, 0, modifiers);
+        break;
+    }
 }
 
 void Internals::wheel(double x, double y, double delta_x, double delta_y)
@@ -356,6 +448,11 @@ void Internals::set_browser_zoom(double factor)
     page().client().page_did_set_browser_zoom(factor);
 }
 
+void Internals::set_device_pixel_ratio(double ratio)
+{
+    page().client().page_did_set_device_pixel_ratio_for_testing(ratio);
+}
+
 bool Internals::headless()
 {
     return page().client().is_headless();
@@ -364,6 +461,11 @@ bool Internals::headless()
 String Internals::dump_display_list()
 {
     return window().associated_document().dump_display_list();
+}
+
+String Internals::dump_stacking_context_tree()
+{
+    return window().associated_document().dump_stacking_context_tree();
 }
 
 String Internals::dump_gc_graph()
@@ -384,7 +486,28 @@ void Internals::handle_sdl_input_events()
 GC::Ref<InternalGamepad> Internals::connect_virtual_gamepad()
 {
     auto& realm = this->realm();
-    return realm.create<InternalGamepad>(realm);
+    auto gamepad = realm.create<InternalGamepad>(realm, *this);
+    m_gamepads.append(gamepad);
+    return gamepad;
+}
+
+void Internals::disconnect_virtual_gamepad(GC::Ref<InternalGamepad> gamepad)
+{
+    if (auto index = m_gamepads.find_first_index(gamepad); index.has_value())
+        m_gamepads.remove(index.value());
+}
+
+void Internals::perform_per_test_cleanup()
+{
+    // Detach any virtual gamepads
+    for (auto gamepad : m_gamepads)
+        gamepad->disconnect();
+    m_gamepads.clear();
+}
+
+void Internals::set_highlighted_node(GC::Ptr<DOM::Node> node)
+{
+    window().associated_document().set_highlighted_node(node, {});
 }
 
 }

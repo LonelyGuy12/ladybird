@@ -64,17 +64,13 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const;
     virtual void dump(int indent) const;
 
-    [[nodiscard]] SourceRange source_range() const;
-    UnrealizedSourceRange unrealized_source_range() const
-    {
-        return { m_source_code, m_start_offset, m_end_offset };
-    }
-    u32 start_offset() const { return m_start_offset; }
-    u32 end_offset() const { return m_end_offset; }
+    [[nodiscard]] SourceRange const& source_range() const { return m_source_range; }
+    u32 start_offset() const { return m_source_range.start.offset; }
+    u32 end_offset() const { return m_source_range.end.offset; }
 
-    SourceCode const& source_code() const { return *m_source_code; }
+    SourceCode const& source_code() const { return *m_source_range.code; }
 
-    void set_end_offset(Badge<Parser>, u32 end_offset) { m_end_offset = end_offset; }
+    void set_end_offset(Badge<Parser>, u32 end_offset) { m_source_range.end.offset = end_offset; }
 
     ByteString class_name() const;
 
@@ -116,11 +112,7 @@ protected:
     explicit ASTNode(SourceRange);
 
 private:
-    // NOTE: These members are carefully ordered so that `m_start_offset` is packed with the padding after RefCounted::m_ref_count.
-    //       This creates a 4-byte padding hole after `m_end_offset` which is used to pack subclasses better.
-    u32 m_start_offset { 0 };
-    RefPtr<SourceCode const> m_source_code;
-    u32 m_end_offset { 0 };
+    SourceRange m_source_range;
 };
 
 // This is a helper class that packs an array of T after the AST node, all in the same allocation.
@@ -289,6 +281,23 @@ public:
     }
 };
 
+struct VarToInitialize {
+    Identifier const& identifier;
+    bool is_parameter { false };
+    bool is_function_name { false };
+};
+
+struct FunctionScopeData {
+    Vector<NonnullRefPtr<FunctionDeclaration const>> functions_to_initialize;
+    Vector<VarToInitialize> vars_to_initialize;
+    HashTable<Utf16FlyString> var_names;
+    bool has_function_named_arguments { false };
+    bool has_argument_parameter { false };
+    bool has_lexically_declared_arguments { false };
+    size_t non_local_var_count { 0 };
+    size_t non_local_var_count_for_parameter_expressions { 0 };
+};
+
 class JS_API ScopeNode : public Statement {
 public:
     template<typename T, typename... Args>
@@ -322,6 +331,7 @@ public:
     [[nodiscard]] bool has_lexical_declarations() const { return !m_lexical_declarations.is_empty(); }
     [[nodiscard]] bool has_non_local_lexical_declarations() const;
     [[nodiscard]] bool has_var_declarations() const { return !m_var_declarations.is_empty(); }
+    [[nodiscard]] Vector<NonnullRefPtr<Declaration const>> const& var_declarations() const { return m_var_declarations; }
 
     [[nodiscard]] size_t var_declaration_count() const { return m_var_declarations.size(); }
     [[nodiscard]] size_t lexical_declaration_count() const { return m_lexical_declarations.size(); }
@@ -344,6 +354,10 @@ public:
         return index;
     }
 
+    FunctionScopeData const* function_scope_data() const { return m_function_scope_data.ptr(); }
+    void set_function_scope_data(OwnPtr<FunctionScopeData> data) { m_function_scope_data = move(data); }
+    void ensure_function_scope_data() const;
+
 protected:
     explicit ScopeNode(SourceRange source_range)
         : Statement(move(source_range))
@@ -360,6 +374,7 @@ private:
     Vector<NonnullRefPtr<FunctionDeclaration const>> m_functions_hoistable_with_annexB_extension;
 
     Vector<LocalVariable> m_local_variables_names;
+    mutable OwnPtr<FunctionScopeData> m_function_scope_data;
 };
 
 // ImportEntry Record, https://tc39.es/ecma262/#table-importentry-record-fields
@@ -679,28 +694,37 @@ public:
     Utf16FlyString const& string() const { return m_string; }
 
     struct Local {
-        enum Type {
+        enum Type : u8 {
+            None,
             Argument,
             Variable,
         };
         Type type;
-        size_t index;
+        u32 index;
 
         bool is_argument() const { return type == Argument; }
         bool is_variable() const { return type == Variable; }
 
-        static Local variable(size_t index) { return { Variable, index }; }
-        static Local argument(size_t index) { return { Argument, index }; }
+        static Local variable(u32 index) { return { Variable, index }; }
+        static Local argument(u32 index) { return { Argument, index }; }
     };
 
-    bool is_local() const { return m_local_index.has_value(); }
+    bool is_local() const { return m_local_type != Local::Type::None; }
     Local local_index() const
     {
-        VERIFY(m_local_index.has_value());
-        return m_local_index.value();
+        VERIFY(m_local_type != Local::Type::None);
+        return Local { m_local_type, m_local_index };
     }
-    void set_local_variable_index(size_t index) { m_local_index = Local::variable(index); }
-    void set_argument_index(size_t index) { m_local_index = Local::argument(index); }
+    void set_local_variable_index(u32 index)
+    {
+        m_local_type = Local::Type::Variable;
+        m_local_index = index;
+    }
+    void set_argument_index(u32 index)
+    {
+        m_local_type = Local::Type::Argument;
+        m_local_index = index;
+    }
 
     bool is_global() const { return m_is_global; }
     void set_is_global() { m_is_global = true; }
@@ -708,16 +732,24 @@ public:
     [[nodiscard]] DeclarationKind declaration_kind() const { return m_declaration_kind; }
     void set_declaration_kind(DeclarationKind kind) { m_declaration_kind = kind; }
 
+    // Returns true if this identifier reference was inside a function scope containing
+    // a direct call to eval(). Such identifiers cannot be optimized as globals.
+    bool is_inside_scope_with_eval() const { return m_is_inside_scope_with_eval; }
+    void set_is_inside_scope_with_eval() { m_is_inside_scope_with_eval = true; }
+
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
 private:
     virtual bool is_identifier() const override { return true; }
 
+    u32 m_local_index;
     Utf16FlyString m_string;
 
-    Optional<Local> m_local_index;
+    Local::Type m_local_type { Local::Type::None };
+
     bool m_is_global { false };
+    bool m_is_inside_scope_with_eval { false };
     DeclarationKind m_declaration_kind { DeclarationKind::None };
 };
 
@@ -1172,6 +1204,10 @@ public:
     {
     }
 
+    LogicalOp op() const { return m_op; }
+    NonnullRefPtr<Expression const> lhs() const { return m_lhs; }
+    NonnullRefPtr<Expression const> rhs() const { return m_rhs; }
+
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
@@ -1199,6 +1235,9 @@ public:
         , m_lhs(move(lhs))
     {
     }
+
+    auto const& lhs() const { return m_lhs; }
+    auto const& op() const { return m_op; }
 
     virtual void dump(int indent) const override;
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
@@ -1932,7 +1971,7 @@ public:
     {
     }
 
-    TemplateLiteral(SourceRange source_range, Vector<NonnullRefPtr<Expression const>> expressions, Vector<NonnullRefPtr<Expression const>> raw_strings)
+    TemplateLiteral(SourceRange source_range, Vector<NonnullRefPtr<Expression const>> expressions, Vector<NonnullRefPtr<StringLiteral const>> raw_strings)
         : Expression(move(source_range))
         , m_expressions(move(expressions))
         , m_raw_strings(move(raw_strings))
@@ -1943,11 +1982,11 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
     Vector<NonnullRefPtr<Expression const>> const& expressions() const { return m_expressions; }
-    Vector<NonnullRefPtr<Expression const>> const& raw_strings() const { return m_raw_strings; }
+    Vector<NonnullRefPtr<StringLiteral const>> const& raw_strings() const { return m_raw_strings; }
 
 private:
     Vector<NonnullRefPtr<Expression const>> const m_expressions;
-    Vector<NonnullRefPtr<Expression const>> const m_raw_strings;
+    Vector<NonnullRefPtr<StringLiteral const>> const m_raw_strings;
 };
 
 class TaggedTemplateLiteral final : public Expression {

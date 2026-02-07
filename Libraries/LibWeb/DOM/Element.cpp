@@ -15,6 +15,7 @@
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibURL/Parser.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/Locale.h>
 #include <LibWeb/Animations/Animation.h>
@@ -54,6 +55,7 @@
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
 #include <LibWeb/HTML/HTMLAreaElement.h>
+#include <LibWeb/HTML/HTMLBaseElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLButtonElement.h>
 #include <LibWeb/HTML/HTMLFieldSetElement.h>
@@ -72,8 +74,10 @@
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/HTMLUListElement.h>
+#include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
@@ -87,6 +91,7 @@
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/StackingContext.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
@@ -100,6 +105,8 @@
 #include <LibWeb/XML/XMLFragmentParser.h>
 
 namespace Web::DOM {
+
+GC_DEFINE_ALLOCATOR(Element);
 
 Element::Element(Document& document, DOM::QualifiedName qualified_name)
     : ParentNode(document, NodeType::ELEMENT_NODE)
@@ -192,6 +199,129 @@ String Element::get_attribute_value(FlyString const& local_name, Optional<FlyStr
 
     // 3. Return attr’s value.
     return attribute->value();
+}
+
+// https://html.spec.whatwg.org/multipage/semantics.html#get-an-element's-target
+String Element::get_an_elements_target(Optional<String> target) const
+{
+    // To get an element's target, given an a, area, or form element element, and an optional string-or-null target (default null), run these steps:
+
+    // 1. If target is null, then:
+    if (!target.has_value()) {
+        // 1. If element has a target attribute, then set target to that attribute's value.
+        if (auto maybe_target = attribute(HTML::AttributeNames::target); maybe_target.has_value()) {
+            target = maybe_target.release_value();
+        }
+        // 2. Otherwise, if element's node document contains a base element with a target attribute,
+        //    set target to the value of the target attribute of the first such base element.
+        else if (auto base_element = document().first_base_element_with_target_in_tree_order()) {
+            target = base_element->attribute(HTML::AttributeNames::target);
+        }
+    }
+
+    // 2. If target is not null, and contains an ASCII tab or newline and a U+003C (<), then set target to "_blank".
+    if (target.has_value() && target->bytes_as_string_view().contains("\t\n\r"sv) && target->contains('<'))
+        target = "_blank"_string;
+
+    // 3. Return target.
+    return target.value_or({});
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#get-an-element's-noopener
+HTML::TokenizedFeature::NoOpener Element::get_an_elements_noopener(URL::URL const& url, StringView target) const
+{
+    // To get an element's noopener, given an a, area, or form element element, a URL record url, and a string target,
+    // perform the following steps. They return a boolean.
+    auto rel = MUST(get_attribute_value(HTML::AttributeNames::rel).to_lowercase());
+    auto link_types = rel.bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
+
+    // 1. If element's link types include the noopener or noreferrer keyword, then return true.
+    if (link_types.contains_slow("noopener"sv) || link_types.contains_slow("noreferrer"sv))
+        return HTML::TokenizedFeature::NoOpener::Yes;
+
+    // 2. If element's link types do not include the opener keyword and
+    //    target is an ASCII case-insensitive match for "_blank", then return true.
+    if (!link_types.contains_slow("opener"sv) && target.equals_ignoring_ascii_case("_blank"sv))
+        return HTML::TokenizedFeature::NoOpener::Yes;
+
+    // 3. If url's blob URL entry is not null:
+    if (url.blob_url_entry().has_value()) {
+        // 1. Let blobOrigin be url's blob URL entry's environment's origin.
+        auto const& blob_origin = url.blob_url_entry()->environment.origin;
+
+        // 2. Let topLevelOrigin be element's relevant settings object's top-level origin.
+        auto const& top_level_origin = HTML::relevant_settings_object(*this).top_level_origin;
+
+        // 3. If blobOrigin is not same site with topLevelOrigin, then return true.
+        if (!blob_origin.is_same_site(top_level_origin.value()))
+            return HTML::TokenizedFeature::NoOpener::Yes;
+    }
+
+    // 4. Return false.
+    return HTML::TokenizedFeature::NoOpener::No;
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#cannot-navigate
+bool Element::cannot_navigate() const
+{
+    // An element element cannot navigate if one of the following is true:
+
+    // - element's node document is not fully active
+    if (!document().is_fully_active())
+        return true;
+
+    // - element is not an a element and is not connected.
+    return !(is_html_anchor_element() || is_svg_a_element()) && !is_connected();
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#following-hyperlinks-2
+void Element::follow_the_hyperlink(Optional<String> hyperlink_suffix, HTML::UserNavigationInvolvement user_involvement)
+{
+    // 1. If subject cannot navigate, then return.
+    if (cannot_navigate())
+        return;
+
+    // 2. Let targetAttributeValue be the empty string.
+    String target_attribute_value;
+
+    // 3. If subject is an a or area element, then set targetAttributeValue to the result of getting an element's target given subject.
+    if (is_html_anchor_element() || is_html_area_element() || is_svg_a_element())
+        target_attribute_value = get_an_elements_target();
+
+    // 4. Let urlRecord be the result of encoding-parsing a URL given subject's href attribute value, relative to subject's node document.
+    auto url_record = document().encoding_parse_url(get_attribute_value(HTML::AttributeNames::href));
+
+    // 5. If urlRecord is failure, then return.
+    if (!url_record.has_value())
+        return;
+
+    // 6. Let noopener be the result of getting an element's noopener with subject, urlRecord, and targetAttributeValue.
+    auto noopener = get_an_elements_noopener(*url_record, target_attribute_value);
+
+    // 7. Let targetNavigable be the first return value of applying the rules for choosing a navigable given
+    //    targetAttributeValue, subject's node navigable, and noopener.
+    auto target_navigable = document().navigable()->choose_a_navigable(target_attribute_value, noopener).navigable;
+
+    // 8. If targetNavigable is null, then return.
+    if (!target_navigable)
+        return;
+
+    // 9. Let urlString be the result of applying the URL serializer to urlRecord.
+    auto url_string = url_record->serialize();
+
+    // 10. If hyperlinkSuffix is non-null, then append it to urlString.
+    if (hyperlink_suffix.has_value())
+        url_string = MUST(String::formatted("{}{}", url_string, *hyperlink_suffix));
+
+    // 11. Let referrerPolicy be the current state of subject's referrerpolicy content attribute.
+    auto referrer_policy = ReferrerPolicy::from_string(attribute(HTML::AttributeNames::referrerpolicy).value_or({})).value_or(ReferrerPolicy::ReferrerPolicy::EmptyString);
+
+    // FIXME: 12. If subject's link types includes the noreferrer keyword, then set referrerPolicy to "no-referrer".
+
+    // 13. Navigate targetNavigable to urlString using subject's node document, with referrerPolicy set to referrerPolicy and userInvolvement set to userInvolvement.
+    auto url = URL::Parser::basic_parse(url_string);
+    VERIFY(url.has_value());
+    MUST(target_navigable->navigate({ .url = url.release_value(), .source_document = document(), .referrer_policy = referrer_policy, .user_involvement = user_involvement }));
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattributenode
@@ -693,11 +823,11 @@ void Element::run_attribute_change_steps(FlyString const& local_name, Optional<S
     }
 }
 
-static CSS::RequiredInvalidationAfterStyleChange compute_required_invalidation(CSS::ComputedProperties const& old_style, CSS::ComputedProperties const& new_style)
+static CSS::RequiredInvalidationAfterStyleChange compute_required_invalidation(CSS::ComputedProperties const& old_style, CSS::ComputedProperties const& new_style, CSS::FontComputer const& font_computer)
 {
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
-    if (old_style.cached_computed_font_list() != new_style.cached_computed_font_list())
+    if (old_style.computed_font_list(font_computer) != new_style.computed_font_list(font_computer))
         invalidation.relayout = true;
 
     for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
@@ -738,7 +868,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
     if (m_computed_properties) {
-        invalidation = compute_required_invalidation(*m_computed_properties, new_computed_properties);
+        invalidation = compute_required_invalidation(*m_computed_properties, new_computed_properties, document().font_computer());
         had_list_marker = m_computed_properties->display().is_list_item();
     } else {
         invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
@@ -768,7 +898,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
 
         // TODO: Can we be smarter about invalidation?
         if (pseudo_element_style && new_pseudo_element_style) {
-            invalidation |= compute_required_invalidation(*pseudo_element_style, *new_pseudo_element_style);
+            invalidation |= compute_required_invalidation(*pseudo_element_style, *new_pseudo_element_style, document().font_computer());
         } else if (pseudo_element_style || new_pseudo_element_style) {
             invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         }
@@ -779,6 +909,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
 
     recompute_pseudo_element_style(CSS::PseudoElement::Before);
     recompute_pseudo_element_style(CSS::PseudoElement::After);
+    recompute_pseudo_element_style(CSS::PseudoElement::Selection);
     if (m_rendered_in_top_layer)
         recompute_pseudo_element_style(CSS::PseudoElement::Backdrop);
     if (had_list_marker || m_computed_properties->display().is_list_item())
@@ -897,7 +1028,7 @@ GC::Ref<DOMTokenList> Element::class_list()
     return *m_class_list;
 }
 
-// https://drafts.csswg.org/css-shadow-parts/#dom-element-part
+// https://drafts.csswg.org/css-shadow-1/#dom-element-part
 GC::Ref<DOMTokenList> Element::part_list()
 {
     // The part attribute’s getter must return a DOMTokenList object whose associated element is the context object and
@@ -1286,28 +1417,19 @@ Vector<CSSPixelRect> Element::get_client_rects() const
     // NOTE: Make sure CSS transforms are resolved before it is used to calculate the rect position.
     const_cast<Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
-    Gfx::AffineTransform transform;
-    CSSPixelPoint scroll_offset;
-    auto const* paintable = this->paintable();
-
     Vector<CSSPixelRect> rects;
     if (auto const* paintable_box = this->paintable_box()) {
-        transform = Gfx::extract_2d_affine_transform(paintable_box->transform());
-        for (auto const* containing_block = paintable->containing_block(); !containing_block->is_viewport_paintable(); containing_block = containing_block->containing_block()) {
-            transform = Gfx::extract_2d_affine_transform(containing_block->transform()).multiply(transform);
-        }
-
-        if (auto enclosing_scroll_offset = paintable_box->enclosing_scroll_frame(); enclosing_scroll_offset) {
-            scroll_offset.translate_by(-enclosing_scroll_offset->cumulative_offset());
-        }
-
         auto absolute_rect = paintable_box->absolute_border_box_rect();
-        auto transformed_rect = transform.map(absolute_rect.translated(-paintable_box->transform_origin()).to_type<float>())
-                                    .to_type<CSSPixels>()
-                                    .translated(paintable_box->transform_origin())
-                                    .translated(-scroll_offset);
-        rects.append(transformed_rect);
-    } else if (paintable) {
+
+        if (auto const& accumulated_visual_context = paintable_box->accumulated_visual_context()) {
+            auto const& viewport_paintable = *document().paintable();
+            auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+            auto transformed_rect = accumulated_visual_context->transform_rect_to_viewport(absolute_rect, scroll_state);
+            rects.append(transformed_rect);
+        } else {
+            rects.append(absolute_rect);
+        }
+    } else if (paintable()) {
         dbgln("FIXME: Failed to get client rects for element ({})", debug_description());
     }
 
@@ -1428,7 +1550,6 @@ void Element::removed_from(Node* old_parent, Node& old_root)
     }
 
     play_or_cancel_animations_after_display_property_change();
-    remove_animations_from_timeline();
 }
 
 void Element::moved_from(GC::Ptr<Node> old_parent)
@@ -1627,6 +1748,13 @@ bool Element::includes_properties_from_invalidation_set(CSS::InvalidationSet con
             case CSS::PseudoClass::LocalLink: {
                 return matches_local_link_pseudo_class();
             }
+            case CSS::PseudoClass::Root:
+                return is<HTML::HTMLHtmlElement>(*this);
+            case CSS::PseudoClass::Host:
+                return is_shadow_host();
+            case CSS::PseudoClass::Required:
+            case CSS::PseudoClass::Optional:
+                return is<HTML::HTMLInputElement>(*this) || is<HTML::HTMLSelectElement>(*this) || is<HTML::HTMLTextAreaElement>(*this);
             default:
                 VERIFY_NOT_REACHED();
             }
@@ -1763,26 +1891,34 @@ void Element::set_tab_index(i32 tab_index)
 }
 
 // https://drafts.csswg.org/cssom-view/#potentially-scrollable
-bool Element::is_potentially_scrollable() const
+bool Element::is_potentially_scrollable(TreatOverflowClipOnBodyParentAsOverflowHidden treat_overflow_clip_on_body_parent_as_overflow_hidden = TreatOverflowClipOnBodyParentAsOverflowHidden::No) const
 {
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout(UpdateLayoutReason::ElementIsPotentiallyScrollable);
+    const_cast<Document&>(document()).update_style();
+
+    // NB: Since this should always be the body element, the body element must have a <html> element parent. See Document::body().
+    VERIFY(parent_element());
 
     // An element body (which will be the body element) is potentially scrollable if all of the following conditions are true:
     VERIFY(is<HTML::HTMLBodyElement>(this) || is<HTML::HTMLFrameSetElement>(this));
 
-    // Since this should always be the body element, the body element must have a <html> element parent. See Document::body().
-    VERIFY(parent());
-
     // - body has an associated box.
+    if (!layout_node())
+        return false;
+
     // - body’s parent element’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
+    if (parent_element()->computed_properties()->overflow_x() == CSS::Overflow::Visible || parent_element()->computed_properties()->overflow_y() == CSS::Overflow::Visible)
+        return false;
+    // NOTE: When treating 'overflow:clip' as 'overflow:hidden', we can never fail this condition
+    if (treat_overflow_clip_on_body_parent_as_overflow_hidden == TreatOverflowClipOnBodyParentAsOverflowHidden::No && (parent_element()->computed_properties()->overflow_x() == CSS::Overflow::Clip || parent_element()->computed_properties()->overflow_y() == CSS::Overflow::Clip))
+        return false;
+
     // - body’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
-    return layout_node()
-        && (parent()->layout_node()
-            && parent()->layout_node()->computed_values().overflow_x() != CSS::Overflow::Visible && parent()->layout_node()->computed_values().overflow_x() != CSS::Overflow::Clip
-            && parent()->layout_node()->computed_values().overflow_y() != CSS::Overflow::Visible && parent()->layout_node()->computed_values().overflow_y() != CSS::Overflow::Clip)
-        && (layout_node()->computed_values().overflow_x() != CSS::Overflow::Visible && layout_node()->computed_values().overflow_x() != CSS::Overflow::Clip
-            && layout_node()->computed_values().overflow_y() != CSS::Overflow::Visible && layout_node()->computed_values().overflow_y() != CSS::Overflow::Clip);
+    if (first_is_one_of(computed_properties()->overflow_x(), CSS::Overflow::Visible, CSS::Overflow::Clip) || first_is_one_of(computed_properties()->overflow_y(), CSS::Overflow::Visible, CSS::Overflow::Clip))
+        return false;
+
+    return true;
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrolltop
@@ -2441,13 +2577,11 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, Bi
 }
 
 // https://drafts.csswg.org/cssom-view-1/#scroll-a-target-into-view
-static ErrorOr<void> scroll_an_element_into_view(Element& target, Bindings::ScrollBehavior behavior, Bindings::ScrollLogicalPosition block, Bindings::ScrollLogicalPosition inline_, GC::Ptr<Element> container)
+static GC::Ref<WebIDL::Promise> scroll_an_element_into_view(Element& target, Bindings::ScrollBehavior behavior, Bindings::ScrollLogicalPosition block, Bindings::ScrollLogicalPosition inline_, GC::Ptr<Element> container)
 {
-    // To scroll a target into view target, which is an Element, pseudo-element, or Range, with a scroll behavior behavior,
-    // a block flow direction position block, an inline base direction position inline, and an optional containing Element
-    // to stop scrolling after reaching container, means to run these steps:
+    // FIXME: 1. Let ancestorPromises be an empty set of Promises.
 
-    // 1. For each ancestor element or viewport that establishes a scrolling box scrolling box, in order of innermost
+    // 2. For each ancestor element or viewport that establishes a scrolling box scrolling box, in order of innermost
     //    to outermost scrolling box, run these substeps:
     auto* ancestor = target.parent();
     Vector<Node&> scrolling_boxes;
@@ -2458,21 +2592,19 @@ static ErrorOr<void> scroll_an_element_into_view(Element& target, Bindings::Scro
     }
 
     for (auto& scrolling_box : scrolling_boxes) {
-        // 1. If the Document associated with target is not same origin with the Document
-        //    associated with the element or viewport associated with scrolling box, terminate these steps.
-        if (target.document().origin() != scrolling_box.document().origin()) {
+        // 1. If the Document associated with target is not same origin with the Document associated with the element
+        //    or viewport associated with scrolling box, abort any remaining iteration of this loop.
+        if (target.document().origin() != scrolling_box.document().origin())
             break;
-        }
-
-        // NOTE: For a viewport scrolling box is initial containing block
-        // CSSPixelRect scrolling_box = scrolling_box.document().viewport_rect();
 
         // 2. Let position be the scroll position resulting from running the steps to determine the scroll-into-view
-        //    position of target with block as the block flow position, inline as the inline base direction position
-        //    and scrolling box as the scrolling box.
+        //    position of target with behavior as the scroll behavior, block as the block flow position, inline as the
+        //    inline base direction position and scrolling box as the scrolling box.
+        // FIXME: Pass in behavior.
         auto position = determine_the_scroll_into_view_position(target, block, inline_, scrolling_box);
 
-        // 3. If position is not the same as scrolling box’s current scroll position, or scrolling box has an ongoing smooth scroll,
+        // 3. If position is not the same as scrolling box’s current scroll position, or scrolling box has an ongoing
+        //    smooth scroll,
         // FIXME: Actually check this condition.
         if (true) {
             // -> If scrolling box is associated with an element
@@ -2486,29 +2618,38 @@ static ErrorOr<void> scroll_an_element_into_view(Element& target, Bindings::Scro
 
                 // FIXME: 2. Let root element be document’s root element, if there is one, or null otherwise.
                 // FIXME: 3. Perform a scroll of the viewport to position, with root element as the associated element and behavior as the scroll behavior.
+                //           Add the Promise returned from this step in the set ancestorPromises.
                 (void)behavior;
 
                 // AD-HOC:
                 // NOTE: Since calculated position is relative to the viewport, we need to add the viewport's position to it
-                //       before passing to perform_scroll_of_viewport() that expects a position relative to the page.
+                //       before passing to perform_a_scroll_of_the_viewport() that expects a position relative to the page.
                 position.set_y(position.y() + document.viewport_rect().y());
-                document.navigable()->perform_scroll_of_viewport(position);
+                document.navigable()->perform_a_scroll_of_the_viewport(position);
             }
         }
 
         // 4. If container is not null and either scrolling box is a shadow-including inclusive ancestor of container
-        //    or is a viewport whose document is a shadow-including inclusive ancestor of container, abort the rest of
-        //    these steps.
+        //    or is a viewport whose document is a shadow-including inclusive ancestor of container, abort any
+        //    remaining iteration of this loop.
         // NB: Our viewports *are* Documents in the DOM, so both checks are equivalent.
         if (container != nullptr && scrolling_box.is_shadow_including_inclusive_ancestor_of(*container))
             break;
     }
 
-    return {};
+    // 3. Let scrollPromise be a new Promise.
+    auto scroll_promise = WebIDL::create_promise(target.realm());
+
+    // 4. Return scrollPromise, and run the remaining steps in parallel.
+    // 5. Resolve scrollPromise when all Promises in ancestorPromises have settled.
+    // FIXME: Actually wait for those promises.
+    WebIDL::resolve_promise(target.realm(), scroll_promise);
+
+    return scroll_promise;
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view-1/#dom-element-scrollintoview
-ErrorOr<void> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> arg)
+// https://drafts.csswg.org/cssom-view/#dom-element-scrollintoview
+GC::Ref<WebIDL::Promise> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> arg)
 {
     // 1. Let behavior be "auto".
     auto behavior = Bindings::ScrollBehavior::Auto;
@@ -2544,17 +2685,21 @@ ErrorOr<void> Element::scroll_into_view(Optional<Variant<bool, ScrollIntoViewOpt
         block = Bindings::ScrollLogicalPosition::End;
     }
 
-    // 7. If the element does not have any associated box, or is not available to user-agent features, then return.
+    // 7. If the element does not have any associated box, or is not available to user-agent features, then return a
+    //    resolved Promise and abort the remaining steps.
     document().update_layout(UpdateLayoutReason::ElementScrollIntoView);
+    HTML::TemporaryExecutionContext temporary_execution_context { realm() };
     if (!layout_node())
-        return Error::from_string_literal("Element has no associated box");
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
-    // 8. Scroll the element into view with behavior, block, and inline.
-    TRY(scroll_an_element_into_view(*this, behavior, block, inline_, container));
+    // 8. Scroll the element into view with behavior, block, inline, and container. Let scrollPromise be the Promise
+    //    returned from this step.
+    auto scroll_promise = scroll_an_element_into_view(*this, behavior, block, inline_, container);
 
     // FIXME: 9. Optionally perform some other action that brings the element to the user’s attention.
 
-    return {};
+    // 10. Return scrollPromise.
+    return scroll_promise;
 }
 
 #define __ENUMERATE_ARIA_ATTRIBUTE(name, attribute)                  \
@@ -3165,7 +3310,7 @@ OrderedHashMap<FlyString, CSS::StyleProperty> const& Element::custom_properties(
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scroll
-void Element::scroll(double x, double y)
+GC::Ref<WebIDL::Promise> Element::scroll(double x, double y)
 {
     // 1. If invoked with one argument, follow these substeps:
     //    NOTE: Not relevant here.
@@ -3181,21 +3326,22 @@ void Element::scroll(double x, double y)
     // 3. Let document be the element’s node document.
     auto& document = this->document();
 
-    // 4. If document is not the active document, terminate these steps.
+    // 4. If document is not the active document, return a resolved Promise and abort the remaining steps.
     if (!document.is_active())
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
     // 5. Let window be the value of document’s defaultView attribute.
     // FIXME: The specification expects defaultView to be a Window object, but defaultView actually returns a WindowProxy object.
     auto window = document.window();
 
-    // 6. If window is null, terminate these steps.
+    // 6. If window is null, return a resolved Promise and abort the remaining steps.
     if (!window)
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
-    // 7. If the element is the root element and document is in quirks mode, terminate these steps.
+    // 7. If the element is the root element and document is in quirks mode, return a resolved Promise and abort the
+    //    remaining steps.
     if (document.document_element() == this && document.in_quirks_mode())
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
     // OPTIMIZATION: Scrolling an unscrolled element to (0, 0) is a no-op as long
     //               as the element is not eligible to be the Document.scrollingElement.
@@ -3204,40 +3350,44 @@ void Element::scroll(double x, double y)
         && scroll_offset({}).is_zero()
         && this != document.body()
         && this != document.document_element()) {
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
     }
 
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    // NB: Ensure that layout is up-to-date before looking at metrics.
     document.update_layout(UpdateLayoutReason::ElementScroll);
 
-    // 8. If the element is the root element invoke scroll() on window with scrollX on window as first argument and y as second argument, and terminate these steps.
-    if (document.document_element() == this) {
-        window->scroll(window->scroll_x(), y);
-        return;
-    }
+    // 8. If the element is the root element, return the Promise returned by scroll() on window after the method is
+    //    invoked with scrollX on window as first argument and y as second argument, and abort the remaining steps.
+    if (document.document_element() == this)
+        return window->scroll(window->scroll_x(), y);
 
-    // 9. If the element is the body element, document is in quirks mode, and the element is not potentially scrollable, invoke scroll() on window
-    //    with options as the only argument, and terminate these steps.
-    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable()) {
-        window->scroll(x, y);
-        return;
-    }
+    // 9. If the element is the body element, document is in quirks mode, and the element is not potentially
+    //    scrollable, return the Promise returned by scroll() on window after the method is invoked with options as the
+    //    only argument, and abort the remaining steps.
+    if (document.body() == this && document.in_quirks_mode() && !is_potentially_scrollable())
+        return window->scroll(x, y);
 
-    // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
+    // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element
+    //     has no overflow, return a resolved Promise and abort the remaining steps.
     // FIXME: or the element has no overflow
     if (!paintable_box())
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
-    // 11. Scroll the element to x,y, with the scroll behavior being the value of the behavior dictionary member of options.
+    // 11. Scroll the element to x,y, with the scroll behavior being the value of the behavior dictionary member of
+    //     options. Let scrollPromise be the Promise returned from this step.
     // FIXME: Implement this in terms of calling "scroll the element".
     auto scroll_offset = paintable_box()->scroll_offset();
     scroll_offset.set_x(CSSPixels::nearest_value_for(x));
     scroll_offset.set_y(CSSPixels::nearest_value_for(y));
     (void)paintable_box()->set_scroll_offset(scroll_offset);
+    auto scroll_promise = WebIDL::create_resolved_promise(realm(), JS::js_undefined());
+
+    // 12. Return scrollPromise.
+    return scroll_promise;
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scroll
-void Element::scroll(HTML::ScrollToOptions options)
+GC::Ref<WebIDL::Promise> Element::scroll(HTML::ScrollToOptions options)
 {
     // 1. If invoked with one argument, follow these substeps:
     //     1. Let options be the argument.
@@ -3247,32 +3397,36 @@ void Element::scroll(HTML::ScrollToOptions options)
     // NOTE: remaining steps performed by Element::scroll(double x, double y)
     auto x = options.left.has_value() ? HTML::normalize_non_finite_values(options.left.value()) : scroll_left();
     auto y = options.top.has_value() ? HTML::normalize_non_finite_values(options.top.value()) : scroll_top();
-    scroll(x, y);
+    return scroll(x, y);
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrollby
-void Element::scroll_by(double x, double y)
+GC::Ref<WebIDL::Promise> Element::scroll_by(double x, double y)
 {
-    // 1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
+    // 2. If invoked with two arguments, follow these substeps:
+    //    1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
     HTML::ScrollToOptions options;
 
-    // 2. Let x and y be the arguments, respectively.
-    // 3. Normalize non-finite values for x and y.
-    // 4. Let the left dictionary member of options have the value x.
-    // 5. Let the top dictionary member of options have the value y.
+    //    2. Let x and y be the arguments, respectively.
+    //    3. Normalize non-finite values for x and y.
+    //    4. Let the left dictionary member of options have the value x.
+    //    5. Let the top dictionary member of options have the value y.
     // NOTE: Element::scroll_by(HTML::ScrollToOptions) performs the normalization and following steps.
     options.left = x;
     options.top = y;
-    scroll_by(options);
+    return scroll_by(options);
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrollby
-void Element::scroll_by(HTML::ScrollToOptions options)
+GC::Ref<WebIDL::Promise> Element::scroll_by(HTML::ScrollToOptions options)
 {
-    // 1. Let options be the argument.
-    // 2. Normalize non-finite values for left and top dictionary members of options, if present.
+    // 1. If invoked with one argument, follow these substeps:
+    //    1. Let options be the argument.
+    //    2. Normalize non-finite values for left and top dictionary members of options, if present.
     auto left = HTML::normalize_non_finite_values(options.left);
     auto top = HTML::normalize_non_finite_values(options.top);
+
+    // NB: Step 2 is implemented by the other overload of scroll_by().
 
     // 3. Add the value of scrollLeft to the left dictionary member.
     options.left = scroll_left() + left;
@@ -3280,8 +3434,8 @@ void Element::scroll_by(HTML::ScrollToOptions options)
     // 4. Add the value of scrollTop to the top dictionary member.
     options.top = scroll_top() + top;
 
-    // 5. Act as if the scroll() method was invoked with options as the only argument.
-    scroll(options);
+    // 5. Return the Promise returned by scroll() after the method is invoked with options as the only argument.
+    return scroll(options);
 }
 
 // https://drafts.csswg.org/cssom-view-1/#dom-element-checkvisibility
@@ -3295,7 +3449,7 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
         return false;
 
     // 2. If an ancestor of this in the flat tree has content-visibility: hidden, return false.
-    for (auto element = parent_element(); element; element = element->parent_element()) {
+    for (auto* element = flat_tree_parent_element(); element; element = element->flat_tree_parent_element()) {
         if (element->computed_properties()->content_visibility() == CSS::ContentVisibility::Hidden)
             return false;
     }
@@ -3304,25 +3458,28 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
     if (!options.has_value())
         return true;
 
-    // 3. If either the opacityProperty or the checkOpacity dictionary members of options are true, and this, or an ancestor of this in the flat tree, has a computed opacity value of 0, return false.
+    // 3. If either the opacityProperty or the checkOpacity dictionary members of options are true, and this, or an
+    //    ancestor of this in the flat tree, has a computed opacity value of 0, return false.
     if (options->opacity_property || options->check_opacity) {
-        for (auto* element = this; element; element = element->parent_element()) {
+        for (auto* element = this; element; element = element->flat_tree_parent_element()) {
             if (element->computed_properties()->opacity() == 0.0f)
                 return false;
         }
     }
 
-    // 4. If either the visibilityProperty or the checkVisibilityCSS dictionary members of options are true, and this is invisible, return false.
+    // 4. If either the visibilityProperty or the checkVisibilityCSS dictionary members of options are true, and this
+    //    is invisible, return false.
     if (options->visibility_property || options->check_visibility_css) {
         if (computed_properties()->visibility() == CSS::Visibility::Hidden)
             return false;
     }
 
-    // 5. If the contentVisibilityAuto dictionary member of options is true and an ancestor of this in the flat tree skips its contents due to content-visibility: auto, return false.
+    // 5. If the contentVisibilityAuto dictionary member of options is true and an ancestor of this in the flat tree
+    //    skips its contents due to content-visibility: auto, return false.
     // FIXME: Currently we do not skip any content if content-visibility is auto: https://drafts.csswg.org/css-contain-2/#proximity-to-the-viewport
     auto const skipped_contents_due_to_content_visibility_auto = false;
     if (options->content_visibility_auto && skipped_contents_due_to_content_visibility_auto) {
-        for (auto* element = this; element; element = element->parent_element()) {
+        for (auto* element = flat_tree_parent_element(); element; element = element->flat_tree_parent_element()) {
             if (element->computed_properties()->content_visibility() == CSS::ContentVisibility::Auto)
                 return false;
         }
@@ -3389,6 +3546,7 @@ bool Element::is_relevant_to_the_user()
         }
 
         // The element has a flat tree descendant that is captured in a view transition.
+        // FIXME: for_each_in_inclusive_subtree_of_type() doesn't walk the flat tree. For example, it doesn't walk from a slot to its assigned slottable.
         if (&element != this && element.captured_in_a_view_transition()) {
             has_relevant_contents = true;
             return TraversalDecision::Break;
@@ -3585,8 +3743,9 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
             pseudo_element->set_scroll_offset(offset);
+    } else {
+        m_scroll_offset = offset;
     }
-    m_scroll_offset = offset;
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#translation-mode

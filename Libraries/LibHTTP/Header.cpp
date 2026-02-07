@@ -31,6 +31,7 @@ Optional<Vector<ByteString>> Header::extract_header_values() const
 
     // For now we only parse some headers that are of the ABNF list form "#something"
     if (name.is_one_of_ignoring_ascii_case(
+            "Accept-Ranges"sv,
             "Access-Control-Request-Headers"sv,
             "Access-Control-Expose-Headers"sv,
             "Access-Control-Allow-Headers"sv,
@@ -216,7 +217,7 @@ Vector<String> get_decode_and_split_header_value(StringView value)
 Vector<ByteString> convert_header_names_to_a_sorted_lowercase_set(ReadonlySpan<ByteString> header_names)
 {
     // 1. Let headerNamesSet be a new ordered set.
-    HashTable<StringView, CaseInsensitiveStringTraits> header_names_seen;
+    HashTable<StringView, CaseInsensitiveASCIIStringTraits> header_names_seen;
     Vector<ByteString> header_names_set;
 
     // 2. For each name of headerNames, append the result of byte-lowercasing name to headerNamesSet.

@@ -18,6 +18,7 @@ font-family: serif
 font-feature-settings: normal
 font-kerning: auto
 font-language-override: normal
+font-optical-sizing: auto
 font-size: 16px
 font-style: normal
 font-variant-alternates: normal
@@ -44,6 +45,7 @@ overflow-wrap: normal
 paint-order: normal
 pointer-events: auto
 quotes: auto
+scrollbar-color: auto
 shape-rendering: auto
 stroke: none
 stroke-dasharray: none
@@ -100,7 +102,7 @@ background-position-x: 0%
 background-position-y: 0%
 background-repeat: repeat
 background-size: auto
-block-size: 1530px
+block-size: 1560px
 border-block-end-color: rgb(0, 0, 0)
 border-block-end-style: none
 border-block-end-width: 0px
@@ -186,7 +188,7 @@ grid-row-start: auto
 grid-template-areas: none
 grid-template-columns: none
 grid-template-rows: none
-height: 2820px
+height: 2850px
 inline-size: 784px
 inset-block-end: auto
 inset-block-start: auto
@@ -252,6 +254,7 @@ position-try-fallbacks: none
 position-try-order: normal
 position-visibility: anchors-visible
 r: 0px
+resize: none
 right: auto
 rotate: none
 row-gap: normal
@@ -260,7 +263,6 @@ ry: auto
 scale: none
 scroll-timeline-axis: block
 scroll-timeline-name: none
-scrollbar-color: auto
 scrollbar-gutter: auto
 scrollbar-width: auto
 shape-image-threshold: 0

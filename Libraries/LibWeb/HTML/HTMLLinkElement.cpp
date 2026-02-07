@@ -693,11 +693,11 @@ void HTMLLinkElement::preload(LinkProcessingOptions& options, GC::Ptr<GC::Functi
         request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::EarlyHint);
 
     // 9. Let controller be null.
-    m_fetch_controller = nullptr;
+    auto controller_holder = Fetch::Infrastructure::FetchControllerHolder::create(vm);
 
     // 10. Let reportTiming given a Document document be to report timing for controller given document's relevant global object.
-    auto report_timing = GC::Function<void(DOM::Document const&)>::create(realm.heap(), [this](DOM::Document const& document) {
-        m_fetch_controller->report_timing(relevant_global_object(document));
+    auto report_timing = GC::Function<void(DOM::Document const&)>::create(realm.heap(), [controller_holder](DOM::Document const& document) {
+        controller_holder->controller()->report_timing(relevant_global_object(document));
     });
 
     // 11. Set controller to the result of fetching request, with processResponseConsumeBody set to the following steps
@@ -734,6 +734,7 @@ void HTMLLinkElement::preload(LinkProcessingOptions& options, GC::Ptr<GC::Functi
     };
 
     m_fetch_controller = Fetch::Fetching::fetch(realm, *request, Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
+    controller_holder->set_controller(*m_fetch_controller);
 
     // 12. Let commit be the following steps given a Document document:
     auto commit = GC::Function<void(DOM::Document&)>::create(realm.heap(), [entry, report_timing](DOM::Document& document) {
@@ -830,10 +831,9 @@ void HTMLLinkElement::process_stylesheet_resource(bool success, Fetch::Infrastru
         //     1. If the element has a charset attribute, get an encoding from that attribute's value. If that succeeds, return the resulting encoding. [ENCODING]
         //     2. Otherwise, return the document's character encoding. [DOM]
         Optional<StringView> environment_encoding;
-        if (auto charset = attribute(HTML::AttributeNames::charset); charset.has_value()) {
-            if (auto environment_encoding = TextCodec::get_standardized_encoding(charset.release_value()); environment_encoding.has_value())
-                environment_encoding = environment_encoding.value();
-        }
+        if (auto charset = attribute(HTML::AttributeNames::charset); charset.has_value())
+            environment_encoding = TextCodec::get_standardized_encoding(charset.release_value());
+
         if (!environment_encoding.has_value() && document().encoding().has_value())
             environment_encoding = document().encoding().value();
 
@@ -893,11 +893,11 @@ static NonnullRefPtr<Core::Promise<bool>> decode_favicon(ReadonlyBytes favicon_d
         // FIXME: Calculate size based on device pixel ratio
         Gfx::IntSize size { 32, 32 };
         auto immutable_bitmap = result.release_value()->bitmap(0, size);
-        auto bitmap = immutable_bitmap->bitmap();
-        if (!bitmap) {
+        if (!immutable_bitmap) {
             promise->reject(Error::from_string_view("Failed to get bitmap from SVG favicon"sv));
             return promise;
         }
+        auto bitmap = immutable_bitmap->bitmap();
         auto navigable = document->navigable();
         if (navigable && navigable->is_traversable())
             navigable->traversable_navigable()->page().client().page_did_change_favicon(*bitmap);
@@ -949,6 +949,13 @@ void HTMLLinkElement::load_fallback_favicon_if_needed(GC::Ref<DOM::Document> doc
     if (document->has_active_favicon())
         return;
     if (!document->url().scheme().is_one_of("http"sv, "https"sv))
+        return;
+
+    // AD-HOC: Don't load fallback favicon for auxiliary browsing contexts (popup windows).
+    // This matches the behavior observed in Chrome and Firefox, and avoids unnecessary network requests
+    // that can interfere with Content Security Policy violation reporting.
+    // See: https://github.com/whatwg/html/issues/12082
+    if (auto browsing_context = document->browsing_context(); browsing_context->is_auxiliary())
         return;
 
     // 1. Let request be a new request whose URL is the URL record obtained by resolving the URL "/favicon.ico" against

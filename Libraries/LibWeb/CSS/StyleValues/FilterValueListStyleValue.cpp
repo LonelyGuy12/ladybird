@@ -8,6 +8,7 @@
  */
 
 #include "FilterValueListStyleValue.h"
+#include <LibWeb/CSS/CalculationResolutionContext.h>
 #include <LibWeb/CSS/Serialize.h>
 #include <LibWeb/Layout/Node.h>
 
@@ -43,32 +44,34 @@ float FilterOperation::Color::resolved_amount() const
     VERIFY_NOT_REACHED();
 }
 
-String FilterValueListStyleValue::to_string(SerializationMode mode) const
+void FilterValueListStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
 {
-    StringBuilder builder {};
     bool first = true;
     for (auto& filter_function : filter_value_list()) {
         if (!first)
             builder.append(' ');
         filter_function.visit(
             [&](FilterOperation::Blur const& blur) {
-                builder.appendff("blur({}", blur.radius.to_string(mode));
+                builder.append("blur("sv);
+                blur.radius.serialize(builder, mode);
             },
             [&](FilterOperation::DropShadow const& drop_shadow) {
                 builder.append("drop-shadow("sv);
-                if (drop_shadow.color.has_value()) {
-                    drop_shadow.color->serialize_a_srgb_value(builder);
+                if (drop_shadow.color) {
+                    drop_shadow.color->serialize(builder, mode);
                     builder.append(' ');
                 }
                 builder.appendff("{} {}", drop_shadow.offset_x, drop_shadow.offset_y);
-                if (drop_shadow.radius.has_value())
-                    builder.appendff(" {}", drop_shadow.radius->to_string(mode));
+                if (drop_shadow.radius.has_value()) {
+                    builder.append(' ');
+                    drop_shadow.radius->serialize(builder, mode);
+                }
             },
             [&](FilterOperation::HueRotate const& hue_rotate) {
                 builder.append("hue-rotate("sv);
                 hue_rotate.angle.visit(
                     [&](AngleOrCalculated const& angle) {
-                        builder.append(angle.to_string(mode));
+                        angle.serialize(builder, mode);
                     },
                     [&](FilterOperation::HueRotate::Zero const&) {
                         builder.append("0deg"sv);
@@ -97,7 +100,7 @@ String FilterValueListStyleValue::to_string(SerializationMode mode) const
                         }
                     }());
 
-                builder.append(color.amount.to_string(mode));
+                color.amount.serialize(builder, mode);
             },
             [&](CSS::URL const& url) {
                 builder.append(url.to_string());
@@ -105,7 +108,6 @@ String FilterValueListStyleValue::to_string(SerializationMode mode) const
         builder.append(')');
         first = false;
     }
-    return MUST(builder.to_string());
 }
 
 bool FilterValueListStyleValue::contains_url() const
@@ -115,6 +117,109 @@ bool FilterValueListStyleValue::contains_url() const
             return true;
     }
     return false;
+}
+
+ValueComparingNonnullRefPtr<StyleValue const> FilterValueListStyleValue::absolutized(ComputationContext const& computation_context) const
+{
+    auto resolution_context = CalculationResolutionContext::from_computation_context(computation_context);
+    auto const& length_resolution_context = computation_context.length_resolution_context;
+
+    auto absolutize_length = [&](LengthOrCalculated const& length) -> LengthOrCalculated {
+        if (length.is_calculated()) {
+            if (auto resolved = length.resolved(resolution_context); resolved.has_value())
+                return LengthOrCalculated { Length::make_px(resolved->to_px(length_resolution_context)) };
+            return length;
+        }
+        if (auto absolutized = length.value().absolutize(length_resolution_context); absolutized.has_value())
+            return LengthOrCalculated { absolutized.release_value() };
+        return length;
+    };
+
+    auto absolutize_angle = [&](AngleOrCalculated const& angle) -> AngleOrCalculated {
+        if (angle.is_calculated()) {
+            if (auto resolved = angle.resolved(resolution_context); resolved.has_value())
+                return AngleOrCalculated { Angle::make_degrees(resolved->to_degrees()) };
+            return angle;
+        }
+        return AngleOrCalculated { Angle::make_degrees(angle.value().to_degrees()) };
+    };
+
+    Vector<FilterValue> absolutized_filter_values;
+    absolutized_filter_values.ensure_capacity(m_filter_value_list.size());
+
+    for (auto const& filter_value : m_filter_value_list) {
+        filter_value.visit(
+            [&](FilterOperation::Blur const& blur) {
+                absolutized_filter_values.append(FilterOperation::Blur {
+                    .radius = absolutize_length(blur.radius),
+                });
+            },
+            [&](FilterOperation::DropShadow const& drop_shadow) {
+                absolutized_filter_values.append(FilterOperation::DropShadow {
+                    .offset_x = absolutize_length(drop_shadow.offset_x),
+                    .offset_y = absolutize_length(drop_shadow.offset_y),
+                    .radius = drop_shadow.radius.map([&](auto const& r) { return absolutize_length(r); }),
+                    .color = drop_shadow.color ? ValueComparingRefPtr<StyleValue const> { drop_shadow.color->absolutized(computation_context) } : nullptr,
+                });
+            },
+            [&](FilterOperation::HueRotate const& hue_rotate) {
+                auto absolutized_angle = hue_rotate.angle.visit(
+                    [&](AngleOrCalculated const& angle) -> FilterOperation::HueRotate::AngleOrZero {
+                        return absolutize_angle(angle);
+                    },
+                    [&](FilterOperation::HueRotate::Zero) -> FilterOperation::HueRotate::AngleOrZero {
+                        return AngleOrCalculated { Angle::make_degrees(0) };
+                    });
+                absolutized_filter_values.append(FilterOperation::HueRotate {
+                    .angle = absolutized_angle,
+                });
+            },
+            [&](FilterOperation::Color const& color) {
+                Optional<double> resolved_value;
+
+                if (color.amount.is_calculated()) {
+                    auto const& calc = color.amount.calculated();
+                    if (calc->resolves_to_number()) {
+                        resolved_value = calc->resolve_number(resolution_context);
+                    } else if (calc->resolves_to_percentage()) {
+                        if (auto resolved = calc->resolve_percentage(resolution_context); resolved.has_value())
+                            resolved_value = resolved->as_fraction();
+                    }
+                } else if (color.amount.is_percentage()) {
+                    resolved_value = color.amount.percentage().as_fraction();
+                }
+
+                if (resolved_value.has_value()) {
+                    auto clamped_value = [&] {
+                        switch (color.operation) {
+                        case Gfx::ColorFilterType::Grayscale:
+                        case Gfx::ColorFilterType::Invert:
+                        case Gfx::ColorFilterType::Opacity:
+                        case Gfx::ColorFilterType::Sepia:
+                            return clamp(*resolved_value, 0.0, 1.0);
+                        case Gfx::ColorFilterType::Brightness:
+                        case Gfx::ColorFilterType::Contrast:
+                        case Gfx::ColorFilterType::Saturate:
+                            return max(*resolved_value, 0.0);
+                        }
+                        VERIFY_NOT_REACHED();
+                    }();
+
+                    absolutized_filter_values.append(FilterOperation::Color {
+                        .operation = color.operation,
+                        .amount = NumberPercentage { Number { Number::Type::Number, clamped_value } },
+                    });
+                    return;
+                }
+
+                absolutized_filter_values.append(color);
+            },
+            [&](CSS::URL const& url) {
+                absolutized_filter_values.append(url);
+            });
+    }
+
+    return FilterValueListStyleValue::create(move(absolutized_filter_values));
 }
 
 }

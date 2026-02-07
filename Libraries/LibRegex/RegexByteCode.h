@@ -17,6 +17,7 @@
 #include <AK/Trie.h>
 #include <AK/TypeCasts.h>
 #include <AK/Types.h>
+#include <AK/Utf16FlyString.h>
 #include <AK/Vector.h>
 #include <LibUnicode/Forward.h>
 
@@ -32,21 +33,31 @@ using ByteCodeValueType = u64;
     __ENUMERATE_OPCODE(ForkStay)                   \
     __ENUMERATE_OPCODE(ForkReplaceJump)            \
     __ENUMERATE_OPCODE(ForkReplaceStay)            \
+    __ENUMERATE_OPCODE(ForkIf)                     \
     __ENUMERATE_OPCODE(FailForks)                  \
     __ENUMERATE_OPCODE(PopSaved)                   \
     __ENUMERATE_OPCODE(SaveLeftCaptureGroup)       \
     __ENUMERATE_OPCODE(SaveRightCaptureGroup)      \
     __ENUMERATE_OPCODE(SaveRightNamedCaptureGroup) \
+    __ENUMERATE_OPCODE(RSeekTo)                    \
     __ENUMERATE_OPCODE(CheckBegin)                 \
     __ENUMERATE_OPCODE(CheckEnd)                   \
     __ENUMERATE_OPCODE(CheckBoundary)              \
     __ENUMERATE_OPCODE(Save)                       \
     __ENUMERATE_OPCODE(Restore)                    \
     __ENUMERATE_OPCODE(GoBack)                     \
+    __ENUMERATE_OPCODE(SetStepBack)                \
+    __ENUMERATE_OPCODE(IncStepBack)                \
+    __ENUMERATE_OPCODE(CheckStepBack)              \
+    __ENUMERATE_OPCODE(CheckSavedPosition)         \
     __ENUMERATE_OPCODE(ClearCaptureGroup)          \
+    __ENUMERATE_OPCODE(FailIfEmpty)                \
     __ENUMERATE_OPCODE(Repeat)                     \
     __ENUMERATE_OPCODE(ResetRepeat)                \
     __ENUMERATE_OPCODE(Checkpoint)                 \
+    __ENUMERATE_OPCODE(CompareSimple)              \
+    __ENUMERATE_OPCODE(SaveModifiers)              \
+    __ENUMERATE_OPCODE(RestoreModifiers)           \
     __ENUMERATE_OPCODE(Exit)
 
 // clang-format off
@@ -120,6 +131,16 @@ enum class BoundaryCheckType : ByteCodeValueType {
 #undef __ENUMERATE_BOUNDARY_CHECK_TYPE
 };
 
+#define ENUMERATE_FORK_IF_CONDITIONS             \
+    __ENUMERATE_FORK_IF_CONDITION(AtStartOfLine) \
+    __ENUMERATE_FORK_IF_CONDITION(Invalid) /* Must be last */
+
+enum class ForkIfCondition : ByteCodeValueType {
+#define __ENUMERATE_FORK_IF_CONDITION(x) x,
+    ENUMERATE_FORK_IF_CONDITIONS
+#undef __ENUMERATE_FORK_IF_CONDITION
+};
+
 struct CharRange {
     u32 from;
     u32 to;
@@ -144,17 +165,58 @@ struct CompareTypeAndValuePair {
     ByteCodeValueType value;
 };
 
-class OpCode;
+REGEX_API extern u32 s_next_string_table_serial;
 
-struct REGEX_API StringTable {
-    StringTable();
-    ~StringTable();
-    StringTable(StringTable const&) = default;
-    StringTable(StringTable&&) = default;
-    StringTable& operator=(StringTable const&) = default;
-    StringTable& operator=(StringTable&&) = default;
+template<typename StringType>
+struct StringTable {
+    StringTable()
+        : m_serial(s_next_string_table_serial++)
+    {
+    }
+    ~StringTable()
+    {
+        if (m_serial != 0) {
+            if (m_serial == s_next_string_table_serial - 1 && m_table.is_empty())
+                --s_next_string_table_serial; // We didn't use this serial, put it back.
+        }
+    }
+    StringTable(StringTable const& other)
+    {
+        // Pull a new serial for this copy
+        m_serial = s_next_string_table_serial++;
+        m_table = other.m_table;
+        m_inverse_table = other.m_inverse_table;
+    }
+    StringTable(StringTable&& other)
+    {
+        m_serial = other.m_serial;
+        m_table = move(other.m_table);
+        m_inverse_table = move(other.m_inverse_table);
+        // Clear other's data to avoid double-deletion of serial
+        other.m_serial = 0;
+    }
+    StringTable& operator=(StringTable const& other)
+    {
+        if (this != &other) {
+            m_serial = s_next_string_table_serial++;
+            m_table = other.m_table;
+            m_inverse_table = other.m_inverse_table;
+        }
+        return *this;
+    }
+    StringTable& operator=(StringTable&& other)
+    {
+        if (this != &other) {
+            m_serial = other.m_serial;
+            m_table = move(other.m_table);
+            m_inverse_table = move(other.m_inverse_table);
+            // Clear other's data to avoid double-deletion of serial
+            other.m_serial = 0;
+        }
+        return *this;
+    }
 
-    ByteCodeValueType set(FlyString string)
+    ByteCodeValueType set(StringType string)
     {
         u32 local_index = m_table.size() + 0x4242;
         ByteCodeValueType global_index;
@@ -170,14 +232,14 @@ struct REGEX_API StringTable {
         return global_index;
     }
 
-    FlyString get(ByteCodeValueType index) const
+    StringType get(ByteCodeValueType index) const
     {
         return m_inverse_table.get(index).value();
     }
 
     u32 m_serial { 0 };
-    HashMap<FlyString, ByteCodeValueType> m_table;
-    HashMap<ByteCodeValueType, FlyString> m_inverse_table;
+    HashMap<StringType, ByteCodeValueType> m_table;
+    HashMap<ByteCodeValueType, StringType> m_inverse_table;
 };
 
 using StringSetTrie = Trie<u32, bool>;
@@ -236,8 +298,32 @@ struct REGEX_API StringSetTable {
     HashMap<ByteCodeValueType, StringSetTrie> m_u16_tries;
 };
 
-class REGEX_API ByteCode : public DisjointChunks<ByteCodeValueType> {
+struct ByteCodeBase {
+    FlyString get_string(size_t index) const { return m_string_table.get(index); }
+    auto const& string_table() const { return m_string_table; }
+
+    auto get_u16_string(size_t index) const { return m_u16_string_table.get(index); }
+    auto const& u16_string_table() const { return m_u16_string_table; }
+
+    auto const& string_set_table() const { return m_string_set_table; }
+    auto& string_set_table() { return m_string_set_table; }
+
+    Optional<size_t> get_group_name_index(size_t group_index) const
+    {
+        return m_group_name_mappings.get(group_index);
+    }
+
+protected:
+    StringTable<FlyString> m_string_table;
+    StringTable<Utf16FlyString> m_u16_string_table;
+    StringSetTable m_string_set_table;
+    HashMap<size_t, size_t> m_group_name_mappings;
+};
+
+class REGEX_API ByteCode : public ByteCodeBase
+    , public DisjointChunks<ByteCodeValueType> {
     using Base = DisjointChunks<ByteCodeValueType>;
+    friend class FlatByteCode;
 
 public:
     using Base::append;
@@ -253,7 +339,7 @@ public:
     ByteCode(Base&&) = delete;
     ByteCode(Base const&) = delete;
 
-    virtual ~ByteCode() = default;
+    ~ByteCode() = default;
 
     ByteCode& operator=(ByteCode const&) = default;
     ByteCode& operator=(ByteCode&&) = default;
@@ -318,17 +404,6 @@ public:
         Base::last_chunk().ensure_capacity(capacity);
     }
 
-    FlyString get_string(size_t index) const { return m_string_table.get(index); }
-    auto const& string_table() const { return m_string_table; }
-
-    auto const& string_set_table() const { return m_string_set_table; }
-    auto& string_set_table() { return m_string_set_table; }
-
-    Optional<size_t> get_group_name_index(size_t group_index) const
-    {
-        return m_group_name_mappings.get(group_index);
-    }
-
     void last_chunk() const = delete;
     void first_chunk() const = delete;
 
@@ -347,6 +422,19 @@ public:
                 m_string_table.m_table.set(entry.key, entry.value);
             }
             m_string_table.m_inverse_table.update(other.m_string_table.m_inverse_table);
+
+            for (auto const& entry : other.m_u16_string_table.m_table) {
+                auto const result = m_u16_string_table.m_inverse_table.set(entry.value, entry.key);
+                if (result != HashSetResult::InsertedNewEntry) {
+                    if (m_u16_string_table.m_inverse_table.get(entry.value) == entry.key) // Already in inverse table.
+                        continue;
+                    dbgln("StringTable: Detected ID clash in string tables! ID {} seems to be reused", entry.value);
+                    dbgln("Old: {}, New: {}", m_u16_string_table.m_inverse_table.get(entry.value), entry.key);
+                    VERIFY_NOT_REACHED();
+                }
+                m_u16_string_table.m_table.set(entry.key, entry.value);
+            }
+            m_u16_string_table.m_inverse_table.update(other.m_u16_string_table.m_inverse_table);
 
             for (auto const& entry : other.m_string_set_table.m_u8_tries) {
                 m_string_set_table.m_u8_tries.set(entry.key, MUST(const_cast<StringSetTrie&>(entry.value).deep_copy()));
@@ -381,13 +469,14 @@ public:
         empend(index);
     }
 
-    void insert_bytecode_compare_string(StringView view)
+    void insert_bytecode_compare_string(Utf16FlyString string)
     {
         empend(static_cast<ByteCodeValueType>(OpCodeId::Compare));
         empend(static_cast<u64>(1)); // number of arguments
-        empend(2 + view.length());   // size of arguments
+        empend(static_cast<u64>(2)); // size of arguments
         empend(static_cast<ByteCodeValueType>(CharacterCompareType::String));
-        insert_string(view);
+        auto index = m_u16_string_table.set(move(string));
+        empend(index);
     }
 
     void insert_bytecode_group_capture_left(size_t capture_groups_count)
@@ -412,13 +501,24 @@ public:
         m_group_name_mappings.set(capture_groups_count - 1, name_string_index);
     }
 
+    void insert_bytecode_save_modifiers(FlagsUnderlyingType new_modifiers)
+    {
+        empend(static_cast<ByteCodeValueType>(OpCodeId::SaveModifiers));
+        empend(static_cast<ByteCodeValueType>(new_modifiers));
+    }
+
+    void insert_bytecode_restore_modifiers()
+    {
+        empend(static_cast<ByteCodeValueType>(OpCodeId::RestoreModifiers));
+    }
+
     enum class LookAroundType {
         LookAhead,
         LookBehind,
         NegatedLookAhead,
         NegatedLookBehind,
     };
-    void insert_bytecode_lookaround(ByteCode&& lookaround_body, LookAroundType type, size_t match_length = 0)
+    void insert_bytecode_lookaround(ByteCode&& lookaround_body, LookAroundType type, size_t match_length = 0, bool greedy_lookaround = true)
     {
         // FIXME: The save stack will grow infinitely with repeated failures
         //        as we do not discard that on failure (we don't necessarily know how many to pop with the current architecture).
@@ -458,17 +558,37 @@ public:
             empend((ByteCodeValueType)OpCodeId::Restore);
             return;
         }
-        case LookAroundType::LookBehind:
+        case LookAroundType::LookBehind: {
             // SAVE
-            // GOBACK match_length(BODY)
-            // REGEXP BODY
+            // SET_STEPBACK match_length(BODY)-1
+            // LABEL _START
+            // INC_STEPBACK
+            // FORK_JUMP _BODY
+            // CHECK_STEPBACK
+            // JUMP _START
+            // LABEL _BODY
+            // REGEX BODY
+            // CHECK_SAVED_POSITION
             // RESTORE
+            auto body_length = lookaround_body.size();
             empend((ByteCodeValueType)OpCodeId::Save);
-            empend((ByteCodeValueType)OpCodeId::GoBack);
-            empend((ByteCodeValueType)match_length);
+            empend((ByteCodeValueType)OpCodeId::SetStepBack);
+            empend((ByteCodeValueType)match_length - 1);
+            empend((ByteCodeValueType)OpCodeId::IncStepBack);
+            empend((ByteCodeValueType)OpCodeId::ForkJump);
+            empend((ByteCodeValueType)1 + 2); // JUMP to label _BODY
+            empend((ByteCodeValueType)OpCodeId::CheckStepBack);
+            empend((ByteCodeValueType)OpCodeId::Jump);
+            empend((ByteCodeValueType)-6); // JUMP to label _START
             extend(move(lookaround_body));
+            if (greedy_lookaround) {
+                empend((ByteCodeValueType)OpCodeId::ForkJump);
+                empend((ByteCodeValueType)(0 - 2 - body_length - 6));
+            }
+            empend((ByteCodeValueType)OpCodeId::CheckSavedPosition);
             empend((ByteCodeValueType)OpCodeId::Restore);
             return;
+        }
         case LookAroundType::NegatedLookBehind: {
             // JUMP _A
             // LABEL _L
@@ -521,6 +641,10 @@ public:
                 return transform_bytecode_repetition_min_one(bytecode_to_repeat, greedy);
         }
 
+        if (minimum == 0 && maximum.has_value() && maximum.value() == 1) {
+            return transform_bytecode_repetition_zero_or_one(bytecode_to_repeat, greedy);
+        }
+
         ByteCode new_bytecode;
         new_bytecode.insert_bytecode_repetition_n(bytecode_to_repeat, minimum, min_repetition_mark_id);
 
@@ -528,10 +652,14 @@ public:
             // (REPEAT REGEXP MIN)
             // LABEL _MAX_LOOP            |
             // FORK END                   |
+            // CHECKPOINT (if min==0)     |
             // REGEXP                     |
+            // FAILIFEMPTY (if min==0)    |
             // REPEAT _MAX_LOOP MAX-MIN   | if max > min
             // FORK END                   |
+            // CHECKPOINT (if min==0)     |
             // REGEXP                     |
+            // FAILIFEMPTY (if min==0)    |
             // LABEL END                  |
             // RESET _MAX_LOOP            |
             auto jump_kind = static_cast<ByteCodeValueType>(greedy ? OpCodeId::ForkStay : OpCodeId::ForkJump);
@@ -539,18 +667,48 @@ public:
                 new_bytecode.empend(jump_kind);
                 new_bytecode.empend((ByteCodeValueType)0); // Placeholder for the jump target.
                 auto pre_loop_fork_jump_index = new_bytecode.size();
+
+                auto checkpoint1 = minimum == 0 ? s_next_checkpoint_serial_id++ : 0;
+                if (minimum == 0) {
+                    new_bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::Checkpoint));
+                    new_bytecode.empend(static_cast<ByteCodeValueType>(checkpoint1));
+                }
+
                 new_bytecode.extend(bytecode_to_repeat);
+
+                if (minimum == 0) {
+                    new_bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::FailIfEmpty));
+                    new_bytecode.empend(checkpoint1);
+                }
+
                 auto repetitions = maximum.value() - minimum;
                 auto fork_jump_address = new_bytecode.size();
                 if (repetitions > 1) {
+                    auto repeated_bytecode_size = bytecode_to_repeat.size();
+                    if (minimum == 0)
+                        repeated_bytecode_size += 4; // Checkpoint + FailIfEmpty
+
                     new_bytecode.empend((ByteCodeValueType)OpCodeId::Repeat);
-                    new_bytecode.empend(bytecode_to_repeat.size() + 2);
+                    new_bytecode.empend(repeated_bytecode_size + 2);
                     new_bytecode.empend(static_cast<ByteCodeValueType>(repetitions - 1));
                     new_bytecode.empend(max_repetition_mark_id);
                     new_bytecode.empend(jump_kind);
                     new_bytecode.empend((ByteCodeValueType)0); // Placeholder for the jump target.
                     auto post_loop_fork_jump_index = new_bytecode.size();
+
+                    auto checkpoint2 = minimum == 0 ? s_next_checkpoint_serial_id++ : 0;
+                    if (minimum == 0) {
+                        new_bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::Checkpoint));
+                        new_bytecode.empend(static_cast<ByteCodeValueType>(checkpoint2));
+                    }
+
                     new_bytecode.extend(bytecode_to_repeat);
+
+                    if (minimum == 0) {
+                        new_bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::FailIfEmpty));
+                        new_bytecode.empend(checkpoint2);
+                    }
+
                     fork_jump_address = new_bytecode.size();
 
                     new_bytecode[post_loop_fork_jump_index - 1] = (ByteCodeValueType)(fork_jump_address - post_loop_fork_jump_index);
@@ -634,6 +792,7 @@ public:
         // FORKJUMP _END  (FORKSTAY -> Greedy)
         // CHECKPOINT _C
         // REGEXP
+        // FAILIFEMPTY _C
         // JUMP_NONEMPTY _C _START JUMP
         // LABEL _END
 
@@ -645,13 +804,16 @@ public:
         else
             bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::ForkJump));
 
-        bytecode.empend(bytecode_to_repeat.size() + 2 + 4); // Jump to the _END label
+        bytecode.empend(bytecode_to_repeat.size() + 2 + 4 + 2); // Jump to the _END label
 
         auto checkpoint = s_next_checkpoint_serial_id++;
         bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::Checkpoint));
         bytecode.empend(static_cast<ByteCodeValueType>(checkpoint));
 
         bytecode.extend(bytecode_to_repeat);
+
+        bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::FailIfEmpty));
+        bytecode.empend(checkpoint);
 
         bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::JumpNonEmpty));
         bytecode.empend(-bytecode.size() - 3); // Jump(...) to the _START label...
@@ -665,7 +827,9 @@ public:
     static void transform_bytecode_repetition_zero_or_one(ByteCode& bytecode_to_repeat, bool greedy)
     {
         // FORKJUMP _END (FORKSTAY -> Greedy)
+        // CHECKPOINT _C
         // REGEXP
+        // FAILIFEMPTY _C
         // LABEL _END
         ByteCode bytecode;
 
@@ -674,42 +838,75 @@ public:
         else
             bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::ForkJump));
 
-        bytecode.empend(bytecode_to_repeat.size()); // Jump to the _END label
+        bytecode.empend(bytecode_to_repeat.size() + 4); // Jump to the _END label
+
+        auto checkpoint = s_next_checkpoint_serial_id++;
+        bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::Checkpoint));
+        bytecode.empend(static_cast<ByteCodeValueType>(checkpoint));
 
         bytecode.extend(move(bytecode_to_repeat));
+
+        bytecode.empend(static_cast<ByteCodeValueType>(OpCodeId::FailIfEmpty));
+        bytecode.empend(checkpoint);
         // LABEL _END = bytecode.size()
 
         bytecode_to_repeat = move(bytecode);
     }
 
-    OpCode& get_opcode(MatchState& state) const;
+    OpCode<ByteCode>& get_opcode(MatchState& state) const;
 
     static void reset_checkpoint_serial_id() { s_next_checkpoint_serial_id = 0; }
 
 private:
-    void insert_string(StringView view)
-    {
-        empend((ByteCodeValueType)view.length());
-        for (size_t i = 0; i < view.length(); ++i)
-            empend((ByteCodeValueType)view[i]);
-    }
-
     void ensure_opcodes_initialized();
-    ALWAYS_INLINE OpCode& get_opcode_by_id(OpCodeId id) const;
-    static OwnPtr<OpCode> s_opcodes[(size_t)OpCodeId::Last + 1];
+    ALWAYS_INLINE OpCode<ByteCode>& get_opcode_by_id(OpCodeId id) const;
+    static OwnPtr<OpCode<ByteCode>> s_opcodes[(size_t)OpCodeId::Last + 1];
     static bool s_opcodes_initialized;
     static size_t s_next_checkpoint_serial_id;
-    StringTable m_string_table;
-    StringSetTable m_string_set_table;
-    HashMap<size_t, size_t> m_group_name_mappings;
 };
 
-#define ENUMERATE_EXECUTION_RESULTS                          \
-    __ENUMERATE_EXECUTION_RESULT(Continue)                   \
-    __ENUMERATE_EXECUTION_RESULT(Fork_PrioHigh)              \
-    __ENUMERATE_EXECUTION_RESULT(Fork_PrioLow)               \
-    __ENUMERATE_EXECUTION_RESULT(Failed)                     \
-    __ENUMERATE_EXECUTION_RESULT(Failed_ExecuteLowPrioForks) \
+class REGEX_API FlatByteCode : public ByteCodeBase {
+public:
+    static FlatByteCode from(ByteCode&& bytecode)
+    {
+        ensure_opcodes_initialized();
+        FlatByteCode flat_bytecode;
+        if (!bytecode.is_empty())
+            flat_bytecode.m_data = move(static_cast<DisjointChunks<ByteCodeValueType>&>(bytecode).first_chunk());
+        flat_bytecode.m_string_table = move(bytecode.m_string_table);
+        flat_bytecode.m_u16_string_table = move(bytecode.m_u16_string_table);
+        flat_bytecode.m_string_set_table = move(bytecode.m_string_set_table);
+        flat_bytecode.m_group_name_mappings = move(bytecode.m_group_name_mappings);
+        return flat_bytecode;
+    }
+
+    Span<ByteCodeValueType const> flat_data() const { return m_data.span(); }
+    OpCode<FlatByteCode>& get_opcode(MatchState& state) const;
+    auto& at(size_t index) { return m_data.data()[index]; }
+    auto const& at(size_t index) const { return m_data.data()[index]; }
+    auto& operator[](size_t index) { return m_data.data()[index]; }
+    auto const& operator[](size_t index) const { return m_data.data()[index]; }
+    auto size() const { return m_data.size(); }
+
+    auto begin() const { return m_data.begin(); }
+    auto end() const { return m_data.end(); }
+
+private:
+    static void ensure_opcodes_initialized();
+    ALWAYS_INLINE OpCode<FlatByteCode>& get_opcode_by_id(OpCodeId id) const;
+    static OwnPtr<OpCode<FlatByteCode>> s_opcodes[(size_t)OpCodeId::Last + 1];
+    static bool s_opcodes_initialized;
+
+    Vector<ByteCodeValueType> m_data;
+};
+
+#define ENUMERATE_EXECUTION_RESULTS                                                     \
+    __ENUMERATE_EXECUTION_RESULT(Continue)                                              \
+    __ENUMERATE_EXECUTION_RESULT(Fork_PrioHigh)                                         \
+    __ENUMERATE_EXECUTION_RESULT(Fork_PrioLow)                                          \
+    __ENUMERATE_EXECUTION_RESULT(Failed)                                                \
+    __ENUMERATE_EXECUTION_RESULT(Failed_ExecuteLowPrioForks)                            \
+    __ENUMERATE_EXECUTION_RESULT(Failed_ExecuteLowPrioForksButNoFurtherPossibleMatches) \
     __ENUMERATE_EXECUTION_RESULT(Succeeded)
 
 enum class ExecutionResult : u8 {
@@ -723,8 +920,10 @@ StringView opcode_id_name(OpCodeId opcode_id);
 StringView boundary_check_type_name(BoundaryCheckType);
 StringView character_compare_type_name(CharacterCompareType result);
 StringView character_class_name(CharClass ch_class);
+StringView fork_if_condition_name(ForkIfCondition condition);
 
-class REGEX_API OpCode {
+template<typename ByteCode>
+class OpCode {
 public:
     OpCode() = default;
     virtual ~OpCode() = default;
@@ -738,18 +937,14 @@ public:
         return m_bytecode->at(state().instruction_position + 1 + offset);
     }
 
-    ALWAYS_INLINE StringView name() const;
+    ALWAYS_INLINE StringView name() const { return name(opcode_id()); }
     static StringView name(OpCodeId);
 
     ALWAYS_INLINE void set_state(MatchState const& state) { m_state = &state; }
 
     ALWAYS_INLINE void set_bytecode(ByteCode& bytecode) { m_bytecode = &bytecode; }
 
-    ALWAYS_INLINE MatchState const& state() const
-    {
-        VERIFY(m_state);
-        return *m_state;
-    }
+    ALWAYS_INLINE MatchState const& state() const { return *m_state; }
 
     ByteString to_byte_string() const
     {
@@ -765,48 +960,113 @@ protected:
     MatchState const* m_state { nullptr };
 };
 
-class OpCode_Exit final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_SaveModifiers final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::SaveModifiers; }
+    ALWAYS_INLINE size_t size() const override { return 2; }
+    ALWAYS_INLINE FlagsUnderlyingType new_modifiers() const { return argument(0); }
+    ByteString arguments_string() const override { return ByteString::formatted("new_modifiers={:#x}", new_modifiers()); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_RestoreModifiers final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::RestoreModifiers; }
+    ALWAYS_INLINE size_t size() const override { return 1; }
+    ByteString arguments_string() const override { return ByteString::empty(); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_Exit final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Exit; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_FailForks final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_FailForks final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::FailForks; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_PopSaved final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_PopSaved final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::PopSaved; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_Save final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_Save final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Save; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_Restore final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_Restore final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Restore; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_GoBack final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_GoBack final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::GoBack; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -814,8 +1074,72 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("count={}", count()); }
 };
 
-class OpCode_Jump final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_SetStepBack final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::SetStepBack; }
+    ALWAYS_INLINE size_t size() const override { return 2; }
+    ALWAYS_INLINE i64 step() const { return argument(0); }
+    ByteString arguments_string() const override { return ByteString::formatted("step={}", step()); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_IncStepBack final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::IncStepBack; }
+    ALWAYS_INLINE size_t size() const override { return 1; }
+    ByteString arguments_string() const override { return ByteString::formatted("inc step back"); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_CheckStepBack final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CheckStepBack; }
+    ALWAYS_INLINE size_t size() const override { return 1; }
+    ByteString arguments_string() const override { return ByteString::formatted("check step back"); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_CheckSavedPosition final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CheckSavedPosition; }
+    ALWAYS_INLINE size_t size() const override { return 1; }
+    ByteString arguments_string() const override { return ByteString::formatted("check saved back"); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_Jump final : public OpCode<ByteCode> {
+
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Jump; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -826,8 +1150,14 @@ public:
     }
 };
 
-class OpCode_ForkJump : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_ForkJump : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ForkJump; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -838,14 +1168,28 @@ public:
     }
 };
 
-class OpCode_ForkReplaceJump final : public OpCode_ForkJump {
+template<typename ByteCode>
+class REGEX_API OpCode_ForkReplaceJump final : public OpCode_ForkJump<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+    using OpCode_ForkJump<ByteCode>::offset;
+    using OpCode_ForkJump<ByteCode>::size;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ForkReplaceJump; }
 };
 
-class OpCode_ForkStay : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_ForkStay : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ForkStay; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -856,30 +1200,56 @@ public:
     }
 };
 
-class OpCode_ForkReplaceStay final : public OpCode_ForkStay {
+template<typename ByteCode>
+class REGEX_API OpCode_ForkReplaceStay final : public OpCode_ForkStay<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+    using OpCode_ForkStay<ByteCode>::offset;
+    using OpCode_ForkStay<ByteCode>::size;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ForkReplaceStay; }
 };
 
-class OpCode_CheckBegin final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_CheckBegin final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CheckBegin; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_CheckEnd final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_CheckEnd final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CheckEnd; }
     ALWAYS_INLINE size_t size() const override { return 1; }
     ByteString arguments_string() const override { return ByteString::empty(); }
 };
 
-class OpCode_CheckBoundary final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_CheckBoundary final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CheckBoundary; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -888,8 +1258,14 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("kind={} ({})", (long unsigned int)argument(0), boundary_check_type_name(type())); }
 };
 
-class OpCode_ClearCaptureGroup final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_ClearCaptureGroup final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ClearCaptureGroup; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -897,8 +1273,29 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("id={}", id()); }
 };
 
-class OpCode_SaveLeftCaptureGroup final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_FailIfEmpty final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::FailIfEmpty; }
+    ALWAYS_INLINE size_t size() const override { return 2; }
+    ALWAYS_INLINE size_t checkpoint() const { return argument(0); }
+    ByteString arguments_string() const override { return ByteString::formatted("checkpoint={}", checkpoint()); }
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_SaveLeftCaptureGroup final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::SaveLeftCaptureGroup; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -906,8 +1303,14 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("id={}", id()); }
 };
 
-class OpCode_SaveRightCaptureGroup final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_SaveRightCaptureGroup final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::SaveRightCaptureGroup; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -915,12 +1318,18 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("id={}", id()); }
 };
 
-class OpCode_SaveRightNamedCaptureGroup final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_SaveRightNamedCaptureGroup final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::SaveRightNamedCaptureGroup; }
     ALWAYS_INLINE size_t size() const override { return 3; }
-    ALWAYS_INLINE FlyString name() const { return m_bytecode->get_string(name_string_table_index()); }
+    ALWAYS_INLINE FlyString name() const { return bytecode().get_string(name_string_table_index()); }
     ALWAYS_INLINE size_t name_string_table_index() const { return argument(0); }
     ALWAYS_INLINE size_t length() const { return name().bytes_as_string_view().length(); }
     ALWAYS_INLINE size_t id() const { return argument(1); }
@@ -930,19 +1339,39 @@ public:
     }
 };
 
-class REGEX_API OpCode_Compare final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_RSeekTo final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
-    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Compare; }
-    ALWAYS_INLINE size_t size() const override { return arguments_size() + 3; }
-    ALWAYS_INLINE size_t arguments_count() const { return argument(0); }
-    ALWAYS_INLINE size_t arguments_size() const { return argument(1); }
-    ByteString arguments_string() const override;
-    Vector<ByteString> variable_arguments_to_byte_string(Optional<MatchInput const&> input = {}) const;
-    Vector<CompareTypeAndValuePair> flat_compares() const;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::RSeekTo; }
+    ALWAYS_INLINE size_t size() const override { return 2; }
+    ByteString arguments_string() const override
+    {
+        auto ch = argument(0);
+        if (ch <= 0x7f)
+            return ByteString::formatted("before '{}'", ch);
+        return ByteString::formatted("before u+{:04x}", argument(0));
+    }
+};
+
+template<typename ByteCode, bool IsSimple>
+class REGEX_API CompareInternals : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
     static bool matches_character_class(CharClass, u32, bool insensitive);
 
-private:
+    Vector<CompareTypeAndValuePair> flat_compares() const;
+
+protected:
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE static void compare_char(MatchInput const& input, MatchState& state, u32 ch1, bool inverse, bool& inverse_matched);
     ALWAYS_INLINE static bool compare_string(MatchInput const& input, MatchState& state, RegexStringView str, bool& had_zero_length_match);
     ALWAYS_INLINE static void compare_character_class(MatchInput const& input, MatchState& state, CharClass character_class, u32 ch, bool inverse, bool& inverse_matched);
@@ -953,8 +1382,47 @@ private:
     ALWAYS_INLINE static void compare_script_extension(MatchInput const& input, MatchState& state, Unicode::Script script, bool inverse, bool& inverse_matched);
 };
 
-class OpCode_Repeat : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_Compare : public CompareInternals<ByteCode, false> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+    using CompareInternals<ByteCode, false>::flat_compares;
+
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Compare; }
+    ALWAYS_INLINE size_t size() const override { return arguments_size() + 3; }
+    ALWAYS_INLINE size_t arguments_count() const { return argument(0); }
+    ALWAYS_INLINE size_t arguments_size() const { return argument(1); }
+    ByteString arguments_string() const override;
+    Vector<ByteString> variable_arguments_to_byte_string(Optional<MatchInput const&> input = {}) const;
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_CompareSimple final : public CompareInternals<ByteCode, true> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+    using CompareInternals<ByteCode, true>::flat_compares;
+
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::CompareSimple; }
+    ALWAYS_INLINE size_t size() const override { return 2 + arguments_size(); } // CompareSimple <arg_size> <arg_type> <arg_value>*
+    ALWAYS_INLINE size_t arguments_count() const { return 1; }
+    ALWAYS_INLINE size_t arguments_size() const { return argument(0); }
+    ByteString arguments_string() const override;
+};
+
+template<typename ByteCode>
+class REGEX_API OpCode_Repeat : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Repeat; }
     ALWAYS_INLINE size_t size() const override { return 4; }
@@ -974,8 +1442,14 @@ public:
     }
 };
 
-class OpCode_ResetRepeat : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_ResetRepeat : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ResetRepeat; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -987,8 +1461,14 @@ public:
     }
 };
 
-class OpCode_Checkpoint final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_Checkpoint final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::Checkpoint; }
     ALWAYS_INLINE size_t size() const override { return 2; }
@@ -996,8 +1476,14 @@ public:
     ByteString arguments_string() const override { return ByteString::formatted("id={}", id()); }
 };
 
-class OpCode_JumpNonEmpty final : public OpCode {
+template<typename ByteCode>
+class REGEX_API OpCode_JumpNonEmpty final : public OpCode<ByteCode> {
 public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
     ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
     ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::JumpNonEmpty; }
     ALWAYS_INLINE size_t size() const override { return 4; }
@@ -1013,7 +1499,61 @@ public:
     }
 };
 
-ALWAYS_INLINE OpCode& ByteCode::get_opcode(regex::MatchState& state) const
+template<typename ByteCode>
+class REGEX_API OpCode_ForkIf final : public OpCode<ByteCode> {
+public:
+    using OpCode<ByteCode>::argument;
+    using OpCode<ByteCode>::name;
+    using OpCode<ByteCode>::state;
+    using OpCode<ByteCode>::bytecode;
+
+    ExecutionResult execute(MatchInput const& input, MatchState& state) const override;
+    ALWAYS_INLINE OpCodeId opcode_id() const override { return OpCodeId::ForkIf; }
+    ALWAYS_INLINE size_t size() const override { return 4; }
+    ALWAYS_INLINE ssize_t offset() const { return argument(0); }
+    ALWAYS_INLINE OpCodeId form() const { return (OpCodeId)argument(1); }
+    ALWAYS_INLINE ForkIfCondition condition() const { return (ForkIfCondition)argument(2); }
+    ByteString arguments_string() const override
+    {
+        return ByteString::formatted("{} {} offset={} [&{}]",
+            opcode_id_name(form()),
+            fork_if_condition_name(condition()),
+            offset(), state().instruction_position + size() + offset());
+    }
+};
+
+ALWAYS_INLINE OpCode<FlatByteCode>& FlatByteCode::get_opcode(regex::MatchState& state) const
+{
+    OpCodeId opcode_id;
+    if (m_data.size() <= state.instruction_position)
+        opcode_id = OpCodeId::Exit;
+    else
+        opcode_id = static_cast<OpCodeId>(m_data.data()[state.instruction_position]);
+
+    if (opcode_id >= OpCodeId::First && opcode_id <= OpCodeId::Last) {
+    } else {
+        dbgln("Invalid OpCodeId requested: {} at {}", (u32)opcode_id, state.instruction_position);
+        VERIFY_NOT_REACHED();
+    }
+    auto& opcode = get_opcode_by_id(opcode_id);
+    opcode.set_state(state);
+    return opcode;
+}
+
+ALWAYS_INLINE OpCode<FlatByteCode>& FlatByteCode::get_opcode_by_id(OpCodeId id) const
+{
+    if (id >= OpCodeId::First && id <= OpCodeId::Last) {
+    } else {
+        dbgln("Invalid OpCodeId requested: {}", (u32)id);
+        VERIFY_NOT_REACHED();
+    }
+
+    auto& opcode = s_opcodes[(u32)id];
+    opcode->set_bytecode(*const_cast<FlatByteCode*>(this));
+    return *opcode;
+}
+
+ALWAYS_INLINE OpCode<ByteCode>& ByteCode::get_opcode(regex::MatchState& state) const
 {
     OpCodeId opcode_id;
     if (auto opcode_ptr = static_cast<DisjointChunks<ByteCodeValueType> const&>(*this).find(state.instruction_position))
@@ -1026,7 +1566,7 @@ ALWAYS_INLINE OpCode& ByteCode::get_opcode(regex::MatchState& state) const
     return opcode;
 }
 
-ALWAYS_INLINE OpCode& ByteCode::get_opcode_by_id(OpCodeId id) const
+ALWAYS_INLINE OpCode<ByteCode>& ByteCode::get_opcode_by_id(OpCodeId id) const
 {
     VERIFY(id >= OpCodeId::First && id <= OpCodeId::Last);
 
@@ -1035,61 +1575,111 @@ ALWAYS_INLINE OpCode& ByteCode::get_opcode_by_id(OpCodeId id) const
     return *opcode;
 }
 
-template<typename T>
-bool is(OpCode const&);
+namespace Detail {
 
-template<typename T>
-ALWAYS_INLINE bool is(OpCode const&)
-{
-    return false;
+template<template<typename> class T, typename ByteCode>
+struct Is {
+    static bool is(OpCode<ByteCode> const& opcode) { return ::is<T<ByteCode>>(opcode); }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_FailForks, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::FailForks;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_Exit, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::Exit;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_Compare, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::Compare;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_SetStepBack, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::SetStepBack;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_IncStepBack, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::IncStepBack;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_CheckStepBack, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::CheckStepBack;
+    }
+};
+
+template<typename ByteCode>
+struct Is<OpCode_CheckSavedPosition, ByteCode> {
+    static bool is(OpCode<ByteCode> const& opcode)
+    {
+        return opcode.opcode_id() == OpCodeId::CheckSavedPosition;
+    }
+};
+
 }
 
-template<typename T>
-ALWAYS_INLINE bool is(OpCode const* opcode)
+template<template<typename> class T, typename ByteCode>
+bool is(OpCode<ByteCode> const& opcode) { return Detail::Is<T, ByteCode>::is(opcode); }
+
+template<template<typename> class T, typename ByteCode>
+ALWAYS_INLINE T<ByteCode> const& to(OpCode<ByteCode> const& opcode)
 {
-    return is<T>(*opcode);
+    return as<T<ByteCode>>(opcode);
 }
 
-template<>
-ALWAYS_INLINE bool is<OpCode_ForkStay>(OpCode const& opcode)
+template<template<typename> class T, typename ByteCode>
+ALWAYS_INLINE T<ByteCode>* to(OpCode<ByteCode>* opcode)
 {
-    return opcode.opcode_id() == OpCodeId::ForkStay;
+    return as<T<ByteCode>>(opcode);
 }
 
-template<>
-ALWAYS_INLINE bool is<OpCode_Exit>(OpCode const& opcode)
+template<template<typename> class T, typename ByteCode>
+ALWAYS_INLINE T<ByteCode> const* to(OpCode<ByteCode> const* opcode)
 {
-    return opcode.opcode_id() == OpCodeId::Exit;
+    return as<T<ByteCode>>(opcode);
 }
 
-template<>
-ALWAYS_INLINE bool is<OpCode_Compare>(OpCode const& opcode)
+template<template<typename> class T, typename ByteCode>
+ALWAYS_INLINE T<ByteCode>& to(OpCode<ByteCode>& opcode)
 {
-    return opcode.opcode_id() == OpCodeId::Compare;
+    return as<T<ByteCode>>(opcode);
 }
 
-template<typename T>
-ALWAYS_INLINE T const& to(OpCode const& opcode)
+template<typename ByteCode>
+StringView OpCode<ByteCode>::name(OpCodeId opcode_id)
 {
-    return as<T>(opcode);
-}
-
-template<typename T>
-ALWAYS_INLINE T* to(OpCode* opcode)
-{
-    return as<T>(opcode);
-}
-
-template<typename T>
-ALWAYS_INLINE T const* to(OpCode const* opcode)
-{
-    return as<T>(opcode);
-}
-
-template<typename T>
-ALWAYS_INLINE T& to(OpCode& opcode)
-{
-    return as<T>(opcode);
+    switch (opcode_id) {
+#define __ENUMERATE_OPCODE(x) \
+    case OpCodeId::x:         \
+        return #x##sv;
+        ENUMERATE_OPCODES
+#undef __ENUMERATE_OPCODE
+    default:
+        VERIFY_NOT_REACHED();
+        return "<Unknown>"sv;
+    }
 }
 
 }

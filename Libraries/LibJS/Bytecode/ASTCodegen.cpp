@@ -17,6 +17,7 @@
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/ErrorTypes.h>
+#include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/ValueInlines.h>
 
 namespace JS {
@@ -95,6 +96,18 @@ static ThrowCompletionOr<ScopedOperand> constant_fold_unary_expression(Generator
     default:
         return throw_completion(js_null());
     }
+}
+
+static Optional<ScopedOperand> try_constant_fold_unary_expression(Generator& generator, ScopedOperand& operand, UnaryOp op)
+{
+    if (operand.operand().is_constant()) {
+        // OPTIMIZATION: Do some basic constant folding for unary operations on numbers.
+        auto value = generator.get_constant(operand);
+        if (auto result = constant_fold_unary_expression(generator, value, op); !result.is_error())
+            return result.release_value();
+    }
+
+    return {};
 }
 
 static ThrowCompletionOr<ScopedOperand> constant_fold_binary_expression(Generator& generator, Value lhs, Value rhs, BinaryOp m_op)
@@ -299,19 +312,59 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> BinaryExpression::gener
     return dst;
 }
 
+static Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> constant_fold_logical_expression(Bytecode::Generator& generator, Optional<ScopedOperand> preferred_dst, ScopedOperand& lhs, LogicalExpression const* expr)
+{
+    auto constant = generator.get_constant(lhs);
+
+    auto return_rhs = [&] -> CodeGenerationErrorOr<Optional<ScopedOperand>> {
+        auto dst = choose_dst(generator, preferred_dst);
+        auto rhs = TRY(expr->rhs()->generate_bytecode(generator, dst)).value();
+
+        if (rhs.operand().is_constant())
+            return rhs;
+
+        generator.emit_mov(dst, rhs);
+        return dst;
+    };
+
+    switch (expr->op()) {
+    case LogicalOp::And:
+        if (constant.to_boolean_slow_case())
+            return TRY(return_rhs());
+        return lhs;
+    case LogicalOp::Or:
+        if (constant.to_boolean_slow_case())
+            return lhs;
+        return TRY(return_rhs());
+    case LogicalOp::NullishCoalescing:
+        if (constant.is_nullish())
+            return TRY(return_rhs());
+        return lhs;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+
+    return Optional<ScopedOperand> {};
+}
+
 Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> LogicalExpression::generate_bytecode(Bytecode::Generator& generator, Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
-    auto dst = choose_dst(generator, preferred_dst);
     auto lhs = TRY(m_lhs->generate_bytecode(generator, preferred_dst)).value();
-    // FIXME: Only mov lhs into dst in case lhs is the value taken.
-    generator.emit_mov(dst, lhs);
+
+    // OPTIMIZATION: return lhs/rhs directly if we can detect lhs as a truthy/falsey literal
+    if (auto constant = generator.try_get_constant(lhs); constant.has_value()) {
+        return TRY(constant_fold_logical_expression(generator, preferred_dst, lhs, this));
+    }
 
     // lhs
     // jump op (true) end (false) rhs
     // rhs
     // jump always (true) end
     // end
+
+    auto dst = choose_dst(generator, preferred_dst);
+    generator.emit_mov(dst, lhs);
 
     auto& rhs_block = generator.make_block();
     auto& end_block = generator.make_block();
@@ -358,15 +411,14 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UnaryExpression::genera
 
     Optional<ScopedOperand> src;
     // Typeof needs some special handling for when the LHS is an Identifier. Namely, it shouldn't throw on unresolvable references, but instead return "undefined".
-    if (m_op != UnaryOp::Typeof)
+    // Skip Not operator as it needs to be evaluated breadth first in order to detect `!!` optimization (otherwise the inner `!x` would eval first).
+    if (m_op != UnaryOp::Typeof && m_op != UnaryOp::Not)
         src = TRY(m_lhs->generate_bytecode(generator)).value();
 
     auto dst = choose_dst(generator, preferred_dst);
 
-    if (src.has_value() && src.value().operand().is_constant()) {
-        // OPTIMIZATION: Do some basic constant folding for unary operations on numbers.
-        auto value = generator.get_constant(*src);
-        if (auto result = constant_fold_unary_expression(generator, value, m_op); !result.is_error())
+    if (src.has_value()) {
+        if (auto result = try_constant_fold_unary_expression(generator, *src, m_op); result.has_value())
             return result.release_value();
     }
 
@@ -375,6 +427,21 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UnaryExpression::genera
         generator.emit<Bytecode::Op::BitwiseNot>(dst, *src);
         break;
     case UnaryOp::Not:
+        if (auto nested = as_if<UnaryExpression>(*m_lhs); nested && nested->op() == UnaryOp::Not) {
+            auto value = TRY(nested->lhs()->generate_bytecode(generator)).value();
+
+            if (value.operand().is_constant())
+                return generator.add_constant(Value(generator.get_constant(value).to_boolean()));
+
+            generator.emit<Bytecode::Op::ToBoolean>(dst, value);
+            break;
+        }
+
+        src = TRY(m_lhs->generate_bytecode(generator)).value();
+
+        if (auto result = try_constant_fold_unary_expression(generator, *src, m_op); result.has_value())
+            return result.release_value();
+
         generator.emit<Bytecode::Op::Not>(dst, *src);
         break;
     case UnaryOp::Plus:
@@ -890,14 +957,8 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> WhileStatement::generat
 Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> WhileStatement::generate_labelled_evaluation(Bytecode::Generator& generator, Vector<FlyString> const& label_set, [[maybe_unused]] Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
-    // test
-    // jump if_false (true) end (false) body
-    // body
-    // jump always (true) test
-    // end
+
     auto& test_block = generator.make_block();
-    auto& body_block = generator.make_block();
-    auto& end_block = generator.make_block();
 
     Optional<ScopedOperand> completion;
     if (generator.must_propagate_completion()) {
@@ -909,6 +970,20 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> WhileStatement::generat
 
     generator.switch_to_basic_block(test_block);
     auto test = TRY(m_test->generate_bytecode(generator)).value();
+
+    // OPTIMIZATION: If predicate is always false, ignore body and exit early
+    if (auto constant = generator.try_get_constant(test); constant.has_value() && !constant->to_boolean_slow_case()) {
+        return completion;
+    }
+
+    // test
+    // jump if_false (true) end (false) body
+    // body
+    // jump always (true) test
+    // end
+    auto& body_block = generator.make_block();
+    auto& end_block = generator.make_block();
+
     generator.emit_jump_if(
         test,
         Bytecode::Label { body_block },
@@ -1105,6 +1180,15 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ForStatement::generate_
         generator.switch_to_basic_block(*test_block_ptr);
 
         auto test = TRY(m_test->generate_bytecode(generator)).value();
+
+        // OPTIMIZATION: test value is always falsey, skip body entirely
+        if (auto constant = generator.try_get_constant(test); constant.has_value() && !constant->to_boolean_slow_case()) {
+            generator.emit<Bytecode::Op::Jump>(Bytecode::Label { end_block });
+            auto undefined_value = generator.add_constant(js_undefined());
+            generator.switch_to_basic_block(end_block);
+            return undefined_value;
+        }
+
         generator.emit_jump_if(test, Bytecode::Label { *body_block_ptr }, Bytecode::Label { end_block });
     }
 
@@ -1151,12 +1235,39 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ObjectExpression::gener
 
     auto object = choose_dst(generator, preferred_dst);
 
-    generator.emit<Bytecode::Op::NewObject>(object);
+    // Determine if this is a simple object literal (all KeyValue with StringLiteral keys
+    // that are not numeric indices). Simple literals can benefit from shape caching with
+    // direct property offset writes. Numeric string keys like "0" are stored in indexed
+    // storage rather than shape-based storage, so they can't use the fast path.
+    bool is_simple = !m_properties.is_empty();
+    for (auto& property : m_properties) {
+        if (property->type() != ObjectProperty::Type::KeyValue || !is<StringLiteral>(property->key())) {
+            is_simple = false;
+            break;
+        }
+        // Check if the key is a numeric index (would be stored in indexed storage)
+        auto const& key = static_cast<StringLiteral const&>(property->key()).value();
+        if (!key.is_empty() && !(key.code_unit_at(0) == '0' && key.length_in_code_units() > 1)) {
+            auto property_index = key.to_number<u32>(TrimWhitespace::No);
+            if (property_index.has_value() && property_index.value() < NumericLimits<u32>::max()) {
+                is_simple = false;
+                break;
+            }
+        }
+    }
+
+    Optional<u32> shape_cache_index;
+    if (is_simple)
+        shape_cache_index = generator.next_object_shape_cache();
+
+    generator.emit<Bytecode::Op::NewObject>(object, shape_cache_index.value_or(NumericLimits<u32>::max()));
+
     if (m_properties.is_empty())
         return object;
 
     generator.push_home_object(object);
 
+    u32 property_slot = 0;
     for (auto& property : m_properties) {
         Bytecode::PutKind property_kind;
         switch (property->type()) {
@@ -1195,7 +1306,13 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ObjectExpression::gener
             }
 
             auto property_key_table_index = generator.intern_property_key(string_literal.value());
-            generator.emit_put_by_id(object, property_key_table_index, *value, property_kind, generator.next_property_lookup_cache());
+
+            // For simple object literals, use InitObjectLiteralProperty for direct offset writes
+            if (is_simple) {
+                generator.emit<Bytecode::Op::InitObjectLiteralProperty>(object, property_key_table_index, *value, *shape_cache_index, property_slot++);
+            } else {
+                generator.emit_put_by_id(object, property_key_table_index, *value, property_kind, generator.next_property_lookup_cache());
+            }
         } else {
             auto property_name = TRY(property->key().generate_bytecode(generator)).value();
             auto value = TRY(generator.emit_named_evaluation_if_anonymous_function(property->value(), {}, {}, property->is_method()));
@@ -1205,6 +1322,10 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ObjectExpression::gener
     }
 
     generator.pop_home_object();
+
+    if (shape_cache_index.has_value())
+        generator.emit<Bytecode::Op::CacheObjectShape>(object, *shape_cache_index);
+
     return object;
 }
 
@@ -2032,10 +2153,8 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
         generator.switch_to_basic_block(type_is_normal_block);
 
         // i. Let innerResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « received.[[Value]] »).
-        auto array = generator.allocate_register();
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(1, array, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
         auto inner_result = generator.allocate_register();
-        generator.emit<Bytecode::Op::CallWithArgumentArray>(inner_result, next_method, iterator, array, OptionalNone {});
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, next_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // ii. If generatorKind is async, set innerResult to ? Await(innerResult).
         if (generator.is_in_async_generator_function()) {
@@ -2122,9 +2241,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
         generator.switch_to_basic_block(throw_method_is_defined_block);
 
         // 1. Let innerResult be ? Call(throw, iterator, « received.[[Value]] »).
-        auto received_value_array = generator.allocate_register();
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(1, received_value_array, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
-        generator.emit<Bytecode::Op::CallWithArgumentArray>(inner_result, throw_method, iterator, received_value_array, OptionalNone {});
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, throw_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // 2. If generatorKind is async, set innerResult to ? Await(innerResult).
         if (generator.is_in_async_generator_function()) {
@@ -2218,10 +2335,8 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
         generator.switch_to_basic_block(return_is_defined_block);
 
         // iv. Let innerReturnResult be ? Call(return, iterator, « received.[[Value]] »).
-        auto call_array = generator.allocate_register();
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(1, call_array, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
         auto inner_return_result = generator.allocate_register();
-        generator.emit<Bytecode::Op::CallWithArgumentArray>(inner_return_result, return_method, iterator, call_array, OptionalNone {});
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_return_result, return_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // v. If generatorKind is async, set innerReturnResult to ? Await(innerReturnResult).
         if (generator.is_in_async_generator_function()) {
@@ -2350,10 +2465,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> IfStatement::generate_b
     // jump always (true) end
     // end
 
-    auto& true_block = generator.make_block();
-    auto& false_block = generator.make_block();
-    // NOTE: if there is no 'else' block the end block is the same as the false block
-    auto& end_block = m_alternate ? generator.make_block() : false_block;
+    auto predicate = TRY(m_predicate->generate_bytecode(generator)).value();
 
     Optional<ScopedOperand> completion;
     if (generator.must_propagate_completion()) {
@@ -2361,28 +2473,43 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> IfStatement::generate_b
         generator.emit_mov(*completion, generator.add_constant(js_undefined()));
     }
 
-    auto predicate = TRY(m_predicate->generate_bytecode(generator)).value();
+    auto build_block = [&](auto node, Optional<BasicBlock&> end_block = {}) -> CodeGenerationErrorOr<Optional<ScopedOperand>> {
+        auto value = TRY(node->generate_bytecode(generator, completion));
+        if (!generator.is_current_block_terminated()) {
+            if (generator.must_propagate_completion() && value.has_value())
+                generator.emit_mov(*completion, *value);
+            if (end_block.has_value())
+                generator.emit<Bytecode::Op::Jump>(Bytecode::Label { *end_block });
+        }
+        return Optional<ScopedOperand> {};
+    };
+
+    // OPTIMIZATION: if the predicate is always true/false, only build the consequent/alternate blocks, respectively.
+    if (auto constant = generator.try_get_constant(predicate); constant.has_value()) {
+        if (constant->to_boolean_slow_case()) {
+            (void)TRY(build_block(m_consequent));
+        } else if (m_alternate) {
+            (void)TRY(build_block(m_alternate));
+        }
+        return completion;
+    }
+
+    auto& true_block = generator.make_block();
+    auto& false_block = generator.make_block();
+    // NOTE: if there is no 'else' block the end block is the same as the false block
+    auto& end_block = m_alternate ? generator.make_block() : false_block;
+
     generator.emit_jump_if(
         predicate,
         Bytecode::Label { true_block },
         Bytecode::Label { false_block });
 
     generator.switch_to_basic_block(true_block);
-    auto consequent = TRY(m_consequent->generate_bytecode(generator, completion));
-    if (!generator.is_current_block_terminated()) {
-        if (generator.must_propagate_completion() && consequent.has_value())
-            generator.emit_mov(*completion, *consequent);
-        generator.emit<Bytecode::Op::Jump>(Bytecode::Label { end_block });
-    }
+    (void)TRY(build_block(m_consequent, { end_block }));
 
     if (m_alternate) {
         generator.switch_to_basic_block(false_block);
-        auto alternate = TRY(m_alternate->generate_bytecode(generator, completion));
-        if (!generator.is_current_block_terminated()) {
-            if (generator.must_propagate_completion() && alternate.has_value())
-                generator.emit_mov(*completion, *alternate);
-            generator.emit<Bytecode::Op::Jump>(Bytecode::Label { end_block });
-        }
+        (void)TRY(build_block(m_alternate, { end_block }));
     }
 
     generator.switch_to_basic_block(end_block);
@@ -2410,6 +2537,18 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> DebuggerStatement::gene
 Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ConditionalExpression::generate_bytecode(Bytecode::Generator& generator, Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
+
+    auto test = TRY(m_test->generate_bytecode(generator)).value();
+
+    // OPTIMIZATION: if the predicate is always true/false, only build the consequent/alternate blocks, respectively.
+    if (auto constant = generator.try_get_constant(test); constant.has_value()) {
+        auto is_always_true = constant->to_boolean_slow_case();
+
+        if (is_always_true)
+            return TRY(m_consequent->generate_bytecode(generator)).value();
+        return TRY(m_alternate->generate_bytecode(generator)).value();
+    }
+
     // test
     // jump if_true (true) true (false) false
     // true
@@ -2422,7 +2561,6 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ConditionalExpression::
     auto& false_block = generator.make_block();
     auto& end_block = generator.make_block();
 
-    auto test = TRY(m_test->generate_bytecode(generator)).value();
     generator.emit_jump_if(
         test,
         Bytecode::Label { true_block },
@@ -2462,10 +2600,40 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> TemplateLiteral::genera
 
     auto dst = choose_dst(generator, preferred_dst);
 
-    for (size_t i = 0; i < m_expressions.size(); i++) {
-        auto value = TRY(m_expressions[i]->generate_bytecode(generator)).value();
+    Vector segments(m_expressions);
+
+    segments.remove_all_matching([&](auto expr) {
+        return expr->is_string_literal() && static_cast<StringLiteral const&>(*expr).value().is_empty();
+    });
+
+    // OPTIMIZATION: Empty template literal (``) can be turned into empty string literal ("")
+    if (segments.size() == 0)
+        return generator.add_constant(Value { GC::Ref { generator.vm().empty_string() } });
+
+    if (segments.size() == 1) {
+        auto value = TRY(segments[0]->generate_bytecode(generator)).value();
+
+        // OPTIMIZATION: String literal template (`xyz`) can be returned directly
+        if (value.operand().is_constant())
+            return value;
+
+        // OPTIMIZATION: `${x}` can be turned into ToString(x) op
+        generator.emit<Bytecode::Op::ToString>(dst, value);
+
+        return dst;
+    }
+
+    for (size_t i = 0; i < segments.size(); i++) {
+        auto expr = segments[i];
+
+        auto value = TRY(expr->generate_bytecode(generator)).value();
+
         if (i == 0) {
-            generator.emit_mov(dst, value);
+            if (expr->is_string_literal()) {
+                generator.emit_mov(dst, value);
+            } else {
+                generator.emit<Bytecode::Op::ToString>(dst, value);
+            }
         } else {
             generator.emit<Bytecode::Op::ConcatString>(dst, value);
         }
@@ -2493,72 +2661,45 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> TaggedTemplateLiteral::
         return TagAndThisValue { .tag = tag, .this_value = generator.add_constant(js_undefined()) };
     }());
 
-    // FIXME: Follow
-    //        13.2.8.3 GetTemplateObject ( templateLiteral ), https://tc39.es/ecma262/#sec-gettemplateobject
-    //        more closely, namely:
-    //        * cache this somehow
-    //        * add a raw object accessor
-    //        * freeze array and raw member
+    // 13.2.8.4 GetTemplateObject ( templateLiteral ), https://tc39.es/ecma262/#sec-gettemplateobject
     Vector<ScopedOperand> string_regs;
     auto& expressions = m_template_literal->expressions();
 
-    for (size_t i = 0; i < expressions.size(); ++i) {
-        if (i % 2 != 0)
-            continue;
+    for (size_t i = 0; i < expressions.size(); i += 2) {
         // NOTE: If the string contains invalid escapes we get a null expression here,
         //       which we then convert to the expected `undefined` TV. See
         //       12.9.6.1 Static Semantics: TV, https://tc39.es/ecma262/#sec-static-semantics-tv
-        auto string_reg = generator.allocate_register();
         if (is<NullLiteral>(expressions[i])) {
-            generator.emit_mov(string_reg, generator.add_constant(js_undefined()));
+            string_regs.append(generator.add_constant(js_undefined()));
         } else {
             auto value = TRY(expressions[i]->generate_bytecode(generator)).value();
-            generator.emit_mov(string_reg, value);
+            string_regs.append(move(value));
         }
-        string_regs.append(move(string_reg));
+    }
+
+    auto& raw_strings = m_template_literal->raw_strings();
+    for (auto const& raw_string : raw_strings) {
+        auto value = TRY(raw_string->generate_bytecode(generator)).value();
+        string_regs.append(move(value));
     }
 
     auto strings_array = generator.allocate_register();
-    if (string_regs.is_empty()) {
-        generator.emit<Bytecode::Op::NewArray>(strings_array, ReadonlySpan<ScopedOperand> {});
-    } else {
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(string_regs.size(), strings_array, string_regs);
-    }
+    generator.emit_with_extra_operand_slots<Bytecode::Op::GetTemplateObject>(
+        string_regs.size(),
+        strings_array,
+        generator.next_template_object_cache(),
+        string_regs);
 
     Vector<ScopedOperand> argument_regs;
     argument_regs.append(strings_array);
 
     for (size_t i = 1; i < expressions.size(); i += 2) {
-        auto string_reg = generator.allocate_register();
-        auto string = TRY(expressions[i]->generate_bytecode(generator)).value();
-        generator.emit_mov(string_reg, string);
-        argument_regs.append(move(string_reg));
+        auto argument = TRY(expressions[i]->generate_bytecode(generator)).value();
+        argument_regs.append(move(argument));
     }
-
-    Vector<ScopedOperand> raw_string_regs;
-    raw_string_regs.ensure_capacity(m_template_literal->raw_strings().size());
-    for (auto& raw_string : m_template_literal->raw_strings()) {
-        auto value = TRY(raw_string->generate_bytecode(generator)).value();
-        raw_string_regs.append(generator.copy_if_needed_to_preserve_evaluation_order(value));
-    }
-
-    auto raw_strings_array = generator.allocate_register();
-    if (raw_string_regs.is_empty()) {
-        generator.emit<Bytecode::Op::NewArray>(raw_strings_array, ReadonlySpan<ScopedOperand> {});
-    } else {
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(raw_string_regs.size(), raw_strings_array, raw_string_regs);
-    }
-
-    generator.emit_put_by_id(strings_array, generator.intern_property_key("raw"_utf16_fly_string), raw_strings_array, Bytecode::PutKind::Normal, generator.next_property_lookup_cache());
-
-    auto arguments = generator.allocate_register();
-    if (!argument_regs.is_empty())
-        generator.emit_with_extra_operand_slots<Bytecode::Op::NewArray>(argument_regs.size(), arguments, argument_regs);
-    else
-        generator.emit<Bytecode::Op::NewArray>(arguments, ReadonlySpan<ScopedOperand> {});
 
     auto dst = choose_dst(generator, preferred_dst);
-    generator.emit<Bytecode::Op::CallWithArgumentArray>(dst, tag, this_value, arguments, OptionalNone {});
+    generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(argument_regs.size(), dst, tag, this_value, OptionalNone {}, argument_regs);
     return dst;
 }
 

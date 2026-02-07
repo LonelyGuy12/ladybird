@@ -22,8 +22,9 @@ struct Context {
         RedBlackTree<size_t, FunctionIndex> tree;
     };
 
-    COWVector<FunctionType> types;
+    COWVector<TypeSection::Type> types;
     COWVector<FunctionType> functions;
+    COWVector<StructType> structs;
     COWVector<TableType> tables;
     COWVector<MemoryType> memories;
     COWVector<GlobalType> globals;
@@ -34,6 +35,8 @@ struct Context {
     Optional<u32> data_count;
     RefPtr<RefRBTree> references { make_ref_counted<RefRBTree>() };
     size_t imported_function_count { 0 };
+    size_t current_function_parameter_count { 0 };
+    Module const* current_module { nullptr };
 };
 
 struct ValidationError : public Error {
@@ -124,10 +127,10 @@ public:
         return Errors::invalid("LabelIndex"sv);
     }
 
-    ErrorOr<void, ValidationError> validate(LocalIndex index) const
+    ErrorOr<LocalIndex, ValidationError> validate(LocalIndex index) const
     {
         if (index.value() < m_context.locals.size())
-            return {};
+            return index;
         return Errors::invalid("LocalIndex"sv);
     }
 
@@ -431,5 +434,13 @@ struct AK::Formatter<Wasm::ValidationError> : public AK::Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, Wasm::ValidationError const& error)
     {
         return Formatter<StringView>::format(builder, error.error_string);
+    }
+};
+
+template<>
+struct AK::Formatter<Wasm::TypeSection::Type> : public AK::Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Wasm::TypeSection::Type const& type)
+    {
+        return Formatter<StringView>::format(builder, type.name());
     }
 };

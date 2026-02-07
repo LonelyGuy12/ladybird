@@ -262,20 +262,16 @@ void initialize_main_thread_vm(AgentType type)
             // 1. Let entry be finalizationRegistry.[[CleanupCallback]].[[Callback]].[[Realm]].
             auto& entry = *finalization_registry.cleanup_callback().callback().realm();
 
-            // 2. Check if we can run script with entry. If this returns "do not run", then return.
-            if (HTML::can_run_script(entry) == HTML::RunScriptDecision::DoNotRun)
-                return;
-
-            // 3. Prepare to run script with entry.
+            // 2. Prepare to run script with entry.
             HTML::prepare_to_run_script(entry);
 
-            // 4. Let result be the result of performing CleanupFinalizationRegistry(finalizationRegistry).
+            // 3. Let result be the result of performing CleanupFinalizationRegistry(finalizationRegistry).
             auto result = finalization_registry.cleanup();
 
-            // 5. Clean up after running script with entry.
+            // 4. Clean up after running script with entry.
             HTML::clean_up_after_running_script(entry);
 
-            // 6. If result is an abrupt completion, then report the exception given by result.[[Value]].
+            // 5. If result is an abrupt completion, then report the exception given by result.[[Value]].
             if (result.is_error())
                 HTML::report_exception(result, entry);
         }));
@@ -302,11 +298,7 @@ void initialize_main_thread_vm(AgentType type)
             OwnPtr<JS::ExecutionContext> dummy_execution_context;
 
             if (realm) {
-                // 1. If realm is not null, then check if we can run script with realm. If this returns "do not run" then return.
-                if (HTML::can_run_script(*realm) == HTML::RunScriptDecision::DoNotRun)
-                    return;
-
-                // 2. If realm is not null, then prepare to run script with realm.
+                // 1. If realm is not null, then prepare to run script with realm.
                 HTML::prepare_to_run_script(*realm);
 
                 // IMPLEMENTATION DEFINED: Additionally to preparing to run a script, we also prepare to run a callback here. This matches WebIDL's
@@ -321,15 +313,15 @@ void initialize_main_thread_vm(AgentType type)
                 // FIXME: We need to setup a dummy execution context in case a JS::NativeFunction is called when processing the job.
                 //        This is because JS::NativeFunction::call excepts something to be on the execution context stack to be able to get the caller context to initialize the environment.
                 //        Do note that the JS spec gives _no_ guarantee that the execution context stack has something on it if HostEnqueuePromiseJob was called with a null realm: https://tc39.es/ecma262/#job-preparedtoevaluatecode
-                dummy_execution_context = JS::ExecutionContext::create(0, 0);
+                dummy_execution_context = JS::ExecutionContext::create(0, 0, 0);
                 dummy_execution_context->script_or_module = script_or_module;
                 vm.push_execution_context(*dummy_execution_context);
             }
 
-            // 3. Let result be job().
+            // 2. Let result be job().
             auto result = job->function()();
 
-            // 4. If realm is not null, then clean up after running script with job settings.
+            // 3. If realm is not null, then clean up after running script with job settings.
             if (realm) {
                 // IMPLEMENTATION DEFINED: Disassociate the realm execution context from the script or module.
                 HTML::execution_context_of_realm(*realm).script_or_module = Empty {};
@@ -343,7 +335,7 @@ void initialize_main_thread_vm(AgentType type)
                 vm.pop_execution_context();
             }
 
-            // 5. If result is an abrupt completion, then report the exception given by result.[[Value]].
+            // 4. If result is an abrupt completion, then report the exception given by result.[[Value]].
             if (result.is_error())
                 HTML::report_exception(result, *realm);
         }));
@@ -364,7 +356,7 @@ void initialize_main_thread_vm(AgentType type)
         // 4. If active script is not null, set script execution context to a new JavaScript execution context, with its Function field set to null,
         //    its Realm field set to active script's realm, and its ScriptOrModule set to active script's record.
         if (script) {
-            script_execution_context = JS::ExecutionContext::create(0, 0);
+            script_execution_context = JS::ExecutionContext::create(0, 0, 0);
             script_execution_context->function = nullptr;
             script_execution_context->realm = &script->realm();
             if (is<HTML::ClassicScript>(script)) {
@@ -642,7 +634,7 @@ void initialize_main_thread_vm(AgentType type)
             // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
 
             JS::ExecutionContext* module_execution_context = nullptr;
-            ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0);
+            ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0, 0);
             module_execution_context->realm = realm;
             if (module)
                 module_execution_context->script_or_module = GC::Ref { *module };
@@ -709,6 +701,14 @@ void initialize_main_thread_vm(AgentType type)
 
         return default_host_resize_array_buffer(buffer, new_byte_length);
     };
+
+    s_main_thread_vm->host_grow_shared_array_buffer = [default_host_grow_shared_array_buffer = move(s_main_thread_vm->host_grow_shared_array_buffer)](JS::ArrayBuffer& buffer, size_t new_byte_length) -> JS::ThrowCompletionOr<JS::HandledByHost> {
+        auto wasm_handled = TRY(WebAssembly::Detail::host_grow_shared_array_buffer(*s_main_thread_vm, buffer, new_byte_length));
+        if (wasm_handled == JS::HandledByHost::Handled)
+            return JS::HandledByHost::Handled;
+
+        return default_host_grow_shared_array_buffer(buffer, new_byte_length);
+    };
 }
 
 JS::VM& main_thread_vm()
@@ -730,7 +730,7 @@ WEB_API void shutdown_python_engine()
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-observer-compound-microtask
-void queue_mutation_observer_microtask(DOM::Document const& document)
+void queue_mutation_observer_microtask()
 {
     auto& vm = main_thread_vm();
     auto& surrounding_agent = as<HTML::SimilarOriginWindowAgent>(*vm.agent());
@@ -743,9 +743,7 @@ void queue_mutation_observer_microtask(DOM::Document const& document)
     surrounding_agent.mutation_observer_microtask_queued = true;
 
     // 3. Queue a microtask to notify mutation observers.
-    // NOTE: This uses the implied document concept. In the case of mutation observers, it is always done in a node
-    //       context, so document should be that node's document.
-    HTML::queue_a_microtask(&document, GC::create_function(vm.heap(), [&surrounding_agent, &heap = document.heap()]() {
+    HTML::queue_a_microtask(nullptr, GC::create_function(vm.heap(), [&surrounding_agent]() {
         // https://dom.spec.whatwg.org/#notify-mutation-observers
         // 1. Set the surrounding agent’s mutation observer microtask queued to false.
         surrounding_agent.mutation_observer_microtask_queued = false;
@@ -829,12 +827,14 @@ NonnullOwnPtr<JS::ExecutionContext> create_a_new_javascript_realm(JS::VM& vm, Fu
 }
 
 // https://html.spec.whatwg.org/multipage/custom-elements.html#invoke-custom-element-reactions
-void invoke_custom_element_reactions(Vector<GC::Root<DOM::Element>>& element_queue)
+void invoke_custom_element_reactions(Vector<GC::Weak<DOM::Element>>& element_queue)
 {
     // 1. While queue is not empty:
     while (!element_queue.is_empty()) {
         // 1. Let element be the result of dequeuing from queue.
         auto element = element_queue.take_first();
+        if (!element)
+            continue;
 
         // 2. Let reactions be element's custom element reaction queue.
         auto* reactions = element->custom_element_reaction_queue();

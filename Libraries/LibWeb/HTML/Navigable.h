@@ -46,6 +46,8 @@ class WEB_API Navigable : public JS::Cell {
     GC_DECLARE_ALLOCATOR(Navigable);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     virtual ~Navigable() override;
 
     using NullOrError = Optional<String>;
@@ -168,7 +170,9 @@ public:
     CSSPixelRect viewport_rect() const { return { m_viewport_scroll_offset, m_viewport_size }; }
     CSSPixelSize viewport_size() const { return m_viewport_size; }
     void set_viewport_size(CSSPixelSize);
-    void perform_scroll_of_viewport(CSSPixelPoint position);
+    void perform_scroll_of_viewport_scrolling_box(CSSPixelPoint position);
+
+    Painting::BackingStoreManager& backing_store_manager() { return *m_backing_store_manager; }
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#rendering-opportunity
     [[nodiscard]] bool has_a_rendering_opportunity() const;
@@ -197,10 +201,10 @@ public:
 
     bool has_pending_navigations() const { return !m_pending_navigations.is_empty(); }
 
-    bool is_ready_to_paint() const;
     void ready_to_paint();
+    void record_display_list_and_scroll_state(PaintConfig);
     void paint_next_frame();
-    void start_display_list_rendering(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
+    void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
 
     bool needs_repaint() const { return m_needs_repaint; }
     void set_needs_repaint() { m_needs_repaint = true; }
@@ -208,6 +212,8 @@ public:
     [[nodiscard]] bool has_inclusive_ancestor_with_visibility_hidden() const;
 
     RefPtr<Gfx::SkiaBackendContext> skia_backend_context() const;
+
+    RenderingThread& rendering_thread() { return m_rendering_thread; }
 
     void set_pending_set_browser_zoom_request(bool value) { m_pending_set_browser_zoom_request = value; }
     bool pending_set_browser_zoom_request() const { return m_pending_set_browser_zoom_request; }
@@ -219,7 +225,8 @@ public:
     template<typename T>
     bool fast_is() const = delete;
 
-    void scroll_viewport_by_delta(CSSPixelPoint delta);
+    GC::Ref<WebIDL::Promise> scroll_viewport_by_delta(CSSPixelPoint delta);
+    GC::Ref<WebIDL::Promise> perform_a_scroll_of_the_viewport(CSSPixelPoint position);
     void reset_zoom();
 
 protected:
@@ -282,7 +289,6 @@ private:
     bool m_needs_repaint { true };
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
-    i32 m_number_of_queued_rasterization_tasks { 0 };
     GC::Ref<Painting::BackingStoreManager> m_backing_store_manager;
     RefPtr<Gfx::SkiaBackendContext> m_skia_backend_context;
     RenderingThread m_rendering_thread;

@@ -7,6 +7,7 @@
 #include <AK/TypeCasts.h>
 #include <LibWeb/Bindings/CSSRuleListPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/CSSFontFaceRule.h>
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSKeyframesRule.h>
 #include <LibWeb/CSS/CSSLayerBlockRule.h>
@@ -174,6 +175,11 @@ WebIDL::ExceptionOr<void> CSSRuleList::remove_a_css_rule(u32 index)
         }
     }
 
+    // https://drafts.csswg.org/css-font-loading/#font-face-css-connection
+    // If a @font-face rule is removed from the document, its connected FontFace object is no longer CSS-connected.
+    if (auto* font_face_rule = as_if<CSSFontFaceRule>(old_rule))
+        font_face_rule->disconnect_font_face();
+
     // 5. Remove rule old rule from list at the zero-indexed position index.
     m_rules.remove(index);
 
@@ -208,6 +214,7 @@ void CSSRuleList::for_each_effective_rule(TraversalOrder order, Function<void(We
             static_cast<CSSGroupingRule const&>(*rule).for_each_effective_rule(order, callback);
             break;
 
+        case CSSRule::Type::CounterStyle:
         case CSSRule::Type::FontFace:
         case CSSRule::Type::Keyframe:
         case CSSRule::Type::Keyframes:
@@ -264,6 +271,7 @@ bool CSSRuleList::evaluate_media_queries(DOM::Document const& document)
                 any_media_queries_changed_match_state = true;
             break;
         }
+        case CSSRule::Type::CounterStyle:
         case CSSRule::Type::FontFace:
         case CSSRule::Type::Keyframe:
         case CSSRule::Type::Keyframes:

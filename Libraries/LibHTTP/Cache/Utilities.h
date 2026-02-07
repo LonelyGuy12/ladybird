@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, Tim Flynn <trflynn89@ladybird.org>
+ * Copyright (c) 2025-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -23,9 +23,10 @@ constexpr inline auto TEST_CACHE_REQUEST_TIME_OFFSET = "X-Ladybird-Request-Time-
 
 String serialize_url_for_cache_storage(URL::URL const&);
 u64 create_cache_key(StringView url, StringView method);
-LexicalPath path_for_cache_key(LexicalPath const& cache_directory, u64 cache_key);
+u64 create_vary_key(HeaderList const& request_headers, HeaderList const& response_headers);
+LexicalPath path_for_cache_entry(LexicalPath const& cache_directory, u64 cache_key, u64 vary_key);
 
-bool is_cacheable(StringView method);
+bool is_cacheable(StringView method, HeaderList const&);
 bool is_cacheable(u32 status_code, HeaderList const&);
 bool is_header_exempted_from_storage(StringView name);
 
@@ -39,7 +40,7 @@ enum class CacheLifetimeStatus {
     MustRevalidate,
     StaleWhileRevalidate,
 };
-CacheLifetimeStatus cache_lifetime_status(HeaderList const&, AK::Duration freshness_lifetime, AK::Duration current_age);
+CacheLifetimeStatus cache_lifetime_status(HeaderList const& request_headers, HeaderList const& response_headers, AK::Duration freshness_lifetime, AK::Duration current_age);
 
 struct RevalidationAttributes {
     static RevalidationAttributes create(HeaderList const&);
@@ -50,6 +51,12 @@ struct RevalidationAttributes {
 
 void store_header_and_trailer_fields(HeaderList&, HeaderList const&);
 void update_header_fields(HeaderList&, HeaderList const&);
+
+bool contains_cache_control_directive(StringView cache_control, StringView directive);
+Optional<StringView> extract_cache_control_directive(StringView cache_control, StringView directive);
+Optional<AK::Duration> extract_cache_control_duration_directive(StringView cache_control, StringView directive, Optional<AK::Duration> valueless_fallback = {});
+
+ByteString normalize_request_vary_header_values(StringView header, HeaderList const& request_headers);
 
 AK::Duration compute_current_time_offset_for_testing(Optional<DiskCache&>, HeaderList const& request_headers);
 

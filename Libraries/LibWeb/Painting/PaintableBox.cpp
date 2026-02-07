@@ -1,28 +1,21 @@
 /*
  * Copyright (c) 2022-2023, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2022-2025, Sam Atkins <sam@ladybird.org>
- * Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ * Copyright (c) 2024-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #include <AK/GenericShorthands.h>
-#include <AK/TemporaryChange.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/ImmutableBitmap.h>
-#include <LibUnicode/CharacterTypes.h>
-#include <LibWeb/CSS/PropertyID.h>
-#include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/DOM/Position.h>
-#include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/Navigable.h>
-#include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/InlineNode.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
+#include <LibWeb/Painting/ChromeMetrics.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/SVGPaintable.h>
@@ -30,31 +23,30 @@
 #include <LibWeb/Painting/ShadowPainting.h>
 #include <LibWeb/Painting/StackingContext.h>
 #include <LibWeb/Painting/TableBordersPainting.h>
-#include <LibWeb/Painting/TextPaintable.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/SVG/SVGFilterElement.h>
-#include <LibWeb/Selection/Selection.h>
 
 namespace Web::Painting {
 
-GC_DEFINE_ALLOCATOR(PaintableWithLines);
+GC_DEFINE_ALLOCATOR(PaintableBox);
 
-bool g_paint_viewport_scrollbars = true;
+static bool g_paint_viewport_scrollbars = true;
+
+namespace {
+
+struct PhysicalResizeAxes {
+    bool horizontal;
+    bool vertical;
+};
+
+}
+
+static PhysicalResizeAxes compute_physical_resize_axes(CSS::ComputedValues const& computed);
 
 void set_paint_viewport_scrollbars(bool const enabled)
 {
     g_paint_viewport_scrollbars = enabled;
-}
-
-GC::Ref<PaintableWithLines> PaintableWithLines::create(Layout::BlockContainer const& block_container)
-{
-    return block_container.heap().allocate<PaintableWithLines>(block_container);
-}
-
-GC::Ref<PaintableWithLines> PaintableWithLines::create(Layout::InlineNode const& inline_node, size_t line_index)
-{
-    return inline_node.heap().allocate<PaintableWithLines>(inline_node, line_index);
 }
 
 GC::Ref<PaintableBox> PaintableBox::create(Layout::Box const& layout_box)
@@ -81,19 +73,44 @@ PaintableBox::~PaintableBox()
 {
 }
 
-PaintableWithLines::PaintableWithLines(Layout::BlockContainer const& layout_box)
-    : PaintableBox(layout_box)
+void PaintableBox::reset_for_relayout()
 {
+    if (parent())
+        remove();
+    while (first_child())
+        first_child()->remove();
+
+    m_containing_block = {};
+
+    m_needs_paint_only_properties_update = true;
+
+    m_offset = {};
+    m_content_size = {};
+
+    m_box_model = {};
+
+    m_overflow_data.clear();
+    m_override_borders_data.clear();
+    m_table_cell_coordinates.clear();
+    m_sticky_insets = nullptr;
+
+    m_absolute_rect.clear();
+
+    m_enclosing_scroll_frame = nullptr;
+    m_own_scroll_frame = nullptr;
+    m_accumulated_visual_context = nullptr;
+    m_accumulated_visual_context_for_descendants = nullptr;
+
+    m_used_values_for_grid_template_columns = nullptr;
+    m_used_values_for_grid_template_rows = nullptr;
+
+    invalidate_stacking_context();
 }
 
-PaintableWithLines::PaintableWithLines(Layout::InlineNode const& inline_node, size_t line_index)
-    : PaintableBox(inline_node)
-    , m_line_index(line_index)
+void PaintableBox::visit_edges(Cell::Visitor& visitor)
 {
-}
-
-PaintableWithLines::~PaintableWithLines()
-{
+    Base::visit_edges(visitor);
+    visitor.visit(m_stacking_context);
 }
 
 CSSPixelPoint PaintableBox::scroll_offset() const
@@ -152,14 +169,21 @@ PaintableBox::ScrollHandled PaintableBox::set_scroll_offset(CSSPixelPoint offset
     //           the element’s eventual snap target in the block axis as newBlockTarget and the element’s eventual snap
     //           target in the inline axis as newInlineTarget.
 
-    GC::Ref<DOM::EventTarget> const event_target = *dom_node();
+    GC::Ptr<DOM::EventTarget> event_target;
+    if (auto pseudo_element = node.generated_for_pseudo_element(); pseudo_element.has_value())
+        event_target = node.pseudo_element_generator();
+    else
+        event_target = dom_node();
+
+    if (!event_target)
+        return ScrollHandled::Yes;
 
     // 3. If (element, "scroll") is already in doc’s pending scroll events, abort these steps.
-    if (document.pending_scroll_events().contains_slow(DOM::Document::PendingScrollEvent { event_target, HTML::EventNames::scroll }))
+    if (document.pending_scroll_events().contains_slow(DOM::Document::PendingScrollEvent { *event_target, HTML::EventNames::scroll }))
         return ScrollHandled::Yes;
 
     // 4. Append (element, "scroll") to doc’s pending scroll events.
-    document.pending_scroll_events().append({ event_target, HTML::EventNames::scroll });
+    document.pending_scroll_events().append({ *event_target, HTML::EventNames::scroll });
 
     set_needs_display(InvalidateDisplayList::No);
     return ScrollHandled::Yes;
@@ -202,27 +226,6 @@ CSSPixelRect PaintableBox::absolute_rect() const
     return *m_absolute_rect;
 }
 
-CSSPixelRect PaintableBox::compute_absolute_paint_rect() const
-{
-    // FIXME: This likely incomplete:
-    auto rect = absolute_border_box_rect();
-    if (has_scrollable_overflow()) {
-        auto scrollable_overflow_rect = this->scrollable_overflow_rect().value();
-        if (computed_values().overflow_x() == CSS::Overflow::Visible)
-            rect.unite_horizontally(scrollable_overflow_rect);
-        if (computed_values().overflow_y() == CSS::Overflow::Visible)
-            rect.unite_vertically(scrollable_overflow_rect);
-    }
-    for (auto const& shadow : box_shadow_data()) {
-        if (shadow.placement == ShadowPlacement::Inner)
-            continue;
-        auto inflate = shadow.spread_distance + shadow.blur_radius;
-        auto shadow_rect = rect.inflated(inflate, inflate, inflate, inflate).translated(shadow.offset_x, shadow.offset_y);
-        rect.unite(shadow_rect);
-    }
-    return rect;
-}
-
 CSSPixelRect PaintableBox::absolute_padding_box_rect() const
 {
     auto absolute_rect = this->absolute_rect();
@@ -232,6 +235,16 @@ CSSPixelRect PaintableBox::absolute_padding_box_rect() const
     rect.set_y(absolute_rect.y() - box_model().padding.top);
     rect.set_height(content_height() + box_model().padding.top + box_model().padding.bottom);
     return rect;
+}
+
+Optional<CSSPixelRect> PaintableBox::absolute_resizer_rect(ChromeMetrics const& metrics) const
+{
+    if (!has_resizer())
+        return {};
+    auto padding_rect = absolute_padding_box_rect();
+    CSSPixels x = is_chrome_mirrored() ? padding_rect.x() : padding_rect.right() - metrics.resize_gripper_size;
+    CSSPixels y = padding_rect.bottom() - metrics.resize_gripper_size;
+    return CSSPixelRect { x, y, metrics.resize_gripper_size, metrics.resize_gripper_size };
 }
 
 CSSPixelRect PaintableBox::absolute_border_box_rect() const
@@ -256,13 +269,6 @@ CSSPixelRect PaintableBox::overflow_clip_edge_rect() const
 {
     // FIXME: Apply overflow-clip-margin-* properties
     return absolute_padding_box_rect();
-}
-
-CSSPixelRect PaintableBox::absolute_paint_rect() const
-{
-    if (!m_absolute_paint_rect.has_value())
-        m_absolute_paint_rect = compute_absolute_paint_rect();
-    return *m_absolute_paint_rect;
 }
 
 template<typename Callable>
@@ -322,68 +328,26 @@ Optional<CSSPixelRect> PaintableBox::get_clip_rect() const
 
 bool PaintableBox::wants_mouse_events() const
 {
-    if (compute_scrollbar_data(ScrollDirection::Vertical).has_value())
-        return true;
-    if (compute_scrollbar_data(ScrollDirection::Horizontal).has_value())
-        return true;
-    return false;
-}
-
-void PaintableBox::before_paint(DisplayListRecordingContext& context, PaintPhase phase) const
-{
-    if (!is_visible())
-        return;
-
-    auto const& own_clip_frame = this->own_clip_frame();
-    bool apply_own_clip_frame = [&] {
-        if (phase == PaintPhase::Background)
-            return own_clip_frame && own_clip_frame->includes_rect_from_clip_property;
-        if (phase == PaintPhase::Foreground)
-            return !own_clip_frame.is_null();
-        return false;
-    }();
-    if (apply_own_clip_frame) {
-        context.display_list_recorder().push_clip_frame(own_clip_frame);
-    } else if (!has_css_transform()) {
-        apply_clip_overflow_rect(context, phase);
-    }
-
-    apply_scroll_offset(context);
-}
-
-void PaintableBox::after_paint(DisplayListRecordingContext& context, PaintPhase phase) const
-{
-    if (!is_visible())
-        return;
-
-    reset_scroll_offset(context);
-
-    auto const& own_clip_frame = this->own_clip_frame();
-    bool reset_own_clip_frame = [&] {
-        if (phase == PaintPhase::Background)
-            return own_clip_frame && own_clip_frame->includes_rect_from_clip_property;
-        if (phase == PaintPhase::Foreground)
-            return !own_clip_frame.is_null();
-        return false;
-    }();
-    if (reset_own_clip_frame) {
-        context.display_list_recorder().pop_clip_frame();
-    } else if (!has_css_transform()) {
-        clear_clip_overflow_rect(context, phase);
-    }
+    return (m_own_scroll_frame && could_be_scrolled_by_wheel_event()) || has_resizer();
 }
 
 bool PaintableBox::could_be_scrolled_by_wheel_event(ScrollDirection direction) const
 {
-    auto overflow = direction == ScrollDirection::Horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
+    bool is_horizontal = direction == ScrollDirection::Horizontal;
+    Gfx::Orientation orientation = is_horizontal ? Gfx::Orientation::Horizontal : Gfx::Orientation::Vertical;
+    auto overflow = is_horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
+
     auto scrollable_overflow_rect = this->scrollable_overflow_rect();
     if (!scrollable_overflow_rect.has_value())
         return false;
-    auto scrollable_overflow_size = direction == ScrollDirection::Horizontal ? scrollable_overflow_rect->width() : scrollable_overflow_rect->height();
-    auto scrollport_size = direction == ScrollDirection::Horizontal ? absolute_padding_box_rect().width() : absolute_padding_box_rect().height();
-    auto overflow_value_allows_scrolling = overflow == CSS::Overflow::Auto || overflow == CSS::Overflow::Scroll;
+
+    CSSPixels scrollable_overflow_size = scrollable_overflow_rect->primary_size_for_orientation(orientation);
+    CSSPixels scrollport_size = absolute_padding_box_rect().primary_size_for_orientation(orientation);
+
+    bool overflow_value_allows_scrolling = overflow == CSS::Overflow::Auto || overflow == CSS::Overflow::Scroll;
     if ((is_viewport_paintable() && overflow != CSS::Overflow::Hidden) || overflow_value_allows_scrolling)
         return scrollable_overflow_size > scrollport_size;
+
     return false;
 }
 
@@ -392,67 +356,126 @@ bool PaintableBox::could_be_scrolled_by_wheel_event() const
     return could_be_scrolled_by_wheel_event(ScrollDirection::Horizontal) || could_be_scrolled_by_wheel_event(ScrollDirection::Vertical);
 }
 
-static constexpr CSSPixels SCROLLBAR_THUMB_NORMAL_THICKNESS = 5;
-static constexpr CSSPixels SCROLLBAR_THUMB_WIDENED_THICKNESS = 10;
+bool PaintableBox::overflow_property_applies() const
+{
+    // https://drafts.csswg.org/css-overflow-3/#overflow-control
+    // Overflow properties apply to block containers, flex containers and grid containers.
+    // FIXME: Ideally we would check whether overflow applies positively rather than listing exceptions. However,
+    //        not all elements that should support overflow are currently identifiable that way.
+    auto const& display = computed_values().display();
+    if (layout_node().is_inline_node())
+        return false;
+    if (display.is_ruby_inside())
+        return false;
+    if (display.is_internal() && !display.is_table_cell() && !display.is_table_caption())
+        return false;
+    return true;
+}
 
-Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(ScrollDirection direction, AdjustThumbRectForScrollOffset adjust_thumb_rect_for_scroll_offset) const
+CSSPixels PaintableBox::available_scrollbar_length(ScrollDirection direction, ChromeMetrics const& metrics) const
+
 {
     bool is_horizontal = direction == ScrollDirection::Horizontal;
-    bool display_scrollbar = could_be_scrolled_by_wheel_event(direction);
-    if (is_horizontal) {
-        display_scrollbar |= computed_values().overflow_x() == CSS::Overflow::Scroll;
-    } else {
-        display_scrollbar |= computed_values().overflow_y() == CSS::Overflow::Scroll;
-    }
-    if (!display_scrollbar) {
-        return {};
-    }
-
-    if (!own_scroll_frame_id().has_value()) {
-        return {};
-    }
-
     auto padding_rect = absolute_padding_box_rect();
-    auto scrollable_overflow_rect = this->scrollable_overflow_rect().value();
-    auto scroll_overflow_size = is_horizontal ? scrollable_overflow_rect.width() : scrollable_overflow_rect.height();
-    auto scrollport_size = is_horizontal ? padding_rect.width() : padding_rect.height();
-    if (scroll_overflow_size == 0)
+    CSSPixels full_scrollport_length = is_horizontal ? padding_rect.width() : padding_rect.height();
+    if (has_resizer())
+        full_scrollport_length -= metrics.resize_gripper_size;
+    else {
+        if (is_horizontal && could_be_scrolled_by_wheel_event(ScrollDirection::Vertical))
+            full_scrollport_length -= metrics.scroll_gutter_thickness;
+        if (!is_horizontal && could_be_scrolled_by_wheel_event(ScrollDirection::Horizontal))
+            full_scrollport_length -= metrics.scroll_gutter_thickness;
+    }
+    return full_scrollport_length;
+}
+
+Optional<CSSPixelRect> PaintableBox::absolute_scrollbar_rect(ScrollDirection direction, bool with_gutter, ChromeMetrics const& metrics) const
+{
+    if (!could_be_scrolled_by_wheel_event(direction))
         return {};
 
-    auto thickness = [&]() {
-        if (is_horizontal)
-            return m_draw_enlarged_horizontal_scrollbar ? SCROLLBAR_THUMB_WIDENED_THICKNESS : SCROLLBAR_THUMB_NORMAL_THICKNESS;
-        return m_draw_enlarged_vertical_scrollbar ? SCROLLBAR_THUMB_WIDENED_THICKNESS : SCROLLBAR_THUMB_NORMAL_THICKNESS;
-    }();
+    bool is_horizontal = direction == ScrollDirection::Horizontal;
+    bool adjusting_for_resizer = has_resizer();
 
-    auto scrollbar_rect_length = is_horizontal ? scrollport_size - thickness : scrollport_size;
-
-    auto min_thumb_length = min(scrollbar_rect_length, 24);
-    auto thumb_length = max(scrollbar_rect_length * (scrollport_size / scroll_overflow_size), min_thumb_length);
-
-    ScrollbarData scrollbar_data;
-
-    if (scroll_overflow_size > scrollport_size)
-        scrollbar_data.scroll_length = (scrollbar_rect_length - thumb_length) / (scroll_overflow_size - scrollport_size);
+    CSSPixels rect_thickness = with_gutter
+        ? metrics.scroll_gutter_thickness
+        : metrics.scroll_thumb_thickness_thin + metrics.scroll_thumb_padding_thin;
+    CSSPixelRect scrollbar_rect = absolute_padding_box_rect();
 
     if (is_horizontal) {
-        if (m_draw_enlarged_horizontal_scrollbar)
-            scrollbar_data.gutter_rect = { padding_rect.left(), padding_rect.bottom() - thickness, padding_rect.width(), thickness };
-        scrollbar_data.thumb_rect = { padding_rect.left(), padding_rect.bottom() - thickness, thumb_length, thickness };
+        if (!adjusting_for_resizer && could_be_scrolled_by_wheel_event(ScrollDirection::Vertical)) {
+            scrollbar_rect.set_width(max(CSSPixels { 0 }, scrollbar_rect.width() - metrics.scroll_gutter_thickness));
+            if (is_chrome_mirrored())
+                scrollbar_rect.set_x(scrollbar_rect.x() + metrics.scroll_gutter_thickness);
+        } else if (adjusting_for_resizer) {
+            scrollbar_rect.set_width(available_scrollbar_length(ScrollDirection::Horizontal, metrics));
+            if (is_chrome_mirrored())
+                scrollbar_rect.set_x(scrollbar_rect.x() + metrics.resize_gripper_size);
+        }
+        scrollbar_rect.set_y(max(CSSPixels { 0 }, scrollbar_rect.bottom() - rect_thickness));
+        scrollbar_rect.set_height(rect_thickness);
     } else {
-        if (m_draw_enlarged_vertical_scrollbar)
-            scrollbar_data.gutter_rect = { padding_rect.right() - thickness, padding_rect.top(), thickness, padding_rect.height() };
-        scrollbar_data.thumb_rect = { padding_rect.right() - thickness, padding_rect.top(), thickness, thumb_length };
+        if (adjusting_for_resizer)
+            scrollbar_rect.set_height(available_scrollbar_length(ScrollDirection::Vertical, metrics));
+        if (!is_chrome_mirrored())
+            scrollbar_rect.set_x(max(CSSPixels { 0 }, scrollbar_rect.right() - rect_thickness));
+        scrollbar_rect.set_width(rect_thickness);
     }
+    return scrollbar_rect;
+}
 
-    if (adjust_thumb_rect_for_scroll_offset == AdjustThumbRectForScrollOffset::Yes) {
-        auto scroll_offset = is_horizontal ? -own_scroll_frame_offset().x() : -own_scroll_frame_offset().y();
-        auto thumb_offset = scroll_offset * scrollbar_data.scroll_length;
+Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(ScrollDirection direction, ChromeMetrics const& metrics, ScrollStateSnapshot const* scroll_state_snapshot) const
+{
+    bool is_horizontal = direction == ScrollDirection::Horizontal;
+    auto orientation = is_horizontal ? Gfx::Orientation::Horizontal : Gfx::Orientation::Vertical;
+    auto overflow = is_horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
 
-        if (is_horizontal)
-            scrollbar_data.thumb_rect.translate_by(thumb_offset, 0);
-        else
-            scrollbar_data.thumb_rect.translate_by(0, thumb_offset);
+    if (overflow != CSS::Overflow::Scroll && !could_be_scrolled_by_wheel_event(direction))
+        return {};
+
+    if (!own_scroll_frame_id().has_value())
+        return {};
+
+    CSSPixelRect scrollable_overflow_rect = this->scrollable_overflow_rect().value();
+    CSSPixels scrollable_overflow_length = scrollable_overflow_rect.primary_size_for_orientation(orientation);
+    if (scrollable_overflow_length == 0)
+        return {};
+
+    bool with_gutter = is_horizontal ? m_draw_enlarged_horizontal_scrollbar : m_draw_enlarged_vertical_scrollbar;
+    auto scrollbar_rect = absolute_scrollbar_rect(direction, with_gutter, metrics);
+    if (!scrollbar_rect.has_value())
+        return {};
+
+    CSSPixels thumb_thickness = metrics.scroll_thumb_thickness_thin;
+    CSSPixels thumb_margin = metrics.scroll_thumb_padding_thin;
+    if (with_gutter) {
+        thumb_thickness = metrics.scroll_thumb_thickness;
+        thumb_margin = CSSPixels { (metrics.scroll_gutter_thickness - metrics.scroll_thumb_thickness) / 2.0 };
+    }
+    CSSPixels scrollbar_length = scrollbar_rect->primary_size_for_orientation(orientation);
+    CSSPixels usable_scrollbar_length = max(CSSPixels { 0 }, scrollbar_length - (2 * thumb_margin));
+    CSSPixels scrollport_size = absolute_padding_box_rect().primary_size_for_orientation(orientation);
+    CSSPixels min_thumb_length = min(usable_scrollbar_length, metrics.scroll_thumb_min_length);
+    CSSPixels thumb_length = max(usable_scrollbar_length * (scrollport_size / scrollable_overflow_length), min_thumb_length);
+
+    ScrollbarData scrollbar_data = { .gutter_rect = {}, .thumb_rect = scrollbar_rect.value(), .thumb_travel_to_scroll_ratio = 0 };
+
+    scrollbar_data.thumb_rect.set_primary_size_for_orientation(orientation, thumb_length);
+    scrollbar_data.thumb_rect.set_secondary_size_for_orientation(orientation, thumb_thickness);
+    scrollbar_data.thumb_rect.translate_primary_offset_for_orientation(orientation, thumb_margin);
+    if (with_gutter || (!is_horizontal && is_chrome_mirrored()))
+        scrollbar_data.thumb_rect.translate_secondary_offset_for_orientation(orientation, thumb_margin);
+    if (with_gutter)
+        scrollbar_data.gutter_rect = scrollbar_rect.value();
+    if (scrollable_overflow_length > scrollport_size)
+        scrollbar_data.thumb_travel_to_scroll_ratio = (usable_scrollbar_length - thumb_length) / (scrollable_overflow_length - scrollport_size);
+
+    if (scroll_state_snapshot) {
+        auto own_offset = scroll_state_snapshot->own_offset_for_frame_with_id(own_scroll_frame_id().value());
+        CSSPixels scroll_offset = is_horizontal ? -own_offset.x() : -own_offset.y();
+        CSSPixels thumb_offset = scroll_offset * scrollbar_data.thumb_travel_to_scroll_ratio;
+
+        scrollbar_data.thumb_rect.translate_primary_offset_for_orientation(orientation, thumb_offset);
     }
 
     return scrollbar_data;
@@ -509,17 +532,46 @@ void PaintableBox::paint(DisplayListRecordingContext& context, PaintPhase phase)
         }
     }
 
-    if (phase == PaintPhase::Overlay && (g_paint_viewport_scrollbars || !is_viewport_paintable()) && computed_values().scrollbar_width() != CSS::ScrollbarWidth::None) {
-        auto scrollbar_colors = computed_values().scrollbar_color();
-        if (auto scrollbar_data = compute_scrollbar_data(ScrollDirection::Vertical); scrollbar_data.has_value()) {
-            auto gutter_rect = context.rounded_device_rect(scrollbar_data->gutter_rect).to_type<int>();
-            auto thumb_rect = context.rounded_device_rect(scrollbar_data->thumb_rect).to_type<int>();
-            context.display_list_recorder().paint_scrollbar(own_scroll_frame_id().value(), gutter_rect, thumb_rect, scrollbar_data->scroll_length, scrollbar_colors.thumb_color, scrollbar_colors.track_color, true);
+    if (phase == PaintPhase::Overlay) {
+        ChromeMetrics const& metrics = context.chrome_metrics();
+
+        if ((g_paint_viewport_scrollbars || !is_viewport_paintable())
+            && computed_values().scrollbar_width() != CSS::ScrollbarWidth::None) {
+            auto scrollbar_colors = computed_values().scrollbar_color();
+
+            for (auto direction : { ScrollDirection::Vertical, ScrollDirection::Horizontal }) {
+                auto scrollbar_data = compute_scrollbar_data(direction, metrics);
+                if (!scrollbar_data.has_value())
+                    continue;
+                context.display_list_recorder().paint_scrollbar(
+                    own_scroll_frame_id().value(),
+                    context.rounded_device_rect(scrollbar_data->gutter_rect).to_type<int>(),
+                    context.rounded_device_rect(scrollbar_data->thumb_rect).to_type<int>(),
+                    scrollbar_data->thumb_travel_to_scroll_ratio,
+                    scrollbar_colors.thumb_color,
+                    scrollbar_colors.track_color,
+                    direction == ScrollDirection::Vertical);
+            }
         }
-        if (auto scrollbar_data = compute_scrollbar_data(ScrollDirection::Horizontal); scrollbar_data.has_value()) {
-            auto gutter_rect = context.rounded_device_rect(scrollbar_data->gutter_rect).to_type<int>();
-            auto thumb_rect = context.rounded_device_rect(scrollbar_data->thumb_rect).to_type<int>();
-            context.display_list_recorder().paint_scrollbar(own_scroll_frame_id().value(), gutter_rect, thumb_rect, scrollbar_data->scroll_length, scrollbar_colors.thumb_color, scrollbar_colors.track_color, false);
+        if (auto resizer_rect = absolute_resizer_rect(metrics); resizer_rect.has_value()) {
+            bool bottom_left_resizer = is_chrome_mirrored();
+            CSSPixels padding = metrics.resize_gripper_padding;
+            CSSPixelRect css_rect = resizer_rect.value()
+                                        .shrunken(padding, padding)
+                                        .translated(bottom_left_resizer ? padding / 2 : -padding / 2, -padding / 2);
+            Gfx::IntRect rect = context.rounded_device_rect(css_rect).to_type<int>();
+            Gfx::Color dark { 0, 0, 0, 100 };
+            Gfx::Color light { 255, 255, 255, 100 };
+            auto& recorder = context.display_list_recorder();
+            auto paint_resizer_line = [&](int step, Gfx::Color color) {
+                Gfx::IntPoint from = { bottom_left_resizer ? rect.left() + step : rect.right() - step, rect.bottom() };
+                Gfx::IntPoint to = { bottom_left_resizer ? rect.left() : rect.right(), rect.bottom() - step };
+                recorder.draw_line(from, to, color, 1, Gfx::LineStyle::Solid);
+            };
+            for (int step = (rect.width() / 3) - 1; step < rect.width(); step += rect.width() / 3) {
+                paint_resizer_line(step, light);
+                paint_resizer_line(step + 1, dark);
+            }
         }
     }
 }
@@ -567,7 +619,7 @@ void PaintableBox::paint_inspector_overlay_internal(DisplayListRecordingContext&
     context.display_list_recorder().draw_text(size_text_device_rect, size_text, font->with_size(font->point_size() * context.device_pixels_per_css_pixel()), Gfx::TextAlignment::Center, context.palette().color(Gfx::ColorRole::TooltipText));
 }
 
-void PaintableBox::set_stacking_context(NonnullOwnPtr<StackingContext> stacking_context)
+void PaintableBox::set_stacking_context(GC::Ref<StackingContext> stacking_context)
 {
     m_stacking_context = move(stacking_context);
 }
@@ -600,25 +652,31 @@ void PaintableBox::paint_border(DisplayListRecordingContext& context) const
 
 void PaintableBox::paint_backdrop_filter(DisplayListRecordingContext& context) const
 {
-    auto const& backdrop_filter = computed_values().backdrop_filter();
-    if (backdrop_filter.is_none()) {
+    if (!m_backdrop_filter.has_filters())
         return;
-    }
 
     auto backdrop_region = context.rounded_device_rect(absolute_border_box_rect());
     auto border_radii_data = normalized_border_radii_data();
     ScopedCornerRadiusClip corner_clipper { context, backdrop_region, border_radii_data };
-    if (auto resolved_backdrop_filter = resolve_filter(context, backdrop_filter); resolved_backdrop_filter.has_value())
+    if (auto resolved_backdrop_filter = to_gfx_filter(m_backdrop_filter, context.device_pixels_per_css_pixel()); resolved_backdrop_filter.has_value())
         context.display_list_recorder().apply_backdrop_filter(backdrop_region.to_type<int>(), border_radii_data, *resolved_backdrop_filter);
 }
 
 void PaintableBox::paint_background(DisplayListRecordingContext& context) const
 {
-    // If the body's background properties were propagated to the root element, do no re-paint the body's background.
+    // If the body's background properties were propagated to the root element, do not re-paint the body's background.
     if (layout_node_with_style_and_box_metrics().is_body() && document().html_element()->should_use_body_background_properties())
         return;
 
-    Painting::paint_background(context, *this, computed_values().image_rendering(), m_resolved_background, normalized_border_radii_data());
+    // If the body's background was propagated to the root element, use the body's image-rendering value.
+    auto image_rendering = computed_values().image_rendering();
+    if (layout_node().is_root_element()
+        && document().html_element()
+        && document().html_element()->should_use_body_background_properties()) {
+        image_rendering = document().background_image_rendering();
+    }
+
+    Painting::paint_background(context, *this, image_rendering, m_resolved_background, normalized_border_radii_data());
 }
 
 void PaintableBox::paint_box_shadow(DisplayListRecordingContext& context) const
@@ -665,384 +723,55 @@ CSSPixelPoint PaintableBox::cumulative_offset_of_enclosing_scroll_frame() const
     return {};
 }
 
-Optional<CSSPixelRect> PaintableBox::clip_rect_for_hit_testing() const
+CSSPixelPoint PaintableBox::transform_to_local_coordinates(CSSPixelPoint screen_position) const
 {
-    if (m_enclosing_clip_frame)
-        return m_enclosing_clip_frame->clip_rect_for_hit_testing();
-    return {};
+    if (!accumulated_visual_context())
+        return screen_position;
+
+    auto const& viewport_paintable = *document().paintable();
+    auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+    auto local_pos = accumulated_visual_context()->transform_point_for_hit_test(screen_position, scroll_state);
+    return local_pos.value_or(screen_position);
 }
 
-void PaintableBox::apply_scroll_offset(DisplayListRecordingContext& context) const
+bool PaintableBox::has_resizer() const
 {
-    if (scroll_frame_id().has_value()) {
-        context.display_list_recorder().push_scroll_frame_id(scroll_frame_id().value());
-    }
+    // https://drafts.csswg.org/css-ui#resize
+    if (is_viewport_paintable())
+        return false;
+
+    // The effect of the resize property on generated content is undefined.
+    // Implementations should not apply the resize property to generated content.
+
+    if (layout_node().generated_for_pseudo_element().has_value())
+        return false;
+
+    auto axes = compute_physical_resize_axes(computed_values());
+    return axes.horizontal || axes.vertical;
 }
 
-void PaintableBox::reset_scroll_offset(DisplayListRecordingContext& context) const
+bool PaintableBox::is_chrome_mirrored() const
 {
-    if (scroll_frame_id().has_value()) {
-        context.display_list_recorder().pop_scroll_frame_id();
-    }
-}
-
-void PaintableBox::apply_clip_overflow_rect(DisplayListRecordingContext& context, PaintPhase phase) const
-{
-    if (!enclosing_clip_frame())
-        return;
-
-    if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::TableCollapsedBorder, PaintPhase::Foreground, PaintPhase::Outline))
-        return;
-
-    context.display_list_recorder().push_clip_frame(enclosing_clip_frame());
-}
-
-void PaintableBox::clear_clip_overflow_rect(DisplayListRecordingContext& context, PaintPhase phase) const
-{
-    if (!enclosing_clip_frame())
-        return;
-
-    if (!AK::first_is_one_of(phase, PaintPhase::Background, PaintPhase::Border, PaintPhase::TableCollapsedBorder, PaintPhase::Foreground, PaintPhase::Outline))
-        return;
-
-    context.display_list_recorder().pop_clip_frame();
-}
-
-void paint_cursor_if_needed(DisplayListRecordingContext& context, TextPaintable const& paintable, PaintableFragment const& fragment)
-{
-    auto const& document = paintable.document();
-    auto const& navigable = *document.navigable();
-
-    if (!navigable.is_focused())
-        return;
-
-    if (!document.cursor_blink_state())
-        return;
-
-    auto cursor_position = document.cursor_position();
-    if (!cursor_position)
-        return;
-
-    if (cursor_position->node() != paintable.dom_node())
-        return;
-
-    // NOTE: This checks if the cursor is before the start or after the end of the fragment. If it is at the end, after all text, it should still be painted.
-    if (cursor_position->offset() < (unsigned)fragment.start_offset() || cursor_position->offset() > (unsigned)(fragment.start_offset() + fragment.length_in_code_units()))
-        return;
-
-    auto active_element = document.active_element();
-    auto active_element_is_editable = false;
-    if (auto* text_control = as_if<HTML::FormAssociatedTextControlElement>(active_element))
-        active_element_is_editable = text_control->is_mutable();
-
-    auto dom_node = fragment.layout_node().dom_node();
-    if (!dom_node || (!dom_node->is_editable() && !active_element_is_editable))
-        return;
-
-    auto caret_color = paintable.computed_values().caret_color();
-    if (caret_color.alpha() == 0)
-        return;
-
-    auto cursor_rect = fragment.range_rect(paintable.selection_state(), cursor_position->offset(), cursor_position->offset());
-    VERIFY(cursor_rect.width() == 1);
-
-    auto cursor_device_rect = context.rounded_device_rect(cursor_rect).to_type<int>();
-
-    context.display_list_recorder().fill_rect(cursor_device_rect, caret_color);
-}
-
-static Gfx::Path build_triangle_wave_path(Gfx::IntPoint from, Gfx::IntPoint to, float amplitude)
-{
-    Gfx::Path path;
-    if (from.y() != to.y()) {
-        dbgln("FIXME: Support more than horizontal waves");
-        return path;
-    }
-
-    path.move_to(from.to_type<float>());
-
-    float const wavelength = amplitude * 2.0f;
-    float const half_wavelength = amplitude;
-    float const quarter_wavelength = amplitude / 2.0f;
-
-    auto position = from.to_type<float>();
-    auto remaining = abs(to.x() - position.x());
-    while (remaining > wavelength) {
-        // Draw a whole wave
-        path.line_to({ position.x() + quarter_wavelength, position.y() - quarter_wavelength });
-        path.line_to({ position.x() + quarter_wavelength + half_wavelength, position.y() + quarter_wavelength });
-        path.line_to({ position.x() + wavelength, (float)position.y() });
-        position.translate_by({ wavelength, 0 });
-        remaining = abs(to.x() - position.x());
-    }
-
-    // Up
-    if (remaining > quarter_wavelength) {
-        path.line_to({ position.x() + quarter_wavelength, position.y() - quarter_wavelength });
-        position.translate_by({ quarter_wavelength, 0 });
-        remaining = abs(to.x() - position.x());
-    } else if (remaining >= 1) {
-        auto fraction = remaining / quarter_wavelength;
-        path.line_to({ position.x() + (fraction * quarter_wavelength), position.y() - (fraction * quarter_wavelength) });
-        remaining = 0;
-    }
-
-    // Down
-    if (remaining > half_wavelength) {
-        path.line_to({ position.x() + half_wavelength, position.y() + quarter_wavelength });
-        position.translate_by(half_wavelength, 0);
-        remaining = abs(to.x() - position.x());
-    } else if (remaining >= 1) {
-        auto fraction = remaining / half_wavelength;
-        path.line_to({ position.x() + (fraction * half_wavelength), position.y() - quarter_wavelength + (fraction * half_wavelength) });
-        remaining = 0;
-    }
-
-    // Back to middle
-    if (remaining >= 1) {
-        auto fraction = remaining / quarter_wavelength;
-        path.line_to({ position.x() + (fraction * quarter_wavelength), position.y() + ((1 - fraction) * quarter_wavelength) });
-    }
-
-    return path;
-}
-
-void paint_text_decoration(DisplayListRecordingContext& context, TextPaintable const& paintable, PaintableFragment const& fragment)
-{
-    auto& recorder = context.display_list_recorder();
-    auto& font = fragment.layout_node().first_available_font();
-    auto fragment_box = fragment.absolute_rect();
-    CSSPixels glyph_height = CSSPixels::nearest_value_for(font.pixel_size());
-    auto baseline = fragment.baseline();
-
-    auto line_color = paintable.computed_values().text_decoration_color();
-    auto line_style = paintable.computed_values().text_decoration_style();
-    auto device_line_thickness = context.rounded_device_pixels(fragment.text_decoration_thickness());
-    auto text_decoration_lines = paintable.computed_values().text_decoration_line();
-    auto text_underline_offset = paintable.computed_values().text_underline_offset();
-    auto text_underline_position = paintable.computed_values().text_underline_position();
-    for (auto line : text_decoration_lines) {
-        DevicePixelPoint line_start_point {};
-        DevicePixelPoint line_end_point {};
-
-        if (line == CSS::TextDecorationLine::SpellingError) {
-            // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-line-spelling-error
-            // This value indicates the type of text decoration used by the user agent to highlight spelling mistakes.
-            // Its appearance is UA-defined, and may be platform-dependent. It is often rendered as a red wavy underline.
-            line_color = Color::Red;
-            device_line_thickness = context.rounded_device_pixels(1);
-            line_style = CSS::TextDecorationStyle::Wavy;
-            line = CSS::TextDecorationLine::Underline;
-
-            // https://drafts.csswg.org/css-text-decor-4/#underline-offset
-            // When the value of the text-decoration-line property is either spelling-error or grammar-error, the UA
-            // must ignore the value of text-underline-position.
-            text_underline_offset = CSS::InitialValues::text_underline_offset();
-        } else if (line == CSS::TextDecorationLine::GrammarError) {
-            // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-line-grammar-error
-            // This value indicates the type of text decoration used by the user agent to highlight grammar mistakes.
-            // Its appearance is UA defined, and may be platform-dependent. It is often rendered as a green wavy underline.
-            line_color = Color::DarkGreen;
-            device_line_thickness = context.rounded_device_pixels(1);
-            line_style = CSS::TextDecorationStyle::Wavy;
-            line = CSS::TextDecorationLine::Underline;
-
-            // https://drafts.csswg.org/css-text-decor-4/#underline-offset
-            // When the value of the text-decoration-line property is either spelling-error or grammar-error, the UA
-            // must ignore the value of text-underline-position.
-            text_underline_offset = CSS::InitialValues::text_underline_offset();
-        }
-
-        switch (line) {
-        case CSS::TextDecorationLine::None:
-            return;
-        case CSS::TextDecorationLine::Underline: {
-            // https://drafts.csswg.org/css-text-decor-4/#text-underline-position-property
-            auto underline_position_without_offset = [&]() {
-                // FIXME: Support text-decoration: underline on vertical text
-                switch (text_underline_position.horizontal) {
-                case Web::CSS::TextUnderlinePositionHorizontal::Auto:
-                    // The user agent may use any algorithm to determine the underline’s position; however it must be
-                    // placed at or under the alphabetic baseline.
-
-                    // Spec Note: It is suggested that the default underline position be close to the alphabetic
-                    //            baseline,
-                    // FIXME:     unless that would either cross subscripted (or otherwise lowered) text or draw over
-                    //            glyphs from Asian scripts such as Han or Tibetan for which an alphabetic underline is
-                    //            too high: in such cases, shifting the underline lower or aligning to the em box edge
-                    //            as described for under may be more appropriate.
-                    return fragment.baseline();
-                case Web::CSS::TextUnderlinePositionHorizontal::FromFont:
-                    // FIXME: If the first available font has metrics indicating a preferred underline offset, use that
-                    //        offset, otherwise behaves as auto.
-                    return fragment.baseline();
-                case Web::CSS::TextUnderlinePositionHorizontal::Under:
-                    // The underline is positioned under the element’s text content. In this case the underline usually
-                    // does not cross the descenders. (This is sometimes called “accounting” underline.)
-                    return fragment.baseline() + CSSPixels { font.pixel_metrics().descent };
-                }
-
-                VERIFY_NOT_REACHED();
-            }();
-
-            line_start_point = context.rounded_device_point(fragment_box.top_left().translated(0, underline_position_without_offset + text_underline_offset));
-            line_end_point = context.rounded_device_point(fragment_box.top_right().translated(0, underline_position_without_offset + text_underline_offset));
-            break;
-        }
-        case CSS::TextDecorationLine::Overline:
-            line_start_point = context.rounded_device_point(fragment_box.top_left().translated(0, baseline - glyph_height));
-            line_end_point = context.rounded_device_point(fragment_box.top_right().translated(0, baseline - glyph_height));
-            break;
-        case CSS::TextDecorationLine::LineThrough: {
-            auto x_height = font.x_height();
-            line_start_point = context.rounded_device_point(fragment_box.top_left().translated(0, baseline - x_height * CSSPixels(0.5f)));
-            line_end_point = context.rounded_device_point(fragment_box.top_right().translated(0, baseline - x_height * CSSPixels(0.5f)));
-            break;
-        }
-        case CSS::TextDecorationLine::Blink:
-            // Conforming user agents may simply not blink the text
-            return;
-        case CSS::TextDecorationLine::SpellingError:
-        case CSS::TextDecorationLine::GrammarError:
-            // Handled above.
-            VERIFY_NOT_REACHED();
-        }
-
-        switch (line_style) {
-        case CSS::TextDecorationStyle::Solid:
-            recorder.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value(), Gfx::LineStyle::Solid);
-            break;
-        case CSS::TextDecorationStyle::Double:
-            switch (line) {
-            case CSS::TextDecorationLine::Underline:
-                break;
-            case CSS::TextDecorationLine::Overline:
-                line_start_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
-                line_end_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
-                break;
-            case CSS::TextDecorationLine::LineThrough:
-                line_start_point.translate_by(0, -device_line_thickness / 2);
-                line_end_point.translate_by(0, -device_line_thickness / 2);
-                break;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-
-            recorder.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value());
-            recorder.draw_line(line_start_point.translated(0, device_line_thickness + 1).to_type<int>(), line_end_point.translated(0, device_line_thickness + 1).to_type<int>(), line_color, device_line_thickness.value());
-            break;
-        case CSS::TextDecorationStyle::Dashed:
-            recorder.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value(), Gfx::LineStyle::Dashed);
-            break;
-        case CSS::TextDecorationStyle::Dotted:
-            recorder.draw_line(line_start_point.to_type<int>(), line_end_point.to_type<int>(), line_color, device_line_thickness.value(), Gfx::LineStyle::Dotted);
-            break;
-        case CSS::TextDecorationStyle::Wavy:
-            auto amplitude = device_line_thickness.value() * 3;
-            switch (line) {
-            case CSS::TextDecorationLine::Underline:
-                line_start_point.translate_by(0, device_line_thickness + context.rounded_device_pixels(1));
-                line_end_point.translate_by(0, device_line_thickness + context.rounded_device_pixels(1));
-                break;
-            case CSS::TextDecorationLine::Overline:
-                line_start_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
-                line_end_point.translate_by(0, -device_line_thickness - context.rounded_device_pixels(1));
-                break;
-            case CSS::TextDecorationLine::LineThrough:
-                line_start_point.translate_by(0, -device_line_thickness / 2);
-                line_end_point.translate_by(0, -device_line_thickness / 2);
-                break;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-            recorder.stroke_path({
-                .cap_style = Gfx::Path::CapStyle::Round,
-                .join_style = Gfx::Path::JoinStyle::Round,
-                .miter_limit = 0,
-                .dash_array = {},
-                .dash_offset = 0,
-                .path = build_triangle_wave_path(line_start_point.to_type<int>(), line_end_point.to_type<int>(), amplitude),
-                .paint_style_or_color = line_color,
-                .thickness = static_cast<float>(device_line_thickness.value()),
-            });
-            break;
-        }
-    }
-}
-
-void paint_text_fragment(DisplayListRecordingContext& context, TextPaintable const& paintable, PaintableFragment const& fragment, PaintPhase phase)
-{
-    if (!paintable.is_visible())
-        return;
-
-    auto& painter = context.display_list_recorder();
-
-    if (phase == PaintPhase::Foreground) {
-        auto fragment_absolute_rect = fragment.absolute_rect();
-        auto fragment_enclosing_device_rect = context.enclosing_device_rect(fragment_absolute_rect).to_type<int>();
-
-        if (context.should_show_line_box_borders())
-            paint_text_fragment_debug_highlight(context, fragment);
-
-        auto glyph_run = fragment.glyph_run();
-        if (!glyph_run)
-            return;
-
-        auto selection_rect = context.enclosing_device_rect(fragment.selection_rect()).to_type<int>();
-        if (!selection_rect.is_empty())
-            painter.fill_rect(selection_rect, CSS::SystemColor::highlight(paintable.computed_values().color_scheme()));
-
-        auto scale = context.device_pixels_per_css_pixel();
-        auto baseline_start = Gfx::FloatPoint {
-            fragment_absolute_rect.x().to_float(),
-            fragment_absolute_rect.y().to_float() + fragment.baseline().to_float(),
-        } * scale;
-        painter.draw_glyph_run(baseline_start, *glyph_run, paintable.computed_values().webkit_text_fill_color(), fragment_enclosing_device_rect, scale, fragment.orientation());
-
-        paint_text_decoration(context, paintable, fragment);
-        paint_cursor_if_needed(context, paintable, fragment);
-    }
-}
-
-void paint_text_fragment_debug_highlight(DisplayListRecordingContext& context, PaintableFragment const& fragment)
-{
-    auto fragment_absolute_rect = fragment.absolute_rect();
-    auto fragment_absolute_device_rect = context.enclosing_device_rect(fragment_absolute_rect);
-    context.display_list_recorder().draw_rect(fragment_absolute_device_rect.to_type<int>(), Color::Green);
-
-    auto baseline_start = context.rounded_device_point(fragment_absolute_rect.top_left().translated(0, fragment.baseline())).to_type<int>();
-    auto baseline_end = context.rounded_device_point(fragment_absolute_rect.top_right().translated(-1, fragment.baseline())).to_type<int>();
-    context.display_list_recorder().draw_line(baseline_start, baseline_end, Color::Red);
-}
-
-void PaintableWithLines::paint(DisplayListRecordingContext& context, PaintPhase phase) const
-{
-    if (!is_visible())
-        return;
-
-    PaintableBox::paint(context, phase);
-
-    // Text shadows
-    // This is yet another loop, but done here because all shadows should appear under all text.
-    // So, we paint the shadows before painting any text.
-    // FIXME: Find a smarter way to do this?
-    if (phase == PaintPhase::Foreground) {
-        for (auto& fragment : fragments())
-            paint_text_shadow(context, fragment, fragment.shadows());
-    }
-
-    for (auto const& fragment : m_fragments) {
-        if (is<TextPaintable>(fragment.paintable()))
-            paint_text_fragment(context, static_cast<TextPaintable const&>(fragment.paintable()), fragment, phase);
-    }
+    auto const& writing_mode = computed_values().writing_mode();
+    return (writing_mode == CSS::WritingMode::HorizontalTb && computed_values().direction() == CSS::Direction::Rtl)
+        || writing_mode == CSS::WritingMode::VerticalRl
+        || writing_mode == CSS::WritingMode::SidewaysRl;
 }
 
 Paintable::DispatchEventOfSameName PaintableBox::handle_mousedown(Badge<EventHandler>, CSSPixelPoint position, unsigned, unsigned)
 {
-    position = adjust_position_for_cumulative_scroll_offset(position);
+    position = transform_to_local_coordinates(position);
+    ChromeMetrics metrics = document().page().chrome_metrics();
+
+    if (resizer_contains(position, metrics)) {
+        if (auto* element = as_if<DOM::Element>(dom_node().ptr())) {
+            navigable()->event_handler().set_element_resize_in_progress(*element, position);
+            return Paintable::DispatchEventOfSameName::No;
+        }
+    }
 
     auto handle_scrollbar = [&](auto direction) {
-        auto scrollbar_data = compute_scrollbar_data(direction);
+        auto scrollbar_data = compute_scrollbar_data(direction, metrics);
         if (!scrollbar_data.has_value())
             return false;
 
@@ -1050,7 +779,7 @@ Paintable::DispatchEventOfSameName PaintableBox::handle_mousedown(Badge<EventHan
             m_scroll_thumb_dragging_direction = direction;
 
             navigable()->event_handler().set_mouse_event_tracking_paintable(this);
-            scroll_to_mouse_position(position);
+            scroll_to_mouse_position(position, metrics);
             return true;
         }
 
@@ -1077,20 +806,21 @@ Paintable::DispatchEventOfSameName PaintableBox::handle_mouseup(Badge<EventHandl
 
 Paintable::DispatchEventOfSameName PaintableBox::handle_mousemove(Badge<EventHandler>, CSSPixelPoint position, unsigned, unsigned)
 {
-    position = adjust_position_for_cumulative_scroll_offset(position);
+    position = transform_to_local_coordinates(position);
+    ChromeMetrics metrics = document().page().chrome_metrics();
 
     if (m_scroll_thumb_grab_position.has_value()) {
-        scroll_to_mouse_position(position);
+        scroll_to_mouse_position(position, metrics);
         return Paintable::DispatchEventOfSameName::No;
     }
 
     auto previous_draw_enlarged_horizontal_scrollbar = m_draw_enlarged_horizontal_scrollbar;
-    m_draw_enlarged_horizontal_scrollbar = scrollbar_contains_mouse_position(ScrollDirection::Horizontal, position);
+    m_draw_enlarged_horizontal_scrollbar = scrollbar_contains(ScrollDirection::Horizontal, position, metrics);
     if (previous_draw_enlarged_horizontal_scrollbar != m_draw_enlarged_horizontal_scrollbar)
         set_needs_display();
 
     auto previous_draw_enlarged_vertical_scrollbar = m_draw_enlarged_vertical_scrollbar;
-    m_draw_enlarged_vertical_scrollbar = scrollbar_contains_mouse_position(ScrollDirection::Vertical, position);
+    m_draw_enlarged_vertical_scrollbar = scrollbar_contains(ScrollDirection::Vertical, position, metrics);
     if (previous_draw_enlarged_vertical_scrollbar != m_draw_enlarged_vertical_scrollbar)
         set_needs_display();
 
@@ -1118,23 +848,20 @@ void PaintableBox::handle_mouseleave(Badge<EventHandler>)
         set_needs_display();
 }
 
-bool PaintableBox::scrollbar_contains_mouse_position(ScrollDirection direction, CSSPixelPoint position)
+bool PaintableBox::scrollbar_contains(ScrollDirection direction, CSSPixelPoint adjusted_position, ChromeMetrics const& metrics) const
 {
-    TemporaryChange force_enlarged_horizontal_scrollbar { m_draw_enlarged_horizontal_scrollbar, true };
-    TemporaryChange force_enlarged_vertical_scrollbar { m_draw_enlarged_vertical_scrollbar, true };
-
-    auto scrollbar_data = compute_scrollbar_data(direction);
-    if (!scrollbar_data.has_value())
-        return false;
-
-    return scrollbar_data->gutter_rect.contains(position);
+    bool with_gutter = direction == ScrollDirection::Horizontal ? m_draw_enlarged_horizontal_scrollbar : m_draw_enlarged_vertical_scrollbar;
+    if (auto rect = absolute_scrollbar_rect(direction, with_gutter, metrics); rect.has_value())
+        return rect->contains(adjusted_position);
+    return false;
 }
 
-void PaintableBox::scroll_to_mouse_position(CSSPixelPoint position)
+void PaintableBox::scroll_to_mouse_position(CSSPixelPoint position, ChromeMetrics const& metrics)
 {
     VERIFY(m_scroll_thumb_dragging_direction.has_value());
 
-    auto scrollbar_data = compute_scrollbar_data(m_scroll_thumb_dragging_direction.value(), AdjustThumbRectForScrollOffset::Yes);
+    auto const& scroll_state = document().paintable()->scroll_state_snapshot();
+    auto scrollbar_data = compute_scrollbar_data(m_scroll_thumb_dragging_direction.value(), metrics, &scroll_state);
     VERIFY(scrollbar_data.has_value());
 
     auto orientation = m_scroll_thumb_dragging_direction == ScrollDirection::Horizontal ? Orientation::Horizontal : Orientation::Vertical;
@@ -1165,7 +892,7 @@ void PaintableBox::scroll_to_mouse_position(CSSPixelPoint position)
     new_scroll_offset.set_primary_offset_for_orientation(orientation, scroll_position_in_pixels);
 
     if (is_viewport_paintable())
-        document().navigable()->perform_scroll_of_viewport(new_scroll_offset);
+        document().navigable()->perform_scroll_of_viewport_scrolling_box(new_scroll_offset);
     else
         (void)set_scroll_offset(new_scroll_offset);
 }
@@ -1181,45 +908,67 @@ bool PaintableBox::handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigne
     return scroll_handled == ScrollHandled::Yes;
 }
 
-TraversalDecision PaintableBox::hit_test_scrollbars(CSSPixelPoint position, Function<TraversalDecision(HitTestResult)> const& callback) const
+TraversalDecision PaintableBox::hit_test_chrome(CSSPixelPoint adjusted_position, Function<TraversalDecision(HitTestResult)> const& callback) const
 {
     // FIXME: This const_cast is not great, but this method is invoked from overrides of virtual const methods.
-    auto& self = const_cast<PaintableBox&>(*this);
+    HitTestResult result { const_cast<PaintableBox&>(*this), 0, {}, {}, CSS::CursorPredefined::Default };
+    ChromeMetrics metrics = document().page().chrome_metrics();
 
-    if (self.scrollbar_contains_mouse_position(ScrollDirection::Horizontal, position))
-        return callback(HitTestResult { const_cast<PaintableBox&>(*this) });
+    if (resizer_contains(adjusted_position, metrics)) {
+        auto axes = compute_physical_resize_axes(computed_values());
+
+        if (axes.vertical) {
+            if (axes.horizontal) {
+                if (is_chrome_mirrored())
+                    result.cursor_override = CSS::CursorPredefined::SwResize;
+                else
+                    result.cursor_override = CSS::CursorPredefined::SeResize;
+            } else {
+                result.cursor_override = CSS::CursorPredefined::NsResize;
+            }
+        } else {
+            result.cursor_override = CSS::CursorPredefined::EwResize;
+        }
+        return callback(result);
+    }
+    if (scrollbar_contains(ScrollDirection::Horizontal, adjusted_position, metrics))
+        return callback(result);
 
     if (m_draw_enlarged_horizontal_scrollbar) {
-        self.m_draw_enlarged_horizontal_scrollbar = false;
-        self.set_needs_display();
+        m_draw_enlarged_horizontal_scrollbar = false;
+        result.paintable->set_needs_display();
     }
-
-    if (self.scrollbar_contains_mouse_position(ScrollDirection::Vertical, position))
-        return callback(HitTestResult { const_cast<PaintableBox&>(*this) });
+    if (scrollbar_contains(ScrollDirection::Vertical, adjusted_position, metrics))
+        return callback(result);
 
     if (m_draw_enlarged_vertical_scrollbar) {
-        self.m_draw_enlarged_vertical_scrollbar = false;
-        self.set_needs_display();
+        m_draw_enlarged_vertical_scrollbar = false;
+        result.paintable->set_needs_display();
     }
 
     return TraversalDecision::Continue;
 }
 
-CSSPixelPoint PaintableBox::adjust_position_for_cumulative_scroll_offset(CSSPixelPoint position) const
+bool PaintableBox::resizer_contains(CSSPixelPoint adjusted_position, ChromeMetrics const& metrics) const
 {
-    return position.translated(-cumulative_offset_of_enclosing_scroll_frame());
+    auto handle_rect = absolute_resizer_rect(metrics);
+    if (!handle_rect.has_value())
+        return false;
+    bool bottom_left_resizer = is_chrome_mirrored();
+    handle_rect->inflate(0, bottom_left_resizer ? 0 : box_model().border.right, box_model().border.bottom, bottom_left_resizer ? box_model().border.left : 0);
+
+    return handle_rect->contains(adjusted_position);
 }
 
 TraversalDecision PaintableBox::hit_test(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const
 {
-    if (clip_rect_for_hit_testing().has_value() && !clip_rect_for_hit_testing()->contains(position))
-        return TraversalDecision::Continue;
+    auto const is_visible = computed_values().visibility() == CSS::Visibility::Visible;
 
-    if (computed_values().visibility() != CSS::Visibility::Visible)
-        return TraversalDecision::Continue;
-
-    if (hit_test_scrollbars(position, callback) == TraversalDecision::Break)
-        return TraversalDecision::Break;
+    // Only hit test chrome (scrollbars, etc.) for visible elements.
+    if (is_visible) {
+        if (hit_test_chrome(position, callback) == TraversalDecision::Break)
+            return TraversalDecision::Break;
+    }
 
     if (is_viewport_paintable()) {
         auto& viewport_paintable = const_cast<ViewportPaintable&>(static_cast<ViewportPaintable const&>(*this));
@@ -1235,13 +984,29 @@ TraversalDecision PaintableBox::hit_test(CSSPixelPoint position, HitTestType typ
     if (hit_test_children(position, type, callback) == TraversalDecision::Break)
         return TraversalDecision::Break;
 
-    if (!visible_for_hit_testing())
+    // Hidden elements and elements with pointer-events: none shouldn't be hit.
+    if (!is_visible || !visible_for_hit_testing())
         return TraversalDecision::Continue;
 
-    auto const offset_position_adjusted_by_scroll_offset = adjust_position_for_cumulative_scroll_offset(position);
+    auto const& viewport_paintable = *document().paintable();
+    auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+    Optional<CSSPixelPoint> local_position;
+    if (auto state = accumulated_visual_context())
+        local_position = state->transform_point_for_hit_test(position, scroll_state);
+    else
+        local_position = position;
 
-    if (!absolute_border_box_rect().contains(offset_position_adjusted_by_scroll_offset))
+    if (!local_position.has_value())
         return TraversalDecision::Continue;
+
+    auto border_box_rect = absolute_border_box_rect();
+    if (!border_box_rect.contains(local_position.value()))
+        return TraversalDecision::Continue;
+
+    if (auto radii = border_radii_data(); radii.has_any_radius()) {
+        if (!radii.contains(local_position.value(), border_box_rect))
+            return TraversalDecision::Continue;
+    }
 
     if (hit_test_continuation(callback) == TraversalDecision::Break)
         return TraversalDecision::Break;
@@ -1297,134 +1062,9 @@ TraversalDecision PaintableBox::hit_test_children(CSSPixelPoint position, HitTes
     return TraversalDecision::Continue;
 }
 
-TraversalDecision PaintableWithLines::hit_test(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const
-{
-    if (clip_rect_for_hit_testing().has_value() && !clip_rect_for_hit_testing()->contains(position))
-        return TraversalDecision::Continue;
-
-    if (computed_values().visibility() != CSS::Visibility::Visible)
-        return TraversalDecision::Continue;
-
-    // TextCursor hit testing mode should be able to place cursor in contenteditable elements even if they are empty
-    if (m_fragments.is_empty()
-        && !has_children()
-        && type == HitTestType::TextCursor
-        && layout_node().dom_node()
-        && layout_node().dom_node()->is_editable()) {
-        HitTestResult const hit_test_result {
-            .paintable = const_cast<PaintableWithLines&>(*this),
-            .index_in_node = 0,
-            .vertical_distance = 0,
-            .horizontal_distance = 0,
-        };
-        if (callback(hit_test_result) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    if (!layout_node().children_are_inline())
-        return PaintableBox::hit_test(position, type, callback);
-
-    if (hit_test_scrollbars(position, callback) == TraversalDecision::Break)
-        return TraversalDecision::Break;
-
-    if (hit_test_children(position, type, callback) == TraversalDecision::Break)
-        return TraversalDecision::Break;
-
-    if (!visible_for_hit_testing())
-        return TraversalDecision::Continue;
-
-    auto const offset_position_adjusted_by_scroll_offset = adjust_position_for_cumulative_scroll_offset(position);
-
-    for (auto const& fragment : fragments()) {
-        if (fragment.paintable().has_stacking_context() || !fragment.paintable().visible_for_hit_testing())
-            continue;
-        auto fragment_absolute_rect = fragment.absolute_rect();
-        if (fragment_absolute_rect.contains(offset_position_adjusted_by_scroll_offset)) {
-            if (fragment.paintable().hit_test(position, type, callback) == TraversalDecision::Break)
-                return TraversalDecision::Break;
-            HitTestResult hit_test_result { const_cast<Paintable&>(fragment.paintable()), fragment.index_in_node_for_point(offset_position_adjusted_by_scroll_offset), 0, 0 };
-            if (callback(hit_test_result) == TraversalDecision::Break)
-                return TraversalDecision::Break;
-        } else if (type == HitTestType::TextCursor) {
-            auto const* common_ancestor_parent = [&]() -> DOM::Node const* {
-                auto selection = document().get_selection();
-                if (!selection)
-                    return nullptr;
-                auto range = selection->range();
-                if (!range)
-                    return nullptr;
-                auto common_ancestor = range->common_ancestor_container();
-                if (common_ancestor->parent())
-                    return common_ancestor->parent();
-                return common_ancestor;
-            }();
-
-            auto const* fragment_dom_node = fragment.layout_node().dom_node();
-            if (common_ancestor_parent && fragment_dom_node && common_ancestor_parent->is_ancestor_of(*fragment_dom_node)) {
-                // If we reached this point, the position is not within the fragment. However, the fragment start or end might be
-                // the place to place the cursor. To determine the best place, we first find the closest fragment horizontally to
-                // the cursor. If we could not find one, then find for the closest vertically above the cursor.
-                // If we knew the direction of selection, we would look above if selecting upward.
-                if (fragment_absolute_rect.bottom() - 1 <= offset_position_adjusted_by_scroll_offset.y()) { // fully below the fragment
-                    HitTestResult hit_test_result {
-                        .paintable = const_cast<Paintable&>(fragment.paintable()),
-                        .index_in_node = fragment.start_offset() + fragment.length_in_code_units(),
-                        .vertical_distance = offset_position_adjusted_by_scroll_offset.y() - fragment_absolute_rect.bottom(),
-                    };
-                    if (callback(hit_test_result) == TraversalDecision::Break)
-                        return TraversalDecision::Break;
-                } else if (fragment_absolute_rect.top() <= offset_position_adjusted_by_scroll_offset.y()) { // vertically within the fragment
-                    if (offset_position_adjusted_by_scroll_offset.x() < fragment_absolute_rect.left()) {
-                        HitTestResult hit_test_result {
-                            .paintable = const_cast<Paintable&>(fragment.paintable()),
-                            .index_in_node = fragment.start_offset(),
-                            .vertical_distance = 0,
-                            .horizontal_distance = fragment_absolute_rect.left() - offset_position_adjusted_by_scroll_offset.x(),
-                        };
-                        if (callback(hit_test_result) == TraversalDecision::Break)
-                            return TraversalDecision::Break;
-                    } else if (offset_position_adjusted_by_scroll_offset.x() > fragment_absolute_rect.right()) {
-                        HitTestResult hit_test_result {
-                            .paintable = const_cast<Paintable&>(fragment.paintable()),
-                            .index_in_node = fragment.start_offset() + fragment.length_in_code_units(),
-                            .vertical_distance = 0,
-                            .horizontal_distance = offset_position_adjusted_by_scroll_offset.x() - fragment_absolute_rect.right(),
-                        };
-                        if (callback(hit_test_result) == TraversalDecision::Break)
-                            return TraversalDecision::Break;
-                    }
-                }
-            }
-        }
-    }
-
-    if (!stacking_context() && is_visible() && (!layout_node().is_anonymous() || is_positioned())
-        && absolute_border_box_rect().contains(offset_position_adjusted_by_scroll_offset)) {
-        if (callback(HitTestResult { const_cast<PaintableWithLines&>(*this) }) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    return TraversalDecision::Continue;
-}
-
 void PaintableBox::set_needs_display(InvalidateDisplayList should_invalidate_display_list)
 {
     document().set_needs_display(absolute_rect(), should_invalidate_display_list);
-}
-
-Optional<CSSPixelRect> PaintableBox::get_masking_area() const
-{
-    auto clip_path = computed_values().clip_path();
-    // FIXME: Support other clip sources.
-    if (!clip_path.has_value() || !clip_path->is_basic_shape())
-        return {};
-    // FIXME: Support other geometry boxes. See: https://drafts.fxtf.org/css-masking/#typedef-geometry-box
-    return absolute_border_box_rect();
-}
-
-RefPtr<Gfx::ImmutableBitmap> PaintableBox::calculate_mask(DisplayListRecordingContext&, CSSPixelRect const&) const
-{
-    return {};
 }
 
 // https://www.w3.org/TR/css-transforms-1/#reference-box
@@ -1520,61 +1160,9 @@ void PaintableBox::resolve_paint_properties()
     auto const& box_shadow_data = computed_values.box_shadow();
     Vector<Painting::ShadowData> resolved_box_shadow_data;
     resolved_box_shadow_data.ensure_capacity(box_shadow_data.size());
-    for (auto const& layer : box_shadow_data) {
-        resolved_box_shadow_data.empend(
-            layer.color,
-            layer.offset_x.to_px(layout_node),
-            layer.offset_y.to_px(layout_node),
-            layer.blur_radius.to_px(layout_node),
-            layer.spread_distance.to_px(layout_node),
-            layer.placement == CSS::ShadowPlacement::Outer ? Painting::ShadowPlacement::Outer
-                                                           : Painting::ShadowPlacement::Inner);
-    }
+    for (auto const& layer : box_shadow_data)
+        resolved_box_shadow_data.unchecked_append(ShadowData::from_css(layer, layout_node));
     set_box_shadow_data(move(resolved_box_shadow_data));
-
-    auto const& transformations = computed_values.transformations();
-    auto const& translate = computed_values.translate();
-    auto const& rotate = computed_values.rotate();
-    auto const& scale = computed_values.scale();
-    auto matrix = Gfx::FloatMatrix4x4::identity();
-    if (translate)
-        matrix = matrix * translate->to_matrix(*this).release_value();
-    if (rotate)
-        matrix = matrix * rotate->to_matrix(*this).release_value();
-    if (scale)
-        matrix = matrix * scale->to_matrix(*this).release_value();
-    for (auto const& transform : transformations)
-        matrix = matrix * transform->to_matrix(*this).release_value();
-    set_transform(matrix);
-
-    auto const& transform_origin = computed_values.transform_origin();
-    auto reference_box = transform_reference_box();
-    auto x = reference_box.left() + transform_origin.x.to_px(layout_node, reference_box.width());
-    auto y = reference_box.top() + transform_origin.y.to_px(layout_node, reference_box.height());
-    set_transform_origin({ x, y });
-
-    // https://drafts.csswg.org/css-transforms-2/#perspective-matrix
-    if (auto perspective = computed_values.perspective(); perspective.has_value()) {
-        // The perspective matrix is computed as follows:
-
-        // 1. Start with the identity matrix.
-        // 2. Translate by the computed X and Y values of 'perspective-origin'
-        // https://drafts.csswg.org/css-transforms-2/#perspective-origin-property
-        // Percentages: refer to the size of the reference box
-        auto perspective_origin = computed_values.perspective_origin().resolved(layout_node, reference_box).to_type<float>();
-        auto computed_x = perspective_origin.x();
-        auto computed_y = perspective_origin.y();
-        m_perspective_matrix = Gfx::translation_matrix(Vector3<float>(computed_x, computed_y, 0));
-
-        // 3. Multiply by the matrix that would be obtained from the 'perspective()' transform function, where the
-        //    length is provided by the value of the perspective property
-        // NB: Length values less than 1px being clamped to 1px is handled by the perspective() function already.
-        // FIXME: Create the matrix directly.
-        m_perspective_matrix = m_perspective_matrix.value() * CSS::TransformationStyleValue::create(CSS::PropertyID::Transform, CSS::TransformFunction::Perspective, CSS::StyleValueVector { CSS::LengthStyleValue::create(CSS::Length::make_px(perspective.value())) })->to_matrix({}).release_value();
-
-        // 4. Translate by the negated computed X and Y values of 'perspective-origin'
-        m_perspective_matrix = m_perspective_matrix.value() * Gfx::translation_matrix(Vector3<float>(-computed_x, -computed_y, 0));
-    }
 
     // Outlines
     auto outline_data = borders_data_for_outline(layout_node, computed_values.outline_color(), computed_values.outline_style(), computed_values.outline_width());
@@ -1585,8 +1173,14 @@ void PaintableBox::resolve_paint_properties()
     CSSPixelRect background_rect;
     Color background_color = computed_values.background_color();
     auto const* background_layers = &computed_values.background_layers();
-    if (layout_node_with_style_and_box_metrics().is_root_element()) {
-        background_rect = navigable()->viewport_rect();
+
+    // https://drafts.csswg.org/css-backgrounds/#root-background
+    // The background of the root element becomes the canvas background and its background painting area extends to
+    // cover the entire canvas. However, any images are sized and positioned relative to the root element’s box as if
+    // they were painted for that element alone.
+    auto is_root = layout_node_with_style_and_box_metrics().is_root_element();
+    if (is_root) {
+        background_rect = absolute_border_box_rect();
 
         // Section 2.11.2: If the computed value of background-image on the root element is none and its background-color is transparent,
         // user agents must instead propagate the computed values of the background properties from that element’s first HTML BODY child element.
@@ -1605,65 +1199,99 @@ void PaintableBox::resolve_paint_properties()
         background_rect = absolute_border_box_rect();
 
     m_resolved_background.layers.clear();
-    if (background_layers) {
-        m_resolved_background = resolve_background_layers(*background_layers, *this, background_color, background_rect, normalized_border_radii_data());
-    };
+    if (background_layers)
+        m_resolved_background = resolve_background_layers(*background_layers, *this, background_color, computed_values.background_color_clip(), background_rect, normalized_border_radii_data());
+
+    if (is_root) {
+        auto canvas_rect = navigable()->viewport_rect();
+        if (auto overflow_rect = scrollable_overflow_rect(); overflow_rect.has_value())
+            canvas_rect.unite(overflow_rect.value());
+        m_resolved_background.background_rect.unite(canvas_rect);
+        m_resolved_background.color_box.rect.unite(canvas_rect);
+    }
 
     if (auto mask_image = computed_values.mask_image()) {
         mask_image->resolve_for_size(layout_node_with_style_and_box_metrics(), absolute_padding_box_rect().size());
     }
-}
 
-void PaintableWithLines::resolve_paint_properties()
-{
-    Base::resolve_paint_properties();
-
-    auto const& layout_node = this->layout_node();
-    for (auto& fragment : fragments()) {
-        if (!fragment.m_layout_node->is_text_node())
-            continue;
-        auto const& text_node = static_cast<Layout::TextNode const&>(*fragment.m_layout_node);
-
-        auto const& font = fragment.m_layout_node->first_available_font();
-        auto const glyph_height = CSSPixels::nearest_value_for(font.pixel_size());
-        auto const css_line_thickness = [&] {
-            auto const& thickness = text_node.computed_values().text_decoration_thickness();
-            return thickness.value.visit(
-                [glyph_height](CSS::TextDecorationThickness::Auto) {
-                    // The UA chooses an appropriate thickness for text decoration lines; see below.
-                    // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-thickness-auto
-                    return max(glyph_height.scaled(0.1), 1);
+    // Filters
+    auto resolve_css_filter = [&](CSS::Filter const& computed_filter) -> ResolvedCSSFilter {
+        ResolvedCSSFilter result;
+        for (auto const& filter_operation : computed_filter.filters()) {
+            filter_operation.visit(
+                [&](CSS::FilterOperation::Blur const& blur) {
+                    auto resolved_radius = blur.resolved_radius(layout_node_with_style_and_box_metrics());
+                    result.operations.empend(ResolvedCSSFilter::Blur {
+                        .radius = CSSPixels::nearest_value_for(resolved_radius),
+                    });
                 },
-                [glyph_height](CSS::TextDecorationThickness::FromFont) {
-                    // If the first available font has metrics indicating a preferred underline width, use that width,
-                    // otherwise behaves as auto.
-                    // https://drafts.csswg.org/css-text-decor-4/#valdef-text-decoration-thickness-from-font
-                    // FIXME: Implement this properly.
-                    return max(glyph_height.scaled(0.1), 1);
+                [&](CSS::FilterOperation::DropShadow const& drop_shadow) {
+                    CSS::CalculationResolutionContext resolution_context {
+                        .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(layout_node_with_style_and_box_metrics()),
+                    };
+                    auto to_css_px = [&](CSS::LengthOrCalculated const& length) {
+                        return CSSPixels::nearest_value_for(length.resolved(resolution_context).map([&](auto&& it) { return it.to_px(layout_node_with_style_and_box_metrics()).to_double(); }).value_or(0.0));
+                    };
+                    auto color_context = CSS::ColorResolutionContext::for_layout_node_with_style(layout_node_with_style_and_box_metrics());
+                    auto resolved_color = drop_shadow.color
+                        ? drop_shadow.color->to_color(color_context).value_or(computed_values.color())
+                        : computed_values.color();
+
+                    result.operations.empend(ResolvedCSSFilter::DropShadow {
+                        .offset_x = to_css_px(drop_shadow.offset_x),
+                        .offset_y = to_css_px(drop_shadow.offset_y),
+                        .radius = drop_shadow.radius.has_value() ? to_css_px(*drop_shadow.radius) : CSSPixels(0),
+                        .color = resolved_color,
+                    });
                 },
-                [&](CSS::LengthPercentage const& length_percentage) {
-                    auto resolved_length = length_percentage.resolved(text_node, CSS::Length(1, CSS::LengthUnit::Em).to_px(text_node)).to_px(*fragment.m_layout_node);
-                    return max(resolved_length, 1);
+                [&](CSS::FilterOperation::Color const& color_operation) {
+                    result.operations.empend(ResolvedCSSFilter::Color {
+                        .operation = color_operation.operation,
+                        .amount = color_operation.resolved_amount(),
+                    });
+                },
+                [&](CSS::FilterOperation::HueRotate const& hue_rotate) {
+                    result.operations.empend(ResolvedCSSFilter::HueRotate {
+                        .angle_degrees = hue_rotate.angle_degrees(layout_node_with_style_and_box_metrics()),
+                    });
+                },
+                [&](CSS::URL const& css_url) {
+                    auto& url_string = css_url.url();
+                    if (url_string.is_empty() || !url_string.starts_with('#'))
+                        return;
+                    auto fragment_or_error = url_string.substring_from_byte_offset(1);
+                    if (fragment_or_error.is_error())
+                        return;
+                    auto maybe_filter = document().get_element_by_id(fragment_or_error.value());
+                    if (!maybe_filter)
+                        return;
+                    if (auto* filter_element = as_if<SVG::SVGFilterElement>(*maybe_filter)) {
+                        auto& node = layout_node_with_style_and_box_metrics();
+                        result.svg_filter = filter_element->gfx_filter(node);
+                        // Compute bounds for triggering filter application.
+                        // For empty elements (like <use> with no href), use the containing SVG's viewport.
+                        auto bounds = absolute_border_box_rect();
+                        if (bounds.is_empty()) {
+                            if (auto const* svg_ancestor = first_ancestor_of_type<SVGSVGPaintable>())
+                                result.svg_filter_bounds = svg_ancestor->absolute_rect();
+                        }
+                        if (!bounds.is_empty())
+                            result.svg_filter_bounds = bounds;
+                    }
                 });
-        }();
-        fragment.set_text_decoration_thickness(css_line_thickness);
-
-        auto const& text_shadow = text_node.computed_values().text_shadow();
-        Vector<ShadowData> resolved_shadow_data;
-        if (!text_shadow.is_empty()) {
-            resolved_shadow_data.ensure_capacity(text_shadow.size());
-            for (auto const& layer : text_shadow) {
-                resolved_shadow_data.empend(
-                    layer.color,
-                    layer.offset_x.to_px(layout_node),
-                    layer.offset_y.to_px(layout_node),
-                    layer.blur_radius.to_px(layout_node),
-                    layer.spread_distance.to_px(layout_node),
-                    ShadowPlacement::Outer);
-            }
         }
-        fragment.set_shadows(move(resolved_shadow_data));
-    }
+        return result;
+    };
+
+    if (computed_values.filter().has_filters())
+        set_filter(resolve_css_filter(computed_values.filter()));
+    else
+        set_filter({});
+
+    if (computed_values.backdrop_filter().has_filters())
+        set_backdrop_filter(resolve_css_filter(computed_values.backdrop_filter()));
+    else
+        set_backdrop_filter({});
 }
 
 RefPtr<ScrollFrame const> PaintableBox::nearest_scroll_frame() const
@@ -1674,21 +1302,13 @@ RefPtr<ScrollFrame const> PaintableBox::nearest_scroll_frame() const
     while (paintable) {
         if (paintable->own_scroll_frame())
             return paintable->own_scroll_frame();
-        if (paintable->is_fixed_position())
+        // Sticky elements need to find a scroll container even through fixed-position ancestors,
+        // because they must reference a scrollport for their sticky offset computation.
+        if (paintable->is_fixed_position() && !is_sticky_position())
             return nullptr;
         paintable = paintable->containing_block();
     }
     return nullptr;
-}
-
-CSSPixelRect PaintableBox::border_box_rect_relative_to_nearest_scrollable_ancestor() const
-{
-    auto result = absolute_border_box_rect();
-    auto const* nearest_scrollable_ancestor = this->nearest_scrollable_ancestor();
-    if (nearest_scrollable_ancestor) {
-        result.set_location(result.location() - nearest_scrollable_ancestor->absolute_rect().top_left());
-    }
-    return result;
 }
 
 PaintableBox const* PaintableBox::nearest_scrollable_ancestor() const
@@ -1704,81 +1324,86 @@ PaintableBox const* PaintableBox::nearest_scrollable_ancestor() const
     return nullptr;
 }
 
-Optional<Gfx::Filter> PaintableBox::resolve_filter(DisplayListRecordingContext& context, CSS::Filter const& computed_filter) const
+static PhysicalResizeAxes compute_physical_resize_axes(CSS::ComputedValues const& computed)
 {
-    Optional<Gfx::Filter> resolved_filter;
-    for (auto const& filter : computed_filter.filters()) {
-        filter.visit(
-            [&](CSS::FilterOperation::Blur const& blur) {
-                auto resolved_radius = blur.resolved_radius(layout_node_with_style_and_box_metrics()) * context.device_pixels_per_css_pixel();
-                auto new_filter = Gfx::Filter::blur(resolved_radius, resolved_radius);
+    // https://drafts.csswg.org/css-ui/#resize
+    if (computed.resize() == CSS::Resize::None)
+        return {};
 
-                resolved_filter = resolved_filter.has_value()
-                    ? Gfx::Filter::compose(new_filter, *resolved_filter)
-                    : new_filter;
-            },
-            [&](CSS::FilterOperation::DropShadow const& drop_shadow) {
-                CSS::CalculationResolutionContext context {
-                    .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(layout_node_with_style_and_box_metrics()),
-                };
-                auto to_px = [&](CSS::LengthOrCalculated const& length) {
-                    return static_cast<float>(length.resolved(context).map([&](auto&& it) { return it.to_px(layout_node_with_style_and_box_metrics()).to_double(); }).value_or(0.0));
-                };
-                // The default value for omitted values is missing length values set to 0
-                // and the missing used color is taken from the color property.
-                auto new_filter = Gfx::Filter::drop_shadow(to_px(drop_shadow.offset_x),
-                    to_px(drop_shadow.offset_y),
-                    drop_shadow.radius.has_value() ? to_px(*drop_shadow.radius) : 0.0f, drop_shadow.color.has_value() ? *drop_shadow.color : this->computed_values().color());
+    // 4.1. ... The resize property applies to elements that are scroll containers. UAs may also apply it,
+    // regardless of the value of the overflow property, to:
+    // - Replaced elements representing images or videos, such as img, video, picture, svg, object, or canvas.
+    // - The <iframe> element.
+    if (computed.display().is_inline_outside() && computed.display().is_flow_inside())
+        return {};
 
-                resolved_filter = resolved_filter.has_value()
-                    ? Gfx::Filter::compose(new_filter, *resolved_filter)
-                    : new_filter;
-            },
-            [&](CSS::FilterOperation::Color const& color_operation) {
-                auto new_filter = Gfx::Filter::color(color_operation.operation, color_operation.resolved_amount());
+    bool horizontal_writing_mode = computed.writing_mode() == CSS::WritingMode::HorizontalTb;
 
-                resolved_filter = resolved_filter.has_value()
-                    ? Gfx::Filter::compose(new_filter, *resolved_filter)
-                    : new_filter;
-            },
-            [&](CSS::FilterOperation::HueRotate const& hue_rotate) {
-                auto new_filter = Gfx::Filter::hue_rotate(hue_rotate.angle_degrees(layout_node_with_style_and_box_metrics()));
+    return {
+        .horizontal = computed.overflow_x() != CSS::Overflow::Visible
+            && computed.overflow_x() != CSS::Overflow::Clip
+            && (computed.resize() == CSS::Resize::Both
+                || computed.resize() == CSS::Resize::Horizontal
+                || (computed.resize() == CSS::Resize::Inline && horizontal_writing_mode)
+                || (computed.resize() == CSS::Resize::Block && !horizontal_writing_mode)),
+        .vertical = computed.overflow_y() != CSS::Overflow::Visible
+            && computed.overflow_y() != CSS::Overflow::Clip
+            && (computed.resize() == CSS::Resize::Both
+                || computed.resize() == CSS::Resize::Vertical
+                || (computed.resize() == CSS::Resize::Inline && !horizontal_writing_mode)
+                || (computed.resize() == CSS::Resize::Block && horizontal_writing_mode))
+    };
+}
 
-                resolved_filter = resolved_filter.has_value()
-                    ? Gfx::Filter::compose(new_filter, *resolved_filter)
-                    : new_filter;
-            },
-            [&](CSS::URL const& css_url) {
-                auto& url_string = css_url.url();
+CSS::TransformStyle PaintableBox::transform_style_used_value() const
+{
+    // https://drafts.csswg.org/css-transforms-2/#transform-style-property
+    // Used value: flat if a grouping property is present, specified keyword otherwise
+    auto const& computed_values = this->computed_values();
 
-                if (url_string.is_empty() || !url_string.starts_with('#'))
-                    return;
+    // https://drafts.csswg.org/css-transforms-2/#grouping-property-values
+    // 'overflow': any value other than 'visible' or 'clip'.
+    if (!first_is_one_of(computed_values.overflow_x(), CSS::Overflow::Visible, CSS::Overflow::Clip) || !first_is_one_of(computed_values.overflow_y(), CSS::Overflow::Visible, CSS::Overflow::Clip))
+        return CSS::TransformStyle::Flat;
 
-                auto fragment_or_error = url_string.substring_from_byte_offset(1);
+    // 'opacity': any value less than 1.
+    if (computed_values.opacity() < 1)
+        return CSS::TransformStyle::Flat;
 
-                if (fragment_or_error.is_error())
-                    return;
+    // 'filter': any value other than 'none'.
+    if (computed_values.filter().has_filters())
+        return CSS::TransformStyle::Flat;
 
-                // FIXME: Support urls that are not only composed of a fragment.
-                auto maybe_filter = document().get_element_by_id(fragment_or_error.value());
+    // 'clip': any value other than 'auto'.
+    if (!computed_values.clip().is_auto())
+        return CSS::TransformStyle::Flat;
 
-                if (!maybe_filter)
-                    return;
+    // 'clip-path': any value other than 'none'.
+    if (computed_values.clip_path().has_value())
+        return CSS::TransformStyle::Flat;
 
-                if (auto* filter_element = as_if<SVG::SVGFilterElement>(*maybe_filter)) {
-                    auto& layout_node = layout_node_with_style_and_box_metrics();
-                    auto new_filter = filter_element->gfx_filter(layout_node);
+    // 'isolation': used value of 'isolate'.
+    if (computed_values.isolation() == CSS::Isolation::Isolate)
+        return CSS::TransformStyle::Flat;
 
-                    if (!new_filter.has_value())
-                        return;
+    // 'mask-image': any value other than 'none'.
+    if (computed_values.mask_image())
+        return CSS::TransformStyle::Flat;
 
-                    resolved_filter = resolved_filter.has_value()
-                        ? Gfx::Filter::compose(*new_filter, *resolved_filter)
-                        : new_filter;
-                }
-            });
-    }
-    return resolved_filter;
+    // 'mask-border-source': any value other than 'none'.
+    // FIXME: Implement this once we have 'mask-border-source'
+
+    // 'mix-blend-mode': any value other than 'normal'.
+    if (computed_values.mix_blend_mode() != CSS::MixBlendMode::Normal)
+        return CSS::TransformStyle::Flat;
+
+    // 'contain': 'paint' and any other property/value combination that causes paint containment. Note:
+    // this includes any property that affect the used value of the 'contain' property, such as 'content-
+    // visibility: hidden'.
+    if (layout_node().has_paint_containment())
+        return CSS::TransformStyle::Flat;
+
+    return computed_values.transform_style();
 }
 
 }

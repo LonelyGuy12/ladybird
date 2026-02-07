@@ -45,6 +45,7 @@
 #include <LibJS/Runtime/Value.h>
 #include <LibJS/Runtime/ValueInlines.h>
 #include <LibJS/SourceTextModule.h>
+#include <math.h>
 
 namespace JS::Bytecode {
 
@@ -144,14 +145,16 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
         }
     }
 
-    u32 registers_and_constants_and_locals_count = 0;
+    u32 registers_and_locals_count = 0;
+    u32 constants_count = 0;
     if (executable) {
-        registers_and_constants_and_locals_count = executable->number_of_registers + executable->constants.size() + executable->local_variable_names.size();
+        registers_and_locals_count = executable->registers_and_locals_count;
+        constants_count = executable->constants.size();
     }
 
     // 2. Let scriptContext be a new ECMAScript code execution context.
     ExecutionContext* script_context = nullptr;
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(script_context, registers_and_constants_and_locals_count, 0);
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(script_context, registers_and_locals_count, constants_count, 0);
 
     // 3. Set the Function of scriptContext to null.
     // NOTE: This was done during execution context construction.
@@ -471,6 +474,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(BitwiseNot);
             HANDLE_INSTRUCTION(BitwiseOr);
             HANDLE_INSTRUCTION(ToInt32);
+            HANDLE_INSTRUCTION(ToString);
             HANDLE_INSTRUCTION(BitwiseXor);
             HANDLE_INSTRUCTION(Call);
             HANDLE_INSTRUCTION(CallBuiltin);
@@ -516,6 +520,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(GetNewTarget);
             HANDLE_INSTRUCTION(GetObjectPropertyIterator);
             HANDLE_INSTRUCTION(GetPrivateById);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(GetTemplateObject);
             HANDLE_INSTRUCTION(GetBinding);
             HANDLE_INSTRUCTION(GetInitializedBinding);
             HANDLE_INSTRUCTION(GreaterThan);
@@ -549,6 +554,8 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(NewClass);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(NewFunction);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(NewObject);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(CacheObjectShape);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(InitObjectLiteralProperty);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(NewObjectWithNoPrototype);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(NewPrimitiveArray);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(NewRegExp);
@@ -651,7 +658,8 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
     context.identifier_table = executable.identifier_table->identifiers().data();
     context.property_key_table = executable.property_key_table->property_keys().data();
 
-    ASSERT(executable.registers_and_constants_and_locals_count <= context.registers_and_constants_and_locals_and_arguments_span().size());
+    VERIFY(executable.registers_and_locals_count + executable.constants.size() == executable.registers_and_locals_and_constants_count);
+    VERIFY(executable.registers_and_locals_and_constants_count <= context.registers_and_constants_and_locals_and_arguments_span().size());
 
     // NOTE: We only copy the `this` value from ExecutionContext if it's not already set.
     //       If we are re-entering an async/generator context, the `this` value
@@ -660,9 +668,10 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
     if (reg(Register::this_value()).is_special_empty_value())
         reg(Register::this_value()) = context.this_value.value_or(js_special_empty_value());
 
-    auto* registers_and_constants_and_locals_and_arguments = context.registers_and_constants_and_locals_and_arguments();
+    // NB: Layout is [registers | locals | constants | arguments], so constants start after registers+locals.
+    auto* values = context.registers_and_constants_and_locals_and_arguments();
     for (size_t i = 0; i < executable.constants.size(); ++i) {
-        registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants.data()[i];
+        values[executable.registers_and_locals_count + i] = executable.constants.data()[i];
     }
 
     run_bytecode(entry_point.value_or(0));
@@ -672,10 +681,10 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
     if constexpr (JS_BYTECODE_DEBUG) {
         for (size_t i = 0; i < executable.number_of_registers; ++i) {
             String value_string;
-            if (registers_and_constants_and_locals_and_arguments[i].is_special_empty_value())
+            if (values[i].is_special_empty_value())
                 value_string = "(empty)"_string;
             else
-                value_string = registers_and_constants_and_locals_and_arguments[i].to_string_without_side_effects();
+                value_string = values[i].to_string_without_side_effects();
             dbgln("[{:3}] {}", i, value_string);
         }
     }
@@ -1196,8 +1205,11 @@ inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Int
 
     if (cache.is_valid()) [[likely]] {
         auto const* environment = interpreter.running_execution_context().lexical_environment.ptr();
-        for (size_t i = 0; i < cache.hops; ++i)
+        for (size_t i = 0; i < cache.hops; ++i) {
+            if (environment->is_permanently_screwed_by_eval()) [[unlikely]]
+                goto slow_path;
             environment = environment->outer_environment();
+        }
         if (!environment->is_permanently_screwed_by_eval()) [[likely]] {
             callee = TRY(static_cast<DeclarativeEnvironment const&>(*environment).get_binding_value_direct(vm, cache.index));
             auto this_value = js_undefined();
@@ -1208,6 +1220,7 @@ inline ThrowCompletionOr<CalleeAndThis> get_callee_and_this_from_environment(Int
                 .this_value = this_value,
             };
         }
+    slow_path:
         cache = {};
     }
 
@@ -1395,6 +1408,10 @@ private:
     {
         Base::visit_edges(visitor);
         visitor.visit(m_object);
+        for (auto& key : m_properties)
+            key.visit_edges(visitor);
+        if (!m_iterator.is_end())
+            m_iterator->visit_edges(visitor);
     }
 
     GC::Ref<Object> m_object;
@@ -1569,6 +1586,40 @@ ThrowCompletionOr<void> Div::execute_impl(Bytecode::Interpreter& interpreter) co
     return {};
 }
 
+ThrowCompletionOr<void> Mod::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& vm = interpreter.vm();
+    auto const lhs = interpreter.get(m_lhs);
+    auto const rhs = interpreter.get(m_rhs);
+
+    if (lhs.is_number() && rhs.is_number()) [[likely]] {
+        if (lhs.is_int32() && rhs.is_int32()) {
+            auto n = lhs.as_i32();
+            auto d = rhs.as_i32();
+            if (d == 0) {
+                interpreter.set(m_dst, js_nan());
+                return {};
+            }
+            if (n == NumericLimits<i32>::min() && d == -1) {
+                interpreter.set(m_dst, Value(-0.0));
+                return {};
+            }
+            auto result = n % d;
+            if (result == 0 && n < 0) {
+                interpreter.set(m_dst, Value(-0.0));
+                return {};
+            }
+            interpreter.set(m_dst, Value(result));
+            return {};
+        }
+        interpreter.set(m_dst, Value(fmod(lhs.as_double(), rhs.as_double())));
+        return {};
+    }
+
+    interpreter.set(m_dst, TRY(mod(vm, lhs, rhs)));
+    return {};
+}
+
 ThrowCompletionOr<void> Sub::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
@@ -1628,6 +1679,13 @@ ThrowCompletionOr<void> ToInt32::execute_impl(Bytecode::Interpreter& interpreter
         return {};
     }
     interpreter.set(m_dst, Value(TRY(value.to_i32(vm))));
+    return {};
+}
+
+ThrowCompletionOr<void> ToString::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& vm = interpreter.vm();
+    interpreter.set(m_dst, Value { TRY(interpreter.get(m_value).to_primitive_string(vm)) });
     return {};
 }
 
@@ -1777,7 +1835,7 @@ JS_ENUMERATE_COMMON_UNARY_OPS(JS_DEFINE_COMMON_UNARY_OP)
 
 void NewArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto array = MUST(Array::create(interpreter.realm(), 0));
+    auto array = MUST(Array::create(interpreter.realm(), m_element_count));
     for (size_t i = 0; i < m_element_count; i++) {
         array->indexed_properties().put(i, interpreter.get(m_elements[i]), default_attributes);
     }
@@ -1786,10 +1844,79 @@ void NewArray::execute_impl(Bytecode::Interpreter& interpreter) const
 
 void NewPrimitiveArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto array = MUST(Array::create(interpreter.realm(), 0));
+    auto array = MUST(Array::create(interpreter.realm(), m_element_count));
     for (size_t i = 0; i < m_element_count; i++)
         array->indexed_properties().put(i, m_elements[i], default_attributes);
     interpreter.set(dst(), array);
+}
+
+// 13.2.8.4 GetTemplateObject ( templateLiteral ), https://tc39.es/ecma262/#sec-gettemplateobject
+void GetTemplateObject::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& vm = interpreter.vm();
+    auto& cache = interpreter.current_executable().template_object_caches[m_cache_index];
+
+    // 1. Let realm be the current Realm Record.
+    auto& realm = *vm.current_realm();
+
+    // 2. Let templateRegistry be realm.[[TemplateMap]].
+    // 3. For each element e of templateRegistry, do
+    //    a. If e.[[Site]] is the same Parse Node as templateLiteral, then
+    //       i. Return e.[[Array]].
+    if (cache.cached_template_object) {
+        interpreter.set(dst(), cache.cached_template_object);
+        return;
+    }
+
+    // 4. Let rawStrings be the TemplateStrings of templateLiteral with argument true.
+    // 5. Assert: rawStrings is a List of Strings.
+    // 6. Let cookedStrings be the TemplateStrings of templateLiteral with argument false.
+    // NOTE: This has already been done.
+
+    // 7. Let count be the number of elements in the List cookedStrings.
+    // NOTE: m_strings contains [cooked_0, ..., cooked_n, raw_0, ..., raw_n]
+    // 8. Assert: count ≤ 2**32 - 1.
+    // NOTE: Done by having count be a u32.
+    u32 count = m_strings_count / 2;
+
+    // 9. Let template be ! ArrayCreate(count).
+    auto template_object = MUST(Array::create(realm, count));
+
+    // 10. Let rawObj be ! ArrayCreate(count).
+    auto raw_object = MUST(Array::create(realm, count));
+
+    // 12. Repeat, while index < count,
+    for (size_t index = 0; index < count; index++) {
+        // a. Let prop be ! ToString(𝔽(index)).
+        // b. Let cookedValue be cookedStrings[index].
+        auto cooked_value = interpreter.get(m_strings[index]);
+
+        // c. Perform ! DefinePropertyOrThrow(template, prop, PropertyDescriptor { [[Value]]: cookedValue, [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }).
+        template_object->indexed_properties().put(index, cooked_value, Attribute::Enumerable);
+
+        // d. Let rawValue be the String value rawStrings[index].
+        auto raw_value = interpreter.get(m_strings[count + index]);
+
+        // e. Perform ! DefinePropertyOrThrow(rawObj, prop, PropertyDescriptor { [[Value]]: rawValue, [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }).
+        raw_object->indexed_properties().put(index, raw_value, Attribute::Enumerable);
+
+        // f. Set index to index + 1.
+    }
+
+    // 13. Perform ! SetIntegrityLevel(rawObj, FROZEN).
+    MUST(raw_object->set_integrity_level(Object::IntegrityLevel::Frozen));
+
+    // 14. Perform ! DefinePropertyOrThrow(template, "raw", PropertyDescriptor { [[Value]]: rawObj, [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }).
+    template_object->define_direct_property(vm.names.raw, raw_object, PropertyAttributes {});
+
+    // 15. Perform ! SetIntegrityLevel(template, FROZEN).
+    MUST(template_object->set_integrity_level(Object::IntegrityLevel::Frozen));
+
+    // 16. Append the Record { [[Site]]: templateLiteral, [[Array]]: template } to realm.[[TemplateMap]].
+    cache.cached_template_object = template_object;
+
+    // 17. Return template.
+    interpreter.set(dst(), template_object);
 }
 
 ThrowCompletionOr<void> NewArrayWithLength::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -1848,6 +1975,16 @@ void NewObject::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& realm = *vm.current_realm();
+
+    if (m_cache_index != NumericLimits<u32>::max()) {
+        auto& cache = interpreter.current_executable().object_shape_caches[m_cache_index];
+        auto cached_shape = cache.shape.ptr();
+        if (cached_shape) {
+            interpreter.set(dst(), Object::create_with_premade_shape(*cached_shape));
+            return;
+        }
+    }
+
     interpreter.set(dst(), Object::create(realm, realm.intrinsics().object_prototype()));
 }
 
@@ -1856,6 +1993,49 @@ void NewObjectWithNoPrototype::execute_impl(Bytecode::Interpreter& interpreter) 
     auto& vm = interpreter.vm();
     auto& realm = *vm.current_realm();
     interpreter.set(dst(), Object::create(realm, nullptr));
+}
+
+void CacheObjectShape::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& cache = interpreter.current_executable().object_shape_caches[m_cache_index];
+    if (!cache.shape) {
+        auto& object = interpreter.get(m_object).as_object();
+        cache.shape = &object.shape();
+    }
+}
+
+COLD static void init_object_literal_property_slow(Object& object, PropertyKey const& property_key, Value value, ObjectShapeCache& cache, u32 property_slot)
+{
+    object.define_direct_property(property_key, value, JS::Attribute::Enumerable | JS::Attribute::Writable | JS::Attribute::Configurable);
+
+    // Cache the property offset for future fast-path use
+    // Note: lookup may fail if the shape is in dictionary mode or for other edge cases.
+    // We only cache if we're not in dictionary mode and the lookup succeeds.
+    if (!object.shape().is_dictionary()) {
+        auto metadata = object.shape().lookup(property_key);
+        if (metadata.has_value()) {
+            if (property_slot >= cache.property_offsets.size())
+                cache.property_offsets.resize(property_slot + 1);
+            cache.property_offsets[property_slot] = metadata->offset;
+        }
+    }
+}
+
+void InitObjectLiteralProperty::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& object = interpreter.get(m_object).as_object();
+    auto value = interpreter.get(m_src);
+    auto& cache = interpreter.current_executable().object_shape_caches[m_shape_cache_index];
+
+    // Fast path: if we have a cached shape and it matches, write directly to the cached offset
+    auto cached_shape = cache.shape.ptr();
+    if (cached_shape && &object.shape() == cached_shape && m_property_slot < cache.property_offsets.size()) {
+        object.put_direct(cache.property_offsets[m_property_slot], value);
+        return;
+    }
+
+    auto const& property_key = interpreter.current_executable().get_property_key(m_property);
+    init_object_literal_property_slow(object, property_key, value, cache, m_property_slot);
 }
 
 void NewRegExp::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -1915,8 +2095,11 @@ static ThrowCompletionOr<void> get_binding(Interpreter& interpreter, Operand dst
 
     if (cache.is_valid()) [[likely]] {
         auto const* environment = interpreter.running_execution_context().lexical_environment.ptr();
-        for (size_t i = 0; i < cache.hops; ++i)
+        for (size_t i = 0; i < cache.hops; ++i) {
+            if (environment->is_permanently_screwed_by_eval()) [[unlikely]]
+                goto slow_path;
             environment = environment->outer_environment();
+        }
         if (!environment->is_permanently_screwed_by_eval()) [[likely]] {
             Value value;
             if constexpr (binding_is_known_to_be_initialized == BindingIsKnownToBeInitialized::No) {
@@ -1927,6 +2110,7 @@ static ThrowCompletionOr<void> get_binding(Interpreter& interpreter, Operand dst
             interpreter.set(dst, value);
             return {};
         }
+    slow_path:
         cache = {};
     }
 
@@ -1934,6 +2118,7 @@ static ThrowCompletionOr<void> get_binding(Interpreter& interpreter, Operand dst
     auto reference = TRY(vm.resolve_binding(executable.get_identifier(identifier), strict));
     if (reference.environment_coordinate().has_value())
         cache = reference.environment_coordinate().value();
+
     interpreter.set(dst, TRY(reference.get_value(vm)));
     return {};
 }
@@ -2177,8 +2362,11 @@ static ThrowCompletionOr<void> initialize_or_set_binding(Interpreter& interprete
         : interpreter.running_execution_context().variable_environment.ptr();
 
     if (cache.is_valid()) [[likely]] {
-        for (size_t i = 0; i < cache.hops; ++i)
+        for (size_t i = 0; i < cache.hops; ++i) {
+            if (environment->is_permanently_screwed_by_eval()) [[unlikely]]
+                goto slow_path;
             environment = environment->outer_environment();
+        }
         if (!environment->is_permanently_screwed_by_eval()) [[likely]] {
             if constexpr (initialization_mode == BindingInitializationMode::Initialize) {
                 TRY(static_cast<DeclarativeEnvironment&>(*environment).initialize_binding_direct(vm, cache.index, value, Environment::InitializeBindingHint::Normal));
@@ -2187,6 +2375,7 @@ static ThrowCompletionOr<void> initialize_or_set_binding(Interpreter& interprete
             }
             return {};
         }
+    slow_path:
         cache = {};
     }
 
@@ -2460,10 +2649,11 @@ static ThrowCompletionOr<void> execute_call(
     auto& function = callee.as_function();
 
     ExecutionContext* callee_context = nullptr;
-    size_t registers_and_constants_and_locals_count = 0;
+    size_t registers_and_locals_count = 0;
+    size_t constants_count = 0;
     size_t argument_count = arguments.size();
-    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(arguments.size(), argument_count));
+    TRY(function.get_stack_frame_size(registers_and_locals_count, constants_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_locals_count, constants_count, max(arguments.size(), argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -2506,7 +2696,7 @@ ThrowCompletionOr<void> CallBuiltin::execute_impl(Bytecode::Interpreter& interpr
 {
     auto callee = interpreter.get(m_callee);
 
-    if (callee.is_object() && interpreter.realm().get_builtin_value(m_builtin) == &callee.as_object()) [[likely]] {
+    if (callee.is_function() && callee.as_function().builtin() == m_builtin) [[likely]] {
         interpreter.set(dst(), TRY(dispatch_builtin_call(interpreter, m_builtin, { m_arguments, m_argument_count })));
         return {};
     }
@@ -2533,9 +2723,10 @@ static ThrowCompletionOr<void> call_with_argument_array(
 
     ExecutionContext* callee_context = nullptr;
     size_t argument_count = argument_array_length;
-    size_t registers_and_constants_and_locals_count = 0;
-    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
+    size_t registers_and_locals_count = 0;
+    size_t constants_count = 0;
+    TRY(function.get_stack_frame_size(registers_and_locals_count, constants_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_locals_count, constants_count, max(argument_array_length, argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -2613,9 +2804,10 @@ ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Inter
 
     ExecutionContext* callee_context = nullptr;
     size_t argument_count = argument_array_length;
-    size_t registers_and_constants_and_locals_count = 0;
-    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
+    size_t registers_and_locals_count = 0;
+    size_t constants_count = 0;
+    TRY(function.get_stack_frame_size(registers_and_locals_count, constants_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_locals_count, constants_count, max(argument_array_length, argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -3008,13 +3200,17 @@ ThrowCompletionOr<void> TypeofBinding::execute_impl(Bytecode::Interpreter& inter
 
     if (m_cache.is_valid()) [[likely]] {
         auto const* environment = interpreter.running_execution_context().lexical_environment.ptr();
-        for (size_t i = 0; i < m_cache.hops; ++i)
+        for (size_t i = 0; i < m_cache.hops; ++i) {
+            if (environment->is_permanently_screwed_by_eval()) [[unlikely]]
+                goto slow_path;
             environment = environment->outer_environment();
+        }
         if (!environment->is_permanently_screwed_by_eval()) [[likely]] {
             auto value = TRY(static_cast<DeclarativeEnvironment const&>(*environment).get_binding_value_direct(vm, m_cache.index));
             interpreter.set(dst(), value.typeof_(vm));
             return {};
         }
+    slow_path:
         m_cache = {};
     }
 

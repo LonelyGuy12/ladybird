@@ -27,6 +27,8 @@
 
 namespace Web::HTML {
 
+GC_DEFINE_ALLOCATOR(Environment);
+
 Environment::~Environment() = default;
 
 void Environment::visit_edges(Cell::Visitor& visitor)
@@ -298,7 +300,11 @@ bool is_scripting_enabled(JS::Realm const& realm)
 
     // The user has not disabled scripting for realm at this time. (User agents may provide users with the option to disable scripting globally, or in a finer-grained manner, e.g., on a per-origin basis, down to the level of individual realms.)
     auto const& document = as<HTML::Window>(realm.global_object()).associated_document();
-    if (!document.page().is_scripting_enabled())
+
+    // NB: about:settings and about:processes are internal pages using javascript, so we do not consider user configuration for these pages.
+    if (document.url() != URL::about_settings()
+        && document.url() != URL::about_processes()
+        && !document.page().is_scripting_enabled())
         return false;
 
     // Either settings's global object is not a Window object, or settings's global object's associated Document's active sandboxing flag set does not have its sandboxed scripts browsing context flag set.
@@ -579,7 +585,6 @@ SerializedEnvironmentSettingsObject EnvironmentSettingsObject::serialize()
         .creation_url = this->creation_url,
         .top_level_creation_url = this->top_level_creation_url,
         .top_level_origin = this->top_level_origin,
-        .api_url_character_encoding = api_url_character_encoding(),
         .api_base_url = api_base_url(),
         .origin = origin(),
         .has_cross_site_ancestor = has_cross_site_ancestor(),

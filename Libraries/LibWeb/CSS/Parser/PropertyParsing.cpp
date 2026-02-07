@@ -19,9 +19,11 @@
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderImageSliceStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderRadiusRectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
@@ -43,7 +45,6 @@
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
-#include <LibWeb/CSS/StyleValues/MathDepthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
@@ -219,6 +220,8 @@ Optional<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readon
     if (auto parsed = parse_for_type(ValueType::DashedIdent); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::EasingFunction); parsed.has_value())
+        return parsed.release_value();
+    if (auto parsed = parse_for_type(ValueType::FontStyle); parsed.has_value())
         return parsed.release_value();
     if (auto parsed = parse_for_type(ValueType::Image); parsed.has_value())
         return parsed.release_value();
@@ -555,6 +558,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
     case PropertyID::BorderTopRightRadius:
     case PropertyID::BorderBottomRightRadius:
     case PropertyID::BorderBottomLeftRadius:
+    case PropertyID::BorderEndEndRadius:
+    case PropertyID::BorderEndStartRadius:
+    case PropertyID::BorderStartEndRadius:
+    case PropertyID::BorderStartStartRadius:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_radius_value(tokens); });
     case PropertyID::BorderRadius:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_border_radius_shorthand_value(tokens); });
@@ -592,8 +599,6 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue const>> Parser::parse_css_value(Pr
         return parse_all_as(tokens, [this](auto& tokens) { return parse_font_feature_settings_value(tokens); });
     case PropertyID::FontLanguageOverride:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_font_language_override_value(tokens); });
-    case PropertyID::FontStyle:
-        return parse_all_as(tokens, [this](auto& tokens) { return parse_font_style_value(tokens); });
     case PropertyID::FontVariationSettings:
         return parse_all_as(tokens, [this](auto& tokens) { return parse_font_variation_settings_value(tokens); });
     case PropertyID::FontVariant:
@@ -1405,17 +1410,6 @@ RefPtr<StyleValue const> Parser::parse_background_value(TokenStream<ComponentVal
         StyleValueList::create(move(background_clips), StyleValueList::Separator::Comma));
 }
 
-static Optional<LengthPercentage> style_value_to_length_percentage(auto value)
-{
-    if (value->is_percentage())
-        return LengthPercentage { value->as_percentage().percentage() };
-    if (value->is_length())
-        return LengthPercentage { value->as_length().length() };
-    if (value->is_calculated())
-        return LengthPercentage { value->as_calculated() };
-    return {};
-}
-
 RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(TokenStream<ComponentValue>& tokens, PropertyID property)
 {
     Optional<PositionEdge> relative_edge {};
@@ -1439,38 +1433,16 @@ RefPtr<StyleValue const> Parser::parse_single_background_position_x_or_y_value(T
         } else {
             return nullptr;
         }
-        if (tokens.has_next_token()) {
-            value = parse_css_value_for_property(property, tokens);
-            if (!value) {
-                transaction.commit();
-                return EdgeStyleValue::create(relative_edge, {});
-            }
-            if (value->is_keyword())
-                return {};
+
+        value = parse_length_percentage_value(tokens);
+        if (!value) {
+            transaction.commit();
+            return EdgeStyleValue::create(relative_edge, {});
         }
     }
 
-    auto offset = style_value_to_length_percentage(value);
-    if (offset.has_value()) {
-        transaction.commit();
-        return EdgeStyleValue::create(relative_edge, *offset);
-    }
-
-    if (!relative_edge.has_value()) {
-        if (property == PropertyID::BackgroundPositionX) {
-            // [ center | [ [ left | right | x-start | x-end ]? <length-percentage>? ]! ]#
-            relative_edge = PositionEdge::Left;
-        } else if (property == PropertyID::BackgroundPositionY) {
-            // [ center | [ [ top | bottom | y-start | y-end ]? <length-percentage>? ]! ]#
-            relative_edge = PositionEdge::Top;
-        } else {
-            VERIFY_NOT_REACHED();
-        }
-    }
-
-    // If no offset is provided create this element but with an offset of default value of zero
     transaction.commit();
-    return EdgeStyleValue::create(relative_edge, {});
+    return EdgeStyleValue::create(relative_edge, value);
 }
 
 RefPtr<StyleValue const> Parser::parse_single_background_size_value(PropertyID property, TokenStream<ComponentValue>& tokens)
@@ -1821,95 +1793,17 @@ RefPtr<StyleValue const> Parser::parse_border_radius_value(TokenStream<Component
 
 RefPtr<StyleValue const> Parser::parse_border_radius_shorthand_value(TokenStream<ComponentValue>& tokens)
 {
-    auto top_left = [&](StyleValueVector& radii) { return radii[0]; };
-    auto top_right = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-        case 3:
-        case 2:
-            return radii[1];
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-    auto bottom_right = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-        case 3:
-            return radii[2];
-        case 2:
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-    auto bottom_left = [&](StyleValueVector& radii) {
-        switch (radii.size()) {
-        case 4:
-            return radii[3];
-        case 3:
-        case 2:
-            return radii[1];
-        case 1:
-            return radii[0];
-        default:
-            VERIFY_NOT_REACHED();
-        }
-    };
-
-    StyleValueVector horizontal_radii;
-    StyleValueVector vertical_radii;
-    bool reading_vertical = false;
     auto transaction = tokens.begin_transaction();
-    tokens.discard_whitespace();
 
-    while (tokens.has_next_token()) {
-        if (tokens.next_token().is_delim('/')) {
-            if (reading_vertical || horizontal_radii.is_empty())
-                return nullptr;
+    auto const& border_radius_rect = parse_border_radius_rect_value(tokens);
 
-            reading_vertical = true;
-            tokens.discard_a_token(); // `/`
-            tokens.discard_whitespace();
-            continue;
-        }
-
-        auto maybe_dimension = parse_length_percentage_value(tokens);
-        if (!maybe_dimension)
-            return nullptr;
-        if (maybe_dimension->is_length() && !property_accepts_length(PropertyID::BorderRadius, maybe_dimension->as_length().length()))
-            return nullptr;
-        if (maybe_dimension->is_percentage() && !property_accepts_percentage(PropertyID::BorderRadius, maybe_dimension->as_percentage().percentage()))
-            return nullptr;
-        if (reading_vertical) {
-            vertical_radii.append(maybe_dimension.release_nonnull());
-        } else {
-            horizontal_radii.append(maybe_dimension.release_nonnull());
-        }
-        tokens.discard_whitespace();
-    }
-
-    if (horizontal_radii.size() > 4 || vertical_radii.size() > 4
-        || horizontal_radii.is_empty()
-        || (reading_vertical && vertical_radii.is_empty()))
+    if (!border_radius_rect)
         return nullptr;
-
-    auto top_left_radius = BorderRadiusStyleValue::create(top_left(horizontal_radii),
-        vertical_radii.is_empty() ? top_left(horizontal_radii) : top_left(vertical_radii));
-    auto top_right_radius = BorderRadiusStyleValue::create(top_right(horizontal_radii),
-        vertical_radii.is_empty() ? top_right(horizontal_radii) : top_right(vertical_radii));
-    auto bottom_right_radius = BorderRadiusStyleValue::create(bottom_right(horizontal_radii),
-        vertical_radii.is_empty() ? bottom_right(horizontal_radii) : bottom_right(vertical_radii));
-    auto bottom_left_radius = BorderRadiusStyleValue::create(bottom_left(horizontal_radii),
-        vertical_radii.is_empty() ? bottom_left(horizontal_radii) : bottom_left(vertical_radii));
 
     transaction.commit();
     return ShorthandStyleValue::create(PropertyID::BorderRadius,
         { PropertyID::BorderTopLeftRadius, PropertyID::BorderTopRightRadius, PropertyID::BorderBottomRightRadius, PropertyID::BorderBottomLeftRadius },
-        { move(top_left_radius), move(top_right_radius), move(bottom_right_radius), move(bottom_left_radius) });
+        { border_radius_rect->top_left(), border_radius_rect->top_right(), border_radius_rect->bottom_right(), border_radius_rect->bottom_left() });
 }
 
 RefPtr<StyleValue const> Parser::parse_columns_value(TokenStream<ComponentValue>& tokens)
@@ -2727,7 +2621,7 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
         }
         case PropertyID::FontStyle: {
             VERIFY(!font_style);
-            font_style = FontStyleStyleValue::create(*keyword_to_font_style(value.release_nonnull()->to_keyword()));
+            font_style = value.release_nonnull();
             tokens.discard_whitespace();
             continue;
         }
@@ -2766,7 +2660,6 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
         line_height = property_initial_value(PropertyID::LineHeight);
 
     transaction.commit();
-    auto initial_value = KeywordStyleValue::create(Keyword::Initial);
     return ShorthandStyleValue::create(PropertyID::Font,
         {
             // Set explicitly https://drafts.csswg.org/css-fonts/#set-explicitly
@@ -2782,7 +2675,7 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
             PropertyID::FontFeatureSettings,
             PropertyID::FontKerning,
             PropertyID::FontLanguageOverride,
-            // FIXME: PropertyID::FontOpticalSizing,
+            PropertyID::FontOpticalSizing,
             // FIXME: PropertyID::FontSizeAdjust,
             PropertyID::FontVariationSettings,
         },
@@ -2797,12 +2690,12 @@ RefPtr<StyleValue const> Parser::parse_font_value(TokenStream<ComponentValue>& t
             line_height.release_nonnull(),
 
             // Reset implicitly
-            initial_value,                                   // font-feature-settings
-            property_initial_value(PropertyID::FontKerning), // font-kerning,
-            initial_value,                                   // font-language-override
-                                                             // FIXME: font-optical-sizing,
-                                                             // FIXME: font-size-adjust,
-            initial_value,                                   // font-variation-settings
+            property_initial_value(PropertyID::FontFeatureSettings),   // font-feature-settings
+            property_initial_value(PropertyID::FontKerning),           // font-kerning,
+            property_initial_value(PropertyID::FontLanguageOverride),  // font-language-override
+            property_initial_value(PropertyID::FontOpticalSizing),     // font-optical-sizing,
+                                                                       // FIXME: font-size-adjust,
+            property_initial_value(PropertyID::FontVariationSettings), // font-variation-settings
         });
 }
 
@@ -2912,12 +2805,8 @@ RefPtr<StyleValue const> Parser::parse_font_feature_settings_value(TokenStream<C
     auto transaction = tokens.begin_transaction();
     auto tag_values = parse_a_comma_separated_list_of_component_values(tokens);
 
-    // "The computed value of font-feature-settings is a map, so any duplicates in the specified value must not be preserved.
-    // If the same feature tag appears more than once, the value associated with the last appearance supersedes any previous
-    // value for that axis."
-    // So, we deduplicate them here using a HashSet.
-
-    OrderedHashMap<FlyString, NonnullRefPtr<OpenTypeTaggedStyleValue const>> feature_tags_map;
+    StyleValueVector feature_tags;
+    feature_tags.ensure_capacity(tag_values.size());
     for (auto const& values : tag_values) {
         // <feature-tag-value> = <opentype-tag> [ <integer [0,∞]> | on | off ]?
         TokenStream tag_tokens { values };
@@ -2955,49 +2844,11 @@ RefPtr<StyleValue const> Parser::parse_font_feature_settings_value(TokenStream<C
         if (!opentype_tag || !value || tag_tokens.has_next_token())
             return nullptr;
 
-        feature_tags_map.set(opentype_tag->string_value(), OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, opentype_tag->string_value(), value.release_nonnull()));
+        feature_tags.append(OpenTypeTaggedStyleValue::create(OpenTypeTaggedStyleValue::Mode::FontFeatureSettings, opentype_tag->string_value(), value.release_nonnull()));
     }
-
-    // "The computed value contains the de-duplicated feature tags, sorted in ascending order by code unit."
-    StyleValueVector feature_tags;
-    feature_tags.ensure_capacity(feature_tags_map.size());
-    for (auto const& [key, feature_tag] : feature_tags_map)
-        feature_tags.append(feature_tag);
-
-    quick_sort(feature_tags, [](auto& a, auto& b) {
-        return a->as_open_type_tagged().tag() < b->as_open_type_tagged().tag();
-    });
 
     transaction.commit();
     return StyleValueList::create(move(feature_tags), StyleValueList::Separator::Comma);
-}
-
-RefPtr<StyleValue const> Parser::parse_font_style_value(TokenStream<ComponentValue>& tokens)
-{
-    // https://drafts.csswg.org/css-fonts/#font-style-prop
-    // normal | italic | left | right | oblique <angle [-90deg,90deg]>?
-    auto transaction = tokens.begin_transaction();
-    auto keyword_value = parse_css_value_for_property(PropertyID::FontStyle, tokens);
-    if (!keyword_value || !keyword_value->is_keyword())
-        return nullptr;
-    auto font_style = keyword_to_font_style(keyword_value->to_keyword());
-    VERIFY(font_style.has_value());
-    if (tokens.has_next_token() && keyword_value->to_keyword() == Keyword::Oblique) {
-        if (auto angle_value = parse_angle_value(tokens)) {
-            if (angle_value->is_angle()) {
-                auto angle = angle_value->as_angle().angle();
-                auto angle_degrees = angle.to_degrees();
-                if (angle_degrees < -90 || angle_degrees > 90)
-                    return nullptr;
-            }
-
-            transaction.commit();
-            return FontStyleStyleValue::create(*font_style, angle_value);
-        }
-    }
-
-    transaction.commit();
-    return FontStyleStyleValue::create(*font_style);
 }
 
 RefPtr<StyleValue const> Parser::parse_font_variation_settings_value(TokenStream<ComponentValue>& tokens)
@@ -3865,10 +3716,9 @@ RefPtr<StyleValue const> Parser::parse_math_depth_value(TokenStream<ComponentVal
     auto transaction = tokens.begin_transaction();
 
     // auto-add
-    if (tokens.next_token().is_ident("auto-add"sv)) {
-        tokens.discard_a_token(); // auto-add
+    if (auto keyword = parse_all_as_single_keyword_value(tokens, Keyword::AutoAdd)) {
         transaction.commit();
-        return MathDepthStyleValue::create_auto_add();
+        return keyword;
     }
 
     // add(<integer>)
@@ -3884,7 +3734,7 @@ RefPtr<StyleValue const> Parser::parse_math_depth_value(TokenStream<ComponentVal
                 return nullptr;
             tokens.discard_a_token(); // add()
             transaction.commit();
-            return MathDepthStyleValue::create_add(integer_value.release_nonnull());
+            return AddFunctionStyleValue::create(integer_value.release_nonnull());
         }
         return nullptr;
     }
@@ -3892,7 +3742,7 @@ RefPtr<StyleValue const> Parser::parse_math_depth_value(TokenStream<ComponentVal
     // <integer>
     if (auto integer_value = parse_integer_value(tokens)) {
         transaction.commit();
-        return MathDepthStyleValue::create_integer(integer_value.release_nonnull());
+        return integer_value;
     }
 
     return nullptr;
@@ -4969,7 +4819,7 @@ RefPtr<StyleValue const> Parser::parse_transition_value(TokenStream<ComponentVal
     // <single-transition-property>, then the declaration is invalid.
     auto const& transition_properties = parsed_value->as_shorthand().longhand(PropertyID::TransitionProperty)->as_value_list().values();
 
-    if (transition_properties.size() > 1 && transition_properties.find_first_index_if([](auto const& transition_property) { return transition_property->to_keyword() == Keyword::None; }).has_value())
+    if (transition_properties.size() > 1 && transition_properties.contains([](auto const& transition_property) { return transition_property->to_keyword() == Keyword::None; }))
         return nullptr;
 
     return parsed_value;
@@ -5877,12 +5727,8 @@ RefPtr<StyleValue const> Parser::parse_filter_value_list_value(TokenStream<Compo
                     return {};
                 }
             }
-            Optional<Color> color = {};
-            if (maybe_color)
-                // FIXME: We should support colors which require compute-time information (i.e. `em` and `vw` to `px` ratios).
-                color = maybe_color->to_color({});
 
-            return if_no_more_tokens_return(FilterOperation::DropShadow { x_offset.value(), y_offset.value(), maybe_radius, color });
+            return if_no_more_tokens_return(FilterOperation::DropShadow { x_offset.value(), y_offset.value(), maybe_radius, maybe_color });
         } else if (filter_token == FilterToken::HueRotate) {
             // hue-rotate( [ <angle> | <zero> ]? )
             if (!tokens.has_next_token())

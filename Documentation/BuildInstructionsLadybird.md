@@ -7,7 +7,7 @@ Qt6 development packages, nasm, additional build tools, and a C++23 capable comp
 We currently use gcc-14 and clang-20 in our CI pipeline. If these versions are not available on your system, see
 [`Meta/find_compiler.py`](../Meta/find_compiler.py) for the minimum compatible version.
 
-CMake 3.25 or newer must be available in $PATH.
+CMake 3.30 or newer must be available in $PATH.
 
 ---
 
@@ -18,9 +18,9 @@ CMake 3.25 or newer must be available in $PATH.
 sudo apt install autoconf autoconf-archive automake build-essential ccache cmake curl fonts-liberation2 git libdrm-dev libgl1-mesa-dev libtool nasm ninja-build pkg-config python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip
 ```
 
-#### CMake 3.25 or newer:
+#### CMake 3.30 or newer:
 
-- Recommendation: Install `CMake 3.25` or newer from [Kitware's apt repository](https://apt.kitware.com/):
+- Recommendation: Install `CMake 3.30` or newer from [Kitware's apt repository](https://apt.kitware.com/):
 
 > [!NOTE]
 > This repository is Ubuntu-only
@@ -73,7 +73,7 @@ sudo apt install libpulse-dev
 ### Arch Linux/Manjaro:
 
 ```
-sudo pacman -S --needed autoconf-archive automake base-devel ccache cmake curl libgl nasm ninja qt6-base qt6-tools qt6-wayland ttf-liberation tar unzip zip
+sudo pacman -S --needed autoconf-archive base-devel ccache cmake curl git libgl nasm ninja python qt6-base qt6-tools ttf-liberation tar unzip zip
 ```
 
 Optionally, install the PulseAudio headers for audio playback support:
@@ -172,8 +172,8 @@ brew install qt
 
 ### Windows:
 
-WSL2 is the supported way to build Ladybird on Windows. An experimental native build is being setup but does not fully
-build.
+WSL2 is the supported way to build Ladybird on Windows. A native build is also possible, however it is still experimental,
+and there are several issues. 
 
 #### WSL2
 - Create a WSL2 environment using one of the Linux distros listed above. Ubuntu or Fedora is recommended.
@@ -187,7 +187,7 @@ MinGW/MSYS2 are not supported.
 ##### Clang-CL (experimental)
 
 > [!NOTE]
-> This only gets the cmake to configure. There is still a lot of work to do in terms of getting it to build.
+> There are still windows specific issues and the functionality is limited.
 
 In order to get pkg-config available for the vcpkg install, you can use Chocolatey to install it.
 To install Chocolatey, see `https://chocolatey.org/install`.
@@ -195,6 +195,10 @@ To install Chocolatey, see `https://chocolatey.org/install`.
 Then Install pkg-config using chocolatey.
 ```
 choco install pkgconfiglite -y
+```
+In a VS command prompt build using ladybird.py:
+```
+py Meta\ladybird.py build
 ```
 
 ### Android:
@@ -238,7 +242,7 @@ BUILD_PRESET=Debug ./Meta/ladybird.py run
 
 Note that debug symbols are available in both Release and Debug builds.
 
-If you want to run other applications, such as the the JS REPL or the WebAssembly REPL, specify an executable with
+If you want to run other applications, such as the JS REPL or the WebAssembly REPL, specify an executable with
 `./Meta/ladybird.py run <executable_name>`.
 
 ### The User Interfaces

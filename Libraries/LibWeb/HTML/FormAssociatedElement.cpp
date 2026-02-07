@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2024, Jelle Raaijmakers <jelle@ladybird.org>
+ * Copyright (c) 2024-2026, Jelle Raaijmakers <jelle@ladybird.org>
  * Copyright (c) 2024, Tim Ledbetter <tim.ledbetter@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -28,7 +28,7 @@
 #include <LibWeb/HTML/ValidityState.h>
 #include <LibWeb/Infra/Strings.h>
 #include <LibWeb/Painting/Paintable.h>
-#include <LibWeb/Selection/Selection.h>
+#include <LibWeb/UIEvents/InputTypes.h>
 
 namespace Web::HTML {
 
@@ -843,7 +843,7 @@ void FormAssociatedTextControlElement::set_the_selection_range(Optional<WebIDL::
     }
 }
 
-void FormAssociatedTextControlElement::handle_insert(Utf16String const& data)
+void FormAssociatedTextControlElement::handle_insert(FlyString const& input_type, Utf16String const& data)
 {
     auto text_node = form_associated_element_to_text_node();
     if (!text_node || !is_mutable())
@@ -862,10 +862,17 @@ void FormAssociatedTextControlElement::handle_insert(Utf16String const& data)
     MUST(set_range_text(data_for_insertion, selection_start, selection_end, Bindings::SelectionMode::End));
 
     text_node->invalidate_style(DOM::StyleInvalidationReason::EditingInsertion);
-    did_edit_text_node();
+
+    // The input event's data attribute is only set for certain input types according to:
+    // https://w3c.github.io/input-events/#overview
+    Optional<Utf16String> data_for_input_event;
+    if (first_is_one_of(input_type, UIEvents::InputTypes::insertText, UIEvents::InputTypes::insertFromPaste))
+        data_for_input_event = data_for_insertion;
+
+    did_edit_text_node(input_type, data_for_input_event);
 }
 
-void FormAssociatedTextControlElement::handle_delete(DeleteDirection direction)
+void FormAssociatedTextControlElement::handle_delete(FlyString const& input_type)
 {
     auto text_node = form_associated_element_to_text_node();
     if (!text_node || !is_mutable())
@@ -875,7 +882,7 @@ void FormAssociatedTextControlElement::handle_delete(DeleteDirection direction)
     auto selection_end = this->selection_end();
 
     if (selection_start == selection_end) {
-        if (direction == DeleteDirection::Backward) {
+        if (input_type == UIEvents::InputTypes::deleteContentBackward) {
             if (auto offset = text_node->grapheme_segmenter().previous_boundary(m_selection_end); offset.has_value())
                 selection_start = *offset;
         } else {
@@ -887,21 +894,19 @@ void FormAssociatedTextControlElement::handle_delete(DeleteDirection direction)
     MUST(set_range_text({}, selection_start, selection_end, Bindings::SelectionMode::End));
 
     text_node->invalidate_style(DOM::StyleInvalidationReason::EditingDeletion);
-    did_edit_text_node();
+    did_edit_text_node(input_type, {});
 }
 
-EventResult FormAssociatedTextControlElement::handle_return_key(FlyString const&)
+Optional<Utf16String> FormAssociatedTextControlElement::selected_text_for_stringifier() const
 {
-    auto* input_element = as_if<HTMLInputElement>(form_associated_element_to_html_element());
-    if (!input_element)
-        return EventResult::Dropped;
+    // https://w3c.github.io/selection-api/#dom-selection-stringifier
+    // Used for clipboard copy and window.getSelection().toString() when this element is active.
+    size_t start = this->selection_start();
+    size_t end = this->selection_end();
+    if (start >= end)
+        return {};
 
-    if (auto* form = input_element->form())
-        form->implicitly_submit_form().release_value_but_fixme_should_propagate_errors();
-    else
-        input_element->commit_pending_changes();
-
-    return EventResult::Handled;
+    return Utf16String::from_utf16(relevant_value().substring_view(start, end - start));
 }
 
 void FormAssociatedTextControlElement::collapse_selection_to_offset(size_t position)

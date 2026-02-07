@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2024, Lucas Chollet <lucas.chollet@serenityos.org>
+ * Copyright (c) 2026, Sam Atkins <sam@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -75,6 +76,17 @@ ValueComparingNonnullRefPtr<ColorFunctionStyleValue const> ColorFunctionStyleVal
     VERIFY_NOT_REACHED();
 }
 
+ValueComparingNonnullRefPtr<StyleValue const> ColorFunctionStyleValue::absolutized(ComputationContext const& context) const
+{
+    auto channel0 = m_properties.channels[0]->absolutized(context);
+    auto channel1 = m_properties.channels[1]->absolutized(context);
+    auto channel2 = m_properties.channels[2]->absolutized(context);
+    auto alpha = m_properties.alpha->absolutized(context);
+    if (channel0 == m_properties.channels[0] && channel1 == m_properties.channels[1] && channel2 == m_properties.channels[2] && alpha == m_properties.alpha)
+        return *this;
+    return ColorFunctionStyleValue::create(string_view_from_color_type(m_color_type), move(channel0), move(channel1), move(channel2), move(alpha));
+}
+
 bool ColorFunctionStyleValue::equals(StyleValue const& other) const
 {
     if (type() != other.type())
@@ -105,7 +117,7 @@ Optional<ColorFunctionStyleValue::Resolved> ColorFunctionStyleValue::resolve_pro
 }
 
 // https://www.w3.org/TR/css-color-4/#serializing-color-function-values
-String ColorFunctionStyleValue::to_string(SerializationMode mode) const
+void ColorFunctionStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
 {
     auto convert_percentage = [&](ValueComparingNonnullRefPtr<StyleValue const> const& value) -> RemoveReference<decltype(value)> {
         if (value->is_percentage())
@@ -141,20 +153,17 @@ String ColorFunctionStyleValue::to_string(SerializationMode mode) const
     if (alpha->is_number() && alpha->as_number().number() < 0)
         alpha = NumberStyleValue::create(0);
 
+    builder.appendff("color({} ", string_view_from_color_type(m_color_type));
+    convert_percentage(m_properties.channels[0])->serialize(builder, mode);
+    builder.append(' ');
+    convert_percentage(m_properties.channels[1])->serialize(builder, mode);
+    builder.append(' ');
+    convert_percentage(m_properties.channels[2])->serialize(builder, mode);
     if (is_alpha_required) {
-        return MUST(String::formatted("color({} {} {} {} / {})",
-            string_view_from_color_type(m_color_type),
-            convert_percentage(m_properties.channels[0])->to_string(mode),
-            convert_percentage(m_properties.channels[1])->to_string(mode),
-            convert_percentage(m_properties.channels[2])->to_string(mode),
-            alpha->to_string(mode)));
+        builder.append(" / "sv);
+        alpha->serialize(builder, mode);
     }
-
-    return MUST(String::formatted("color({} {} {} {})",
-        string_view_from_color_type(m_color_type),
-        convert_percentage(m_properties.channels[0])->to_string(mode),
-        convert_percentage(m_properties.channels[1])->to_string(mode),
-        convert_percentage(m_properties.channels[2])->to_string(mode)));
+    builder.append(')');
 }
 
 Optional<Color> ColorFunctionStyleValue::to_color(ColorResolutionContext color_resolution_context) const

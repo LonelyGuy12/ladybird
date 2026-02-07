@@ -17,18 +17,17 @@
 
 namespace Web::CSS {
 
-String CursorStyleValue::to_string(SerializationMode mode) const
+void CursorStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
 {
-    StringBuilder builder;
-
-    builder.append(m_properties.image->to_string(mode));
+    m_properties.image->serialize(builder, mode);
 
     if (m_properties.x) {
         VERIFY(m_properties.y);
-        builder.appendff(" {} {}", m_properties.x->to_string(mode), m_properties.y->to_string(mode));
+        builder.append(' ');
+        m_properties.x->serialize(builder, mode);
+        builder.append(' ');
+        m_properties.y->serialize(builder, mode);
     }
-
-    return builder.to_string_without_validation();
 }
 
 ValueComparingNonnullRefPtr<StyleValue const> CursorStyleValue::absolutized(ComputationContext const& computation_context) const
@@ -75,7 +74,7 @@ Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithS
         // 32x32 is selected arbitrarily.
         // FIXME: Ask the OS for the default size?
         CSSPixelSize const default_cursor_size { 32, 32 };
-        auto cursor_css_size = run_default_sizing_algorithm({}, {}, image.natural_width(), image.natural_height(), image.natural_aspect_ratio(), default_cursor_size);
+        auto cursor_css_size = run_default_sizing_algorithm({}, {}, { image.natural_width(), image.natural_height(), image.natural_aspect_ratio() }, default_cursor_size);
         // FIXME: How do we determine what cursor sizes the OS allows?
         // We don't multiply by the pixel ratio, because we want to use the image's actual pixel size.
         DevicePixelSize cursor_device_size { cursor_css_size.to_type<double>().to_rounded<int>() };
@@ -101,7 +100,7 @@ Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithS
         // Paint the cursor into a bitmap.
         auto display_list = Painting::DisplayList::create(document.page().client().device_pixels_per_css_pixel());
         Painting::DisplayListRecorder display_list_recorder(display_list);
-        DisplayListRecordingContext paint_context { display_list_recorder, document.page().palette(), document.page().client().device_pixels_per_css_pixel() };
+        DisplayListRecordingContext paint_context { display_list_recorder, document.page().palette(), document.page().client().device_pixels_per_css_pixel(), document.page().chrome_metrics() };
 
         image.resolve_for_size(layout_node, CSSPixelSize { bitmap.size() });
         image.paint(paint_context, DevicePixelRect { bitmap.rect() }, ImageRendering::Auto);

@@ -66,6 +66,7 @@ void FlexFormattingContext::run(AvailableSpace const& available_space)
         return;
     }
 
+    FORMATTING_CONTEXT_TRACE();
     m_available_space = available_space;
 
     // 1. Generate anonymous flex items
@@ -96,10 +97,6 @@ void FlexFormattingContext::run(AvailableSpace const& available_space)
 
     // 3. Determine the flex base size and hypothetical main size of each item
     for (auto& item : m_flex_items) {
-        if (item.box->is_replaced_box()) {
-            // FIXME: Get rid of prepare_for_replaced_layout() and make replaced elements figure out their intrinsic size lazily.
-            static_cast<ReplacedBox&>(*item.box).prepare_for_replaced_layout();
-        }
         determine_flex_base_size(item);
     }
 
@@ -127,10 +124,40 @@ void FlexFormattingContext::run(AvailableSpace const& available_space)
             return false;
         return true;
     }();
+
+    // OPTIMIZATION: Skip automatic_minimum_size calculation when we can prove it won't affect the result.
+    //               We compute:
+    //                   hypothetical_main_size = clamp(flex_base_size, automatic_minimum_size, max_size)
+    //               For non-replaced elements without aspect ratio, the spec defines:
+    //                   automatic_minimum_size = content_based_minimum_size
+    //                   content_based_minimum_size = min(content_size_suggestion, specified_size_suggestion)
+    //               This means:
+    //                   automatic_minimum_size <= specified_size_suggestion (when specified exists).
+    //.              So if flex_base_size == specified_size_suggestion, then automatic_minimum_size <= flex_base_size,
+    //               and the lower clamp becomes a no-op. We can substitute 0 and get the same result.
+    //.              We exclude: scroll containers (content can overflow, different behavior), replaced elements (use
+    //               different formula with intrinsic sizes), and items with aspect-ratio (transferred_size_suggestion
+    //               complicates the calculation).
+    auto can_skip_automatic_minimum_size_for_item = [&](FlexItem const& item) -> bool {
+        if (item.box->is_scroll_container())
+            return false;
+        if (item.box->is_replaced_box() || item.box->has_preferred_aspect_ratio())
+            return false;
+        if (!item.used_flex_basis_is_definite)
+            return false;
+        return item.flex_base_size == specified_size_suggestion(item);
+    };
+
     for (auto& item : m_flex_items) {
         // The hypothetical main size is the item’s flex base size clamped according to its used min and max main sizes (and flooring the content box size at zero).
         auto clamp_max = has_main_max_size(item.box) ? specified_main_max_size(item) : CSSPixels::max();
-        auto clamp_min = has_main_min_size(item.box) ? specified_main_min_size(item) : (should_skip_automatic_minimum_size_clamp ? 0 : automatic_minimum_size(item));
+        auto clamp_min = [&] {
+            if (has_main_min_size(item.box))
+                return specified_main_min_size(item);
+            if (should_skip_automatic_minimum_size_clamp || can_skip_automatic_minimum_size_for_item(item))
+                return CSSPixels(0);
+            return automatic_minimum_size(item);
+        }();
         item.hypothetical_main_size = max(CSSPixels(0), css_clamp(item.flex_base_size, clamp_min, clamp_max));
     }
 
@@ -744,8 +771,9 @@ void FlexFormattingContext::determine_flex_base_size(FlexItem& item)
     //         - using stretch-fit main size if the flex basis is indefinite, there is no
     //           intrinsic size and no cross size to resolve the ratio against.
     //         - in response to cross size min/max constraints.
-    if (item.box->has_natural_aspect_ratio()) {
-        if (!item.used_flex_basis_is_definite && !item.box->has_natural_width() && !item.box->has_natural_height() && !has_definite_cross_size(item)) {
+    auto auto_size = item.box->auto_content_box_size();
+    if (auto_size.has_aspect_ratio()) {
+        if (!item.used_flex_basis_is_definite && !auto_size.has_width() && !auto_size.has_height() && !has_definite_cross_size(item)) {
             item.flex_base_size = inner_main_size(m_flex_container_state);
         }
         item.flex_base_size = adjust_main_size_through_aspect_ratio_for_cross_size_min_max_constraints(child_box, item.flex_base_size, computed_cross_min_size(child_box), computed_cross_max_size(child_box));
@@ -1156,7 +1184,8 @@ void FlexFormattingContext::determine_hypothetical_cross_size_of_item(FlexItem& 
     }
 
     if (item.box->has_preferred_aspect_ratio()) {
-        if (item.used_flex_basis_is_definite || (item.box->has_natural_width() && item.box->has_natural_height())) {
+        auto auto_size = item.box->auto_content_box_size();
+        if (item.used_flex_basis_is_definite || (auto_size.has_width() && auto_size.has_height())) {
             item.hypothetical_cross_size = calculate_cross_size_from_main_size_and_aspect_ratio(item.main_size.value(), item.box->preferred_aspect_ratio().value());
             return;
         }
@@ -2011,13 +2040,14 @@ bool FlexFormattingContext::should_treat_cross_max_size_as_none(Box const& box) 
 
 CSSPixels FlexFormattingContext::calculate_cross_min_content_contribution(FlexItem const& item, bool resolve_percentage_min_max_sizes) const
 {
+    bool cross_size_auto = should_treat_cross_size_as_auto(item.box);
     auto size = [&] {
-        if (should_treat_cross_size_as_auto(item.box))
+        if (cross_size_auto)
             return calculate_min_content_cross_size(item);
         return !is_row_layout() ? get_pixel_width(item, computed_cross_size(item.box)) : get_pixel_height(item, computed_cross_size(item.box));
     }();
 
-    if (item.box->has_preferred_aspect_ratio())
+    if (cross_size_auto && item.box->has_preferred_aspect_ratio())
         size = adjust_cross_size_through_aspect_ratio_for_main_size_min_max_constraints(item.box, size, computed_main_min_size(item.box), computed_main_max_size(item.box));
 
     auto const& computed_min_size = this->computed_cross_min_size(item.box);
@@ -2033,13 +2063,14 @@ CSSPixels FlexFormattingContext::calculate_cross_min_content_contribution(FlexIt
 
 CSSPixels FlexFormattingContext::calculate_cross_max_content_contribution(FlexItem const& item, bool resolve_percentage_min_max_sizes) const
 {
+    bool cross_size_auto = should_treat_cross_size_as_auto(item.box);
     auto size = [&] {
-        if (should_treat_cross_size_as_auto(item.box))
+        if (cross_size_auto)
             return calculate_max_content_cross_size(item);
         return !is_row_layout() ? get_pixel_width(item, computed_cross_size(item.box)) : get_pixel_height(item, computed_cross_size(item.box));
     }();
 
-    if (item.box->has_preferred_aspect_ratio())
+    if (cross_size_auto && item.box->has_preferred_aspect_ratio())
         size = adjust_cross_size_through_aspect_ratio_for_main_size_min_max_constraints(item.box, size, computed_main_min_size(item.box), computed_main_max_size(item.box));
 
     auto const& computed_min_size = this->computed_cross_min_size(item.box);
@@ -2059,8 +2090,12 @@ CSSPixels FlexFormattingContext::calculate_width_to_use_when_determining_intrins
     auto computed_width = box.computed_values().width();
     auto const& computed_min_width = box.computed_values().min_width();
     auto const& computed_max_width = box.computed_values().max_width();
-    auto clamp_min = (!computed_min_width.is_auto() && (!computed_min_width.contains_percentage())) ? get_pixel_width(item, computed_min_width) : 0;
-    auto clamp_max = (!should_treat_max_width_as_none(box, m_available_space_for_items->space.width) && (!computed_max_width.contains_percentage())) ? get_pixel_width(item, computed_max_width) : CSSPixels::max();
+
+    // We can resolve percentage min/max-width if the available width is definite.
+    bool can_resolve_percentages = m_available_space_for_items->space.width.is_definite();
+
+    auto clamp_min = (!computed_min_width.is_auto() && (!computed_min_width.contains_percentage() || can_resolve_percentages)) ? get_pixel_width(item, computed_min_width) : 0;
+    auto clamp_max = (!should_treat_max_width_as_none(box, m_available_space_for_items->space.width) && (!computed_max_width.contains_percentage() || can_resolve_percentages)) ? get_pixel_width(item, computed_max_width) : CSSPixels::max();
 
     CSSPixels width;
     if (should_treat_width_as_auto(box, m_available_space_for_items->space) || computed_width.is_fit_content())

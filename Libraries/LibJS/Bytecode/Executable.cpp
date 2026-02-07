@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/BinarySearch.h>
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/RegexTable.h>
+#include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibJS/SourceCode.h>
 
@@ -25,6 +27,8 @@ Executable::Executable(
     NonnullRefPtr<SourceCode const> source_code,
     size_t number_of_property_lookup_caches,
     size_t number_of_global_variable_caches,
+    size_t number_of_template_object_caches,
+    size_t number_of_object_shape_caches,
     size_t number_of_registers,
     Strict strict)
     : bytecode(move(bytecode))
@@ -39,6 +43,8 @@ Executable::Executable(
 {
     property_lookup_caches.resize(number_of_property_lookup_caches);
     global_variable_caches.resize(number_of_global_variable_caches);
+    template_object_caches.resize(number_of_template_object_caches);
+    object_shape_caches.resize(number_of_object_shape_caches);
 }
 
 Executable::~Executable() = default;
@@ -90,6 +96,9 @@ void Executable::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(constants);
+    for (auto& cache : template_object_caches)
+        visitor.visit(cache.cached_template_object);
+    property_key_table->visit_edges(visitor);
 }
 
 Optional<Executable::ExceptionHandlers const&> Executable::exception_handlers_for_offset(size_t offset) const
@@ -107,25 +116,32 @@ UnrealizedSourceRange Executable::source_range_at(size_t offset) const
         return {};
     auto it = InstructionStreamIterator(bytecode.span().slice(offset), this);
     VERIFY(!it.at_end());
-    auto mapping = source_map.get(offset);
-    if (!mapping.has_value())
+    auto* entry = binary_search(source_map, offset, nullptr, [](size_t needle, SourceMapEntry const& entry) -> int {
+        if (needle < entry.bytecode_offset)
+            return -1;
+        if (needle > entry.bytecode_offset)
+            return 1;
+        return 0;
+    });
+    if (!entry)
         return {};
     return UnrealizedSourceRange {
         .source_code = source_code,
-        .start_offset = mapping->source_start_offset,
-        .end_offset = mapping->source_end_offset,
+        .start_offset = entry->source_record.source_start_offset,
+        .end_offset = entry->source_record.source_end_offset,
     };
 }
 
 Operand Executable::original_operand_from_raw(u32 raw) const
 {
+    // NB: Layout is [registers | locals | constants | arguments]
     if (raw < number_of_registers)
         return Operand { Operand::Type::Register, raw };
-    if (raw < local_index_base)
-        return Operand { Operand::Type::Constant, raw - static_cast<u32>(number_of_registers) };
+    if (raw < registers_and_locals_count)
+        return Operand { Operand::Type::Local, raw - local_index_base };
     if (raw < argument_index_base)
-        return Operand { Operand::Type::Local, raw - static_cast<u32>(local_index_base) };
-    return Operand { Operand::Type::Argument, raw - static_cast<u32>(argument_index_base) };
+        return Operand { Operand::Type::Constant, raw - registers_and_locals_count };
+    return Operand { Operand::Type::Argument, raw - argument_index_base };
 }
 
 }

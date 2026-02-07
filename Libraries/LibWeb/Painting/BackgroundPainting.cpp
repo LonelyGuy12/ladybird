@@ -15,7 +15,7 @@
 #include <LibWeb/Painting/Blending.h>
 #include <LibWeb/Painting/DisplayList.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
-#include <LibWeb/Painting/PaintableBox.h>
+#include <LibWeb/Painting/PaintableWithLines.h>
 
 namespace Web::Painting {
 
@@ -98,7 +98,7 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
         display_list_recorder.save();
         auto display_list = compute_text_clip_paths(context, paintable_box, resolved_background.background_rect.location());
         auto rect = context.rounded_device_rect(resolved_background.background_rect);
-        display_list_recorder.add_mask(move(display_list), rect.to_type<int>());
+        display_list_recorder.add_mask(move(display_list), rect.to_type<int>(), Gfx::MaskKind::Alpha);
     }
 
     BackgroundBox border_box {
@@ -180,17 +180,8 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
         if (background_positioning_area.is_empty())
             continue;
 
-        if (layer.position_edge_x == CSS::PositionEdge::Right) {
-            image_rect.set_right_without_resize(background_positioning_area.right() - layer.offset_x);
-        } else {
-            image_rect.set_left(background_positioning_area.left() + layer.offset_x);
-        }
-
-        if (layer.position_edge_y == CSS::PositionEdge::Bottom) {
-            image_rect.set_bottom_without_resize(background_positioning_area.bottom() - layer.offset_y);
-        } else {
-            image_rect.set_top(background_positioning_area.top() + layer.offset_y);
-        }
+        image_rect.set_left(background_positioning_area.left() + layer.position_x);
+        image_rect.set_top(background_positioning_area.top() + layer.position_y);
 
         // Repetition
         bool repeat_x = false;
@@ -297,7 +288,7 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
 
         Gfx::CompositingAndBlendingOperator compositing_and_blending_operator = mix_blend_mode_to_compositing_and_blending_operator(layer.blend_mode);
         if (compositing_and_blending_operator != Gfx::CompositingAndBlendingOperator::Normal) {
-            display_list_recorder.apply_compositing_and_blending_operator(compositing_and_blending_operator);
+            display_list_recorder.apply_effects(1.0f, compositing_and_blending_operator);
         }
 
         if (auto color = image.color_if_single_pixel_bitmap(); color.has_value()) {
@@ -343,24 +334,18 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
     }
 }
 
-ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> const& layers, PaintableBox const& paintable_box, Color background_color, CSSPixelRect const& border_rect, BorderRadiiData const& border_radii)
+ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> const& layers, PaintableBox const& paintable_box, Color background_color, CSS::BackgroundBox background_color_clip, CSSPixelRect const& border_rect, BorderRadiiData const& border_radii)
 {
-    auto layer_is_paintable = [&](auto& layer) {
-        return layer.background_image && layer.background_image->is_paintable();
-    };
-
     BackgroundBox border_box {
         border_rect,
         border_radii
     };
 
-    auto color_box = border_box;
-    if (!layers.is_empty())
-        color_box = get_box(layers.last().clip, border_box, paintable_box);
+    auto color_box = get_box(background_color_clip, border_box, paintable_box);
 
     Vector<ResolvedBackgroundLayerData> resolved_layers;
     for (auto const& layer : layers) {
-        if (!layer_is_paintable(layer))
+        if (!layer.background_image->is_paintable())
             continue;
 
         auto background_positioning_area = get_box(layer.origin, border_box, paintable_box).rect;
@@ -376,7 +361,7 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
         }
         auto concrete_image_size = CSS::run_default_sizing_algorithm(
             specified_width, specified_height,
-            image.natural_width(), image.natural_height(), image.natural_aspect_ratio(),
+            { image.natural_width(), image.natural_height(), image.natural_aspect_ratio() },
             background_positioning_area.size());
 
         // If any of these are zero, the NaNs will pop up in the painting code.
@@ -419,11 +404,18 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
             // background positioning area, then the rounded width X' = W / round(W / X)
             // where round() is a function that returns the nearest natural number
             // (integer greater than zero).
+            auto round_to_natural = [](CSSPixels value) {
+                auto rounded = round(value);
+                if (rounded <= CSSPixels(0))
+                    return CSSPixels(1);
+                return rounded;
+            };
+
             if (layer.repeat_x == CSS::Repetition::Round) {
-                image_rect.set_width(background_positioning_area.width() / round(background_positioning_area.width() / image_rect.width()));
+                image_rect.set_width(background_positioning_area.width() / round_to_natural(background_positioning_area.width() / image_rect.width()));
             }
             if (layer.repeat_y == CSS::Repetition::Round) {
-                image_rect.set_height(background_positioning_area.height() / round(background_positioning_area.height() / image_rect.height()));
+                image_rect.set_height(background_positioning_area.height() / round_to_natural(background_positioning_area.height() / image_rect.height()));
             }
 
             // If background-repeat is round for one dimension only and if background-size is auto
@@ -442,16 +434,14 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
         CSSPixels space_x = background_positioning_area.width() - image_rect.width();
         CSSPixels space_y = background_positioning_area.height() - image_rect.height();
 
-        CSSPixels offset_x = layer.position_offset_x.to_px(paintable_box.layout_node(), space_x);
-        CSSPixels offset_y = layer.position_offset_y.to_px(paintable_box.layout_node(), space_y);
+        CSSPixels position_x = layer.position_x.to_px(paintable_box.layout_node(), space_x);
+        CSSPixels position_y = layer.position_y.to_px(paintable_box.layout_node(), space_y);
 
         resolved_layers.append({ .background_image = layer.background_image,
             .attachment = layer.attachment,
             .clip = layer.clip,
-            .position_edge_x = layer.position_edge_x,
-            .position_edge_y = layer.position_edge_y,
-            .offset_x = offset_x,
-            .offset_y = offset_y,
+            .position_x = position_x,
+            .position_y = position_y,
             .background_positioning_area = background_positioning_area,
             .image_rect = image_rect,
             .repeat_x = layer.repeat_x,
@@ -462,7 +452,7 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
     return ResolvedBackground {
         .color_box = color_box,
         .layers = move(resolved_layers),
-        .needs_text_clip = !layers.is_empty() && layers.last().clip == CSS::BackgroundBox::Text,
+        .needs_text_clip = background_color_clip == CSS::BackgroundBox::Text,
         .background_rect = border_rect,
         .color = background_color
     };

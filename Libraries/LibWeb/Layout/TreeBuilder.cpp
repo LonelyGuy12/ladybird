@@ -199,6 +199,8 @@ class GeneratedContentImageProvider final
     GC_DECLARE_ALLOCATOR(GeneratedContentImageProvider);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     virtual ~GeneratedContentImageProvider() override = default;
 
     virtual void finalize() override
@@ -250,6 +252,7 @@ private:
     {
         Base::visit_edges(visitor);
         visitor.visit(m_layout_node);
+        m_image->visit_edges(visitor);
     }
 
     virtual void image_provider_visit_edges(Visitor& visitor) const override
@@ -269,13 +272,13 @@ private:
 
 GC_DEFINE_ALLOCATOR(GeneratedContentImageProvider);
 
-void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::PseudoElement pseudo_element, AppendOrPrepend mode)
+GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::PseudoElement pseudo_element, Optional<AppendOrPrepend> insertion_mode)
 {
     auto& document = element.document();
 
     auto pseudo_element_style = element.computed_properties(pseudo_element);
     if (!pseudo_element_style)
-        return;
+        return {};
 
     auto initial_quote_nesting_level = m_quote_nesting_level;
     DOM::AbstractElement element_reference { element, pseudo_element };
@@ -290,12 +293,12 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Ps
         && (pseudo_element_display.is_none()
             || pseudo_element_content.type == CSS::ContentData::Type::Normal
             || pseudo_element_content.type == CSS::ContentData::Type::None))
-        return;
+        return {};
 
     // For ::marker with content or display 'none' -- do nothing.
     if (pseudo_element == CSS::PseudoElement::Marker
         && (pseudo_element_display.is_none() || pseudo_element_content.type == CSS::ContentData::Type::None))
-        return;
+        return {};
 
     // For ::marker with content 'normal', create the marker pseudo-element from a ListItemMarkerBox
     // FIXME: This + ListItemBox + ListItemMarkerBox will disappear once ::marker pseudo-elements with 'normal' content
@@ -303,10 +306,19 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Ps
     //        See: https://github.com/LadybirdBrowser/ladybird/issues/4782
     if (pseudo_element == CSS::PseudoElement::Marker && pseudo_element_content.type == CSS::ContentData::Type::Normal)
         if (auto* list_box = as_if<ListItemBox>(*element.layout_node())) {
+            // https://www.w3.org/TR/css-lists-3/#content-property
+            // "::marker does not generate a box" when list-style-type is 'none' and there's no marker image. Custom
+            // ::marker content is already excluded by the outer condition checking for Type::Normal.
+            auto const& list_style_type = list_box->computed_values().list_style_type();
+            if (list_style_type.has<CSS::CounterStyleNameKeyword>()
+                && list_style_type.get<CSS::CounterStyleNameKeyword>() == CSS::CounterStyleNameKeyword::None
+                && !list_box->list_style_image()) {
+                return {};
+            }
 
             auto list_item_marker = document.heap().allocate<ListItemMarkerBox>(
                 document,
-                list_box->computed_values().list_style_type(),
+                list_style_type,
                 list_box->computed_values().list_style_position(),
                 element,
                 *pseudo_element_style);
@@ -314,12 +326,12 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Ps
             element.set_computed_properties(CSS::PseudoElement::Marker, pseudo_element_style);
             element.set_pseudo_element_node({}, CSS::PseudoElement::Marker, list_item_marker);
             list_box->prepend_child(*list_item_marker);
-            return;
+            return list_item_marker;
         }
 
     auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, *pseudo_element_style, nullptr);
     if (!pseudo_element_node)
-        return;
+        return {};
 
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker
     if (is<ListItemBox>(*pseudo_element_node)) {
@@ -343,11 +355,11 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Ps
     pseudo_element_node->set_initial_quote_nesting_level(initial_quote_nesting_level);
 
     element.set_pseudo_element_node({}, pseudo_element, pseudo_element_node);
-    insert_node_into_inline_or_block_ancestor(*pseudo_element_node, pseudo_element_display, mode);
+    if (insertion_mode.has_value())
+        insert_node_into_inline_or_block_ancestor(*pseudo_element_node, pseudo_element_display, insertion_mode.value());
     pseudo_element_node->mutable_computed_values().set_content(pseudo_element_content);
 
-    DOM::AbstractElement pseudo_element_reference { element, pseudo_element };
-    CSS::resolve_counters(pseudo_element_reference);
+    CSS::resolve_counters(element_reference);
     // Now that we have counters, we can compute the content for real. Which is silly.
     if (pseudo_element_content.type == CSS::ContentData::Type::List) {
         auto [new_content, _] = pseudo_element_style->content(element_reference, initial_quote_nesting_level);
@@ -376,6 +388,8 @@ void TreeBuilder::create_pseudo_element_if_needed(DOM::Element& element, CSS::Ps
             TODO();
         }
     }
+
+    return pseudo_element_node;
 }
 
 // Block nodes inside inline nodes are allowed, but to maintain the invariant that either all layout children are
@@ -619,6 +633,10 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     } else {
         if (is<DOM::Element>(dom_node)) {
             auto& element = static_cast<DOM::Element&>(dom_node);
+            // ::backdrop is a sibling of the element, not a child, so unlike other pseudo-elements, it's not
+            // automatically discarded when element's layout is recomputed. We must remove it manually.
+            if (auto old_backdrop_node = element.get_pseudo_element_node(CSS::PseudoElement::Backdrop))
+                old_backdrop_node->remove();
             element.clear_pseudo_element_nodes({});
             VERIFY(!element.needs_style_update());
             style = element.computed_properties();
@@ -651,14 +669,31 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     if (!layout_node)
         return;
 
+    // Decide whether to replace an existing node (partial tree update) or insert a new one appropriately.
+    bool const may_replace_existing_layout_node = must_create_subtree == MustCreateSubtree::No
+        && old_layout_node
+        && old_layout_node->parent()
+        && old_layout_node != layout_node;
+
+    if (dom_node.is_element() && should_create_layout_node) {
+        auto& element = static_cast<DOM::Element&>(dom_node);
+        // Each element rendered in the top layer has a ::backdrop pseudo-element, for which it is the originating element.
+        if (element.rendered_in_top_layer() && context.layout_top_layer) {
+            // If we're inserting a new element, we can append the ::backdrop node now, before layout_node is appended.
+            // Otherwise, we need to insert the ::backdrop before old_layout_node so it's behind the layout_node.
+            if (may_replace_existing_layout_node) {
+                if (auto backdrop_node = create_pseudo_element_if_needed(element, CSS::PseudoElement::Backdrop, {})) {
+                    old_layout_node->parent()->insert_before(*backdrop_node, old_layout_node);
+                }
+            } else {
+                create_pseudo_element_if_needed(element, CSS::PseudoElement::Backdrop, AppendOrPrepend::Append);
+            }
+        }
+    }
+
     if (dom_node.is_document()) {
         m_layout_root = layout_node;
     } else if (should_create_layout_node) {
-        // Decide whether to replace an existing node (partial tree update) or insert a new one appropriately.
-        bool const may_replace_existing_layout_node = must_create_subtree == MustCreateSubtree::No
-            && old_layout_node
-            && old_layout_node->parent()
-            && old_layout_node != layout_node;
         if (may_replace_existing_layout_node) {
             old_layout_node->parent()->replace_child(*layout_node, *old_layout_node);
         } else if (layout_node->is_svg_box()) {
@@ -710,14 +745,8 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                 // generate boxes as if they were siblings of the root element.
                 TemporaryChange<bool> layout_mask(context.layout_top_layer, true);
                 for (auto const& top_layer_element : document.top_layer_elements()) {
-                    if (top_layer_element->rendered_in_top_layer()) {
-                        // Each element rendered in the top layer has a ::backdrop pseudo-element, for which it is the originating element.
-                        if ((should_create_layout_node || top_layer_element->needs_layout_tree_update())
-                            && !top_layer_element->has_inclusive_ancestor_with_display_none()) {
-                            create_pseudo_element_if_needed(top_layer_element, CSS::PseudoElement::Backdrop, AppendOrPrepend::Append);
-                        }
+                    if (top_layer_element->rendered_in_top_layer())
                         update_layout_tree(top_layer_element, context, should_create_layout_node ? MustCreateSubtree::Yes : MustCreateSubtree::No);
-                    }
                 }
             }
             pop_parent();
@@ -908,6 +937,7 @@ void TreeBuilder::for_each_in_tree_with_inside_display(NodeWithStyle& root, Call
     });
 }
 
+// https://drafts.csswg.org/css-tables-3/#fixup-algorithm
 void TreeBuilder::fixup_tables(NodeWithStyle& root)
 {
     remove_irrelevant_boxes(root);
@@ -916,13 +946,15 @@ void TreeBuilder::fixup_tables(NodeWithStyle& root)
     missing_cells_fixup(table_root_boxes);
 }
 
+// https://drafts.csswg.org/css-tables-3/#fixup-algorithm
+// 1. Remove irrelevant boxes:
 void TreeBuilder::remove_irrelevant_boxes(NodeWithStyle& root)
 {
     // The following boxes are discarded as if they were display:none:
 
     Vector<GC::Root<Node>> to_remove;
 
-    // Children of a table-column.
+    // 1. Children of a table-column.
     for_each_in_tree_with_internal_display<CSS::DisplayInternal::TableColumn>(root, [&](Box& table_column) {
         table_column.for_each_child([&](auto& child) {
             to_remove.append(child);
@@ -930,7 +962,7 @@ void TreeBuilder::remove_irrelevant_boxes(NodeWithStyle& root)
         });
     });
 
-    // Children of a table-column-group which are not a table-column.
+    // 2. Children of a table-column-group which are not a table-column.
     for_each_in_tree_with_internal_display<CSS::DisplayInternal::TableColumnGroup>(root, [&](Box& table_column_group) {
         table_column_group.for_each_child([&](auto& child) {
             if (!child.display().is_table_column())
@@ -940,11 +972,11 @@ void TreeBuilder::remove_irrelevant_boxes(NodeWithStyle& root)
     });
 
     // FIXME:
-    // Anonymous inline boxes which contain only white space and are between two immediate siblings each of which is a table-non-root box.
-    // Anonymous inline boxes which meet all of the following criteria:
-    // - they contain only white space
-    // - they are the first and/or last child of a tabular container
-    // - whose immediate sibling, if any, is a table-non-root box
+    // 3. Anonymous inline boxes which contain only white space and are between two immediate siblings each of which is a table-non-root box.
+    // 4. Anonymous inline boxes which meet all of the following criteria:
+    //    - they contain only white space
+    //    - they are the first and/or last child of a tabular container
+    //    - whose immediate sibling, if any, is a table-non-root box
 
     for (auto& box : to_remove)
         box->parent()->remove_child(*box);
@@ -978,16 +1010,16 @@ static bool is_not_proper_table_child(Node const& node)
     return !is_proper_table_child(node);
 }
 
-static bool is_table_row(Node const& node)
-{
-    return node.display().is_table_row();
-}
-
 static bool is_not_table_row(Node const& node)
 {
     if (!node.has_style())
         return true;
-    return !is_table_row(node);
+    return !TableGrid::is_table_row(node);
+}
+
+static bool is_table_column(Node const& node)
+{
+    return node.display().is_table_column();
 }
 
 static bool is_table_cell(Node const& node)
@@ -1000,6 +1032,12 @@ static bool is_not_table_cell(Node const& node)
     if (!node.has_style())
         return true;
     return !is_table_cell(node);
+}
+
+static bool is_table_row_group_column_group_or_caption(Node const& node)
+{
+    auto const display = node.display();
+    return is_table_track_group(display) || display.is_table_caption();
 }
 
 template<typename Matcher, typename Callback>
@@ -1049,16 +1087,20 @@ static void wrap_in_anonymous(Vector<GC::Root<Node>>& sequence, Node* nearest_si
         parent.append_child(*wrapper);
 }
 
+// https://drafts.csswg.org/css-tables-3/#fixup-algorithm
+// 2. Generate missing child wrappers:
 void TreeBuilder::generate_missing_child_wrappers(NodeWithStyle& root)
 {
-    // An anonymous table-row box must be generated around each sequence of consecutive children of a table-root box which are not proper table child boxes.
+    // 1. An anonymous table-row box must be generated around each sequence of consecutive children of a table-root box
+    //    which are not proper table child boxes.
     for_each_in_tree_with_inside_display<CSS::DisplayInside::Table>(root, [&](auto& parent) {
         for_each_sequence_of_consecutive_children_matching(parent, is_not_proper_table_child, [&](auto sequence, auto nearest_sibling) {
             wrap_in_anonymous<Box>(sequence, nearest_sibling, CSS::Display { CSS::DisplayInternal::TableRow });
         });
     });
 
-    // An anonymous table-row box must be generated around each sequence of consecutive children of a table-row-group box which are not table-row boxes.
+    // 2. An anonymous table-row box must be generated around each sequence of consecutive children of a table-row-group
+    //    box which are not table-row boxes.
     for_each_in_tree_with_internal_display<CSS::DisplayInternal::TableRowGroup>(root, [&](auto& parent) {
         for_each_sequence_of_consecutive_children_matching(parent, is_not_table_row, [&](auto& sequence, auto nearest_sibling) {
             wrap_in_anonymous<Box>(sequence, nearest_sibling, CSS::Display { CSS::DisplayInternal::TableRow });
@@ -1077,7 +1119,8 @@ void TreeBuilder::generate_missing_child_wrappers(NodeWithStyle& root)
         });
     });
 
-    // An anonymous table-cell box must be generated around each sequence of consecutive children of a table-row box which are not table-cell boxes. !Testcase
+    // 3. An anonymous table-cell box must be generated around each sequence of consecutive children of a table-row box
+    //    which are not table-cell boxes.
     for_each_in_tree_with_internal_display<CSS::DisplayInternal::TableRow>(root, [&](auto& parent) {
         for_each_sequence_of_consecutive_children_matching(parent, is_not_table_cell, [&](auto& sequence, auto nearest_sibling) {
             wrap_in_anonymous<BlockContainer>(sequence, nearest_sibling, CSS::Display { CSS::DisplayInternal::TableCell });
@@ -1085,32 +1128,51 @@ void TreeBuilder::generate_missing_child_wrappers(NodeWithStyle& root)
     });
 }
 
+// https://drafts.csswg.org/css-tables-3/#fixup-algorithm
+// 3. Generate missing parents:
 Vector<GC::Root<Box>> TreeBuilder::generate_missing_parents(NodeWithStyle& root)
 {
     Vector<GC::Root<Box>> table_roots_to_wrap;
     root.for_each_in_inclusive_subtree_of_type<Box>([&](auto& parent) {
-        // An anonymous table-row box must be generated around each sequence of consecutive table-cell boxes whose parent is not a table-row.
+        // 1. An anonymous table-row box must be generated around each sequence of consecutive table-cell boxes whose
+        //    parent is not a table-row.
         if (is_not_table_row(parent)) {
             for_each_sequence_of_consecutive_children_matching(parent, is_table_cell, [&](auto& sequence, auto nearest_sibling) {
                 wrap_in_anonymous<Box>(sequence, nearest_sibling, CSS::Display { CSS::DisplayInternal::TableRow });
             });
         }
 
-        // A table-row is misparented if its parent is neither a table-row-group nor a table-root box.
-        if (!parent.display().is_table_inside() && !is_proper_table_child(parent)) {
-            for_each_sequence_of_consecutive_children_matching(parent, is_table_row, [&](auto& sequence, auto nearest_sibling) {
-                wrap_in_anonymous<Box>(sequence, nearest_sibling, CSS::Display::from_short(parent.display().is_inline_outside() ? CSS::Display::Short::InlineTable : CSS::Display::Short::Table));
-            });
+        // 2. An anonymous table or inline-table box must be generated around each sequence of consecutive proper table
+        //    child boxes which are misparented.
+        {
+            // If the box’s parent is an inline, run-in, or ruby box (or any box that would perform inlinification of
+            // its children), then an inline-table box must be generated; otherwise it must be a table box.
+            // FIXME: run-in and ruby boxes
+            auto display = CSS::Display::from_short(parent.display().is_inline_outside() ? CSS::Display::Short::InlineTable : CSS::Display::Short::Table);
+
+            // A table-row is misparented if its parent is neither a table-row-group nor a table-root box.
+            if (!TableGrid::is_table_row_group(parent) && !parent.display().is_table_inside()) {
+                for_each_sequence_of_consecutive_children_matching(parent, TableGrid::is_table_row, [&](auto& sequence, auto nearest_sibling) {
+                    wrap_in_anonymous<Box>(sequence, nearest_sibling, display);
+                });
+            }
+
+            // A table-column box is misparented if its parent is neither a table-column-group box nor a table-root box.
+            if (!TableGrid::is_table_column_group(parent) && !parent.display().is_table_inside()) {
+                for_each_sequence_of_consecutive_children_matching(parent, is_table_column, [&](auto& sequence, auto nearest_sibling) {
+                    wrap_in_anonymous<Box>(sequence, nearest_sibling, display);
+                });
+            }
+
+            // A table-row-group, table-column-group, or table-caption box is misparented if its parent is not a table-root box.
+            if (!parent.display().is_table_inside()) {
+                for_each_sequence_of_consecutive_children_matching(parent, is_table_row_group_column_group_or_caption, [&](auto& sequence, auto nearest_sibling) {
+                    wrap_in_anonymous<Box>(sequence, nearest_sibling, display);
+                });
+            }
         }
 
-        // A table-row-group, table-column-group, or table-caption box is misparented if its parent is not a table-root box.
-        if (!parent.display().is_table_inside() && !is_proper_table_child(parent)) {
-            for_each_sequence_of_consecutive_children_matching(parent, is_proper_table_child, [&](auto& sequence, auto nearest_sibling) {
-                wrap_in_anonymous<Box>(sequence, nearest_sibling, CSS::Display::from_short(parent.display().is_inline_outside() ? CSS::Display::Short::InlineTable : CSS::Display::Short::Table));
-            });
-        }
-
-        // An anonymous table-wrapper box must be generated around each table-root.
+        // 3. An anonymous table-wrapper box must be generated around each table-root.
         if (parent.display().is_table_inside()) {
             if (parent.has_been_wrapped_in_table_wrapper()) {
                 VERIFY(parent.parent());
@@ -1152,16 +1214,6 @@ Vector<GC::Root<Box>> TreeBuilder::generate_missing_parents(NodeWithStyle& root)
     return table_roots_to_wrap;
 }
 
-template<typename Matcher, typename Callback>
-static void for_each_child_box_matching(Box& parent, Matcher matcher, Callback callback)
-{
-    parent.for_each_child_of_type<Box>([&](Box& child_box) {
-        if (matcher(child_box))
-            callback(child_box);
-        return IterationDecision::Continue;
-    });
-}
-
 static void fixup_row(Box& row_box, TableGrid const& table_grid, size_t row_index)
 {
     for (size_t column_index = 0; column_index < table_grid.column_count(); ++column_index) {
@@ -1178,21 +1230,24 @@ static void fixup_row(Box& row_box, TableGrid const& table_grid, size_t row_inde
     }
 }
 
+// https://drafts.csswg.org/css-tables-3/#missing-cells-fixup
 void TreeBuilder::missing_cells_fixup(Vector<GC::Root<Box>> const& table_root_boxes)
 {
-    // Implements https://www.w3.org/TR/css-tables-3/#missing-cells-fixup.
+    // Once the amount of columns in a table is known, any table-row box must be modified such that it owns enough
+    // cells to fill all the columns of the table, when taking spans into account. New table-cell anonymous boxes must
+    // be appended to its rows content until this condition is met.
     for (auto& table_box : table_root_boxes) {
         auto table_grid = TableGrid::calculate_row_column_grid(*table_box);
         size_t row_index = 0;
-        for_each_child_box_matching(*table_box, TableGrid::is_table_row_group, [&](auto& row_group_box) {
-            for_each_child_box_matching(row_group_box, is_table_row, [&](auto& row_box) {
+        TableGrid::for_each_child_box_matching(*table_box, TableGrid::is_table_row_group, [&](auto& row_group_box) {
+            TableGrid::for_each_child_box_matching(row_group_box, TableGrid::is_table_row, [&](auto& row_box) {
                 fixup_row(row_box, table_grid, row_index);
                 ++row_index;
                 return IterationDecision::Continue;
             });
         });
 
-        for_each_child_box_matching(*table_box, is_table_row, [&](auto& row_box) {
+        TableGrid::for_each_child_box_matching(*table_box, TableGrid::is_table_row, [&](auto& row_box) {
             fixup_row(row_box, table_grid, row_index);
             ++row_index;
             return IterationDecision::Continue;

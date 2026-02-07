@@ -31,6 +31,8 @@
 #include <LibWeb/HTML/LazyLoadingElement.h>
 #include <LibWeb/HTML/ScrollOptions.h>
 #include <LibWeb/HTML/TagNames.h>
+#include <LibWeb/HTML/TokenizedFeatures.h>
+#include <LibWeb/HTML/UserNavigationInvolvement.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/TrustedTypes/TrustedHTML.h>
 #include <LibWeb/TrustedTypes/TrustedScript.h>
@@ -116,11 +118,14 @@ class WEB_API Element
     , public ARIA::ARIAMixin
     , public Animations::Animatable {
     WEB_PLATFORM_OBJECT(Element, ParentNode);
+    GC_DECLARE_ALLOCATOR(Element);
 
 public:
     virtual ~Element() override;
 
     virtual bool is_dom_element() const final { return true; }
+
+    virtual Node& slottable_as_node() override { return *this; }
 
     FlyString const& qualified_name() const { return m_qualified_name.as_string(); }
     FlyString const& html_uppercased_qualified_name() const;
@@ -151,6 +156,13 @@ public:
     Optional<String> get_attribute(FlyString const& name) const;
     Optional<String> get_attribute_ns(Optional<FlyString> const& namespace_, FlyString const& name) const;
     String get_attribute_value(FlyString const& local_name, Optional<FlyString> const& namespace_ = {}) const;
+
+    String get_an_elements_target(Optional<String> target = {}) const;
+    HTML::TokenizedFeature::NoOpener get_an_elements_noopener(URL::URL const& url, StringView target) const;
+
+    bool cannot_navigate() const;
+
+    void follow_the_hyperlink(Optional<String> hyperlink_suffix, HTML::UserNavigationInvolvement = HTML::UserNavigationInvolvement::None);
 
     Optional<String> lang() const;
     void invalidate_lang_value();
@@ -326,7 +338,11 @@ public:
     i32 tab_index() const;
     void set_tab_index(i32 tab_index);
 
-    bool is_potentially_scrollable() const;
+    enum class TreatOverflowClipOnBodyParentAsOverflowHidden {
+        No,
+        Yes,
+    };
+    bool is_potentially_scrollable(TreatOverflowClipOnBodyParentAsOverflowHidden) const;
 
     double scroll_top() const;
     double scroll_left() const;
@@ -342,7 +358,7 @@ public:
     WebIDL::ExceptionOr<void> insert_adjacent_text(String const& where, Utf16String const& data);
 
     // https://w3c.github.io/csswg-drafts/cssom-view-1/#dom-element-scrollintoview
-    ErrorOr<void> scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> = {});
+    GC::Ref<WebIDL::Promise> scroll_into_view(Optional<Variant<bool, ScrollIntoViewOptions>> = {});
 
     // https://www.w3.org/TR/wai-aria-1.2/#ARIAMixin
 #define __ENUMERATE_ARIA_ATTRIBUTE(name, attribute) \
@@ -387,10 +403,10 @@ public:
     void set_custom_element_state(CustomElementState);
     void setup_custom_element_from_constructor(HTML::CustomElementDefinition& custom_element_definition, Optional<String> const& is_value);
 
-    void scroll(HTML::ScrollToOptions);
-    void scroll(double x, double y);
-    void scroll_by(HTML::ScrollToOptions);
-    void scroll_by(double x, double y);
+    GC::Ref<WebIDL::Promise> scroll(HTML::ScrollToOptions);
+    GC::Ref<WebIDL::Promise> scroll(double x, double y);
+    GC::Ref<WebIDL::Promise> scroll_by(HTML::ScrollToOptions);
+    GC::Ref<WebIDL::Promise> scroll_by(double x, double y);
 
     bool check_visibility(Optional<CheckVisibilityOptions>);
 
@@ -543,7 +559,7 @@ protected:
     virtual i32 default_tab_index_value() const;
 
     // https://dom.spec.whatwg.org/#concept-element-attributes-change-ext
-    virtual void attribute_changed(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_);
+    MUST_UPCALL virtual void attribute_changed(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_);
 
     virtual void computed_properties_changed() { }
 

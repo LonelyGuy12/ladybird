@@ -91,6 +91,7 @@ public:
     {
         VERIFY(!is_current_block_terminated());
         size_t slot_offset = m_current_basic_block->size();
+        VERIFY(slot_offset <= NumericLimits<u32>::max());
         m_current_basic_block->set_last_instruction_start_offset(slot_offset);
         grow(sizeof(OpType));
         void* slot = m_current_basic_block->data() + slot_offset;
@@ -98,7 +99,7 @@ public:
         static_cast<OpType*>(slot)->set_strict(m_strict);
         if constexpr (OpType::IsTerminator)
             m_current_basic_block->terminate({});
-        m_current_basic_block->add_source_map_entry(slot_offset, { m_current_ast_node->start_offset(), m_current_ast_node->end_offset() });
+        m_current_basic_block->add_source_map_entry(static_cast<u32>(slot_offset), { m_current_ast_node->start_offset(), m_current_ast_node->end_offset() });
     }
 
     template<typename OpType, typename ExtraSlotType, typename... Args>
@@ -109,6 +110,7 @@ public:
 
         size_t size_to_allocate = round_up_to_power_of_two(sizeof(OpType) + extra_slot_count * sizeof(ExtraSlotType), alignof(void*));
         size_t slot_offset = m_current_basic_block->size();
+        VERIFY(slot_offset <= NumericLimits<u32>::max());
         m_current_basic_block->set_last_instruction_start_offset(slot_offset);
         grow(size_to_allocate);
         void* slot = m_current_basic_block->data() + slot_offset;
@@ -116,7 +118,7 @@ public:
         static_cast<OpType*>(slot)->set_strict(m_strict);
         if constexpr (OpType::IsTerminator)
             m_current_basic_block->terminate({});
-        m_current_basic_block->add_source_map_entry(slot_offset, { m_current_ast_node->start_offset(), m_current_ast_node->end_offset() });
+        m_current_basic_block->add_source_map_entry(static_cast<u32>(slot_offset), { m_current_ast_node->start_offset(), m_current_ast_node->end_offset() });
     }
 
     template<typename OpType, typename... Args>
@@ -348,6 +350,8 @@ public:
 
     [[nodiscard]] size_t next_global_variable_cache() { return m_next_global_variable_cache++; }
     [[nodiscard]] size_t next_property_lookup_cache() { return m_next_property_lookup_cache++; }
+    [[nodiscard]] size_t next_template_object_cache() { return m_next_template_object_cache++; }
+    [[nodiscard]] u32 next_object_shape_cache() { return m_next_object_shape_cache++; }
 
     enum class DeduplicateConstant {
         Yes,
@@ -359,6 +363,13 @@ public:
     {
         VERIFY(operand.operand().is_constant());
         return m_constants[operand.operand().index()];
+    }
+
+    [[nodiscard]] Optional<Value> try_get_constant(ScopedOperand const& operand) const
+    {
+        if (operand.operand().is_constant())
+            return get_constant(operand);
+        return {};
     }
 
     UnwindContext const* current_unwind_context() const { return m_current_unwind_context; }
@@ -426,6 +437,8 @@ private:
     u32 m_next_block { 1 };
     u32 m_next_property_lookup_cache { 0 };
     u32 m_next_global_variable_cache { 0 };
+    u32 m_next_template_object_cache { 0 };
+    u32 m_next_object_shape_cache { 0 };
     FunctionKind m_enclosing_function_kind { FunctionKind::Normal };
     Vector<LabelableScope> m_continuable_scopes;
     Vector<LabelableScope> m_breakable_scopes;

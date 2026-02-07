@@ -176,9 +176,8 @@ enum class PropertyID : @property_id_underlying_type@ {
     Custom,
 )~~~");
 
-    Vector<String> inherited_shorthand_property_ids;
+    Vector<String> shorthand_property_ids;
     Vector<String> inherited_longhand_property_ids;
-    Vector<String> noninherited_shorthand_property_ids;
     Vector<String> noninherited_longhand_property_ids;
 
     properties.for_each_member([&](auto& name, auto& value) {
@@ -186,14 +185,20 @@ enum class PropertyID : @property_id_underlying_type@ {
         // Legacy aliases don't get a PropertyID
         if (is_legacy_alias(value.as_object()))
             return;
-        bool inherited = value.as_object().get_bool("inherited"sv).value_or(false);
+        auto inherited = value.as_object().get_bool("inherited"sv);
         if (value.as_object().has("longhands"sv)) {
-            if (inherited)
-                inherited_shorthand_property_ids.append(name);
-            else
-                noninherited_shorthand_property_ids.append(name);
+            if (inherited.has_value()) {
+                dbgln("Property '{}' with longhands cannot specify 'inherited'", name);
+                VERIFY_NOT_REACHED();
+            }
+            shorthand_property_ids.append(name);
         } else {
-            if (inherited)
+            if (!inherited.has_value()) {
+                dbgln("Property '{}' is missing 'inherited'", name);
+                VERIFY_NOT_REACHED();
+            }
+
+            if (inherited.value())
                 inherited_longhand_property_ids.append(name);
             else
                 noninherited_longhand_property_ids.append(name);
@@ -201,12 +206,11 @@ enum class PropertyID : @property_id_underlying_type@ {
     });
 
     // Section order:
-    // 1. inherited shorthand properties
-    // 2. noninherited shorthand properties
-    // 3. inherited longhand properties
-    // 4. noninherited longhand properties
+    // 1. shorthand properties
+    // 2. inherited longhand properties
+    // 3. noninherited longhand properties
 
-    auto first_property_id = inherited_shorthand_property_ids.first();
+    auto first_property_id = shorthand_property_ids.first();
     auto last_property_id = noninherited_longhand_property_ids.last();
 
     auto emit_properties = [&](auto& property_ids) {
@@ -219,8 +223,7 @@ enum class PropertyID : @property_id_underlying_type@ {
         }
     };
 
-    emit_properties(inherited_shorthand_property_ids);
-    emit_properties(noninherited_shorthand_property_ids);
+    emit_properties(shorthand_property_ids);
     emit_properties(inherited_longhand_property_ids);
     emit_properties(noninherited_longhand_property_ids);
 
@@ -230,10 +233,8 @@ enum class PropertyID : @property_id_underlying_type@ {
     generator.set("first_longhand_property_id", title_casify(inherited_longhand_property_ids.first()));
     generator.set("last_longhand_property_id", title_casify(noninherited_longhand_property_ids.last()));
 
-    generator.set("first_inherited_shorthand_property_id", title_casify(inherited_shorthand_property_ids.first()));
-    generator.set("last_inherited_shorthand_property_id", title_casify(inherited_shorthand_property_ids.last()));
-    generator.set("first_inherited_longhand_property_id", title_casify(inherited_longhand_property_ids.first()));
-    generator.set("last_inherited_longhand_property_id", title_casify(inherited_longhand_property_ids.last()));
+    generator.set("first_inherited_property_id", title_casify(inherited_longhand_property_ids.first()));
+    generator.set("last_inherited_property_id", title_casify(inherited_longhand_property_ids.last()));
 
     // FIXME: property_accepts_{number,percentage}() has a different range from accepted_type_ranges() despite the names sounding similar.
     generator.append(R"~~~(
@@ -295,13 +296,12 @@ size_t property_maximum_value_count(PropertyID);
 bool property_affects_layout(PropertyID);
 bool property_affects_stacking_context(PropertyID);
 bool property_needs_layout_for_getcomputedstyle(PropertyID);
+bool property_needs_layout_node_for_resolved_value(PropertyID);
 
 constexpr PropertyID first_property_id = PropertyID::@first_property_id@;
 constexpr PropertyID last_property_id = PropertyID::@last_property_id@;
-constexpr PropertyID first_inherited_shorthand_property_id = PropertyID::@first_inherited_shorthand_property_id@;
-constexpr PropertyID last_inherited_shorthand_property_id = PropertyID::@last_inherited_shorthand_property_id@;
-constexpr PropertyID first_inherited_longhand_property_id = PropertyID::@first_inherited_longhand_property_id@;
-constexpr PropertyID last_inherited_longhand_property_id = PropertyID::@last_inherited_longhand_property_id@;
+constexpr PropertyID first_inherited_property_id = PropertyID::@first_inherited_property_id@;
+constexpr PropertyID last_inherited_property_id = PropertyID::@last_inherited_property_id@;
 constexpr PropertyID first_longhand_property_id = PropertyID::@first_longhand_property_id@;
 constexpr PropertyID last_longhand_property_id = PropertyID::@last_longhand_property_id@;
 constexpr size_t number_of_longhand_properties = to_underlying(last_longhand_property_id) - to_underlying(first_longhand_property_id) + 1;
@@ -647,9 +647,7 @@ bool is_animatable_property(PropertyID property_id)
 
 bool is_inherited_property(PropertyID property_id)
 {
-    if (property_id >= first_inherited_shorthand_property_id && property_id <= last_inherited_shorthand_property_id)
-        return true;
-    if (property_id >= first_inherited_longhand_property_id && property_id <= last_inherited_longhand_property_id)
+    if (property_id >= first_inherited_property_id && property_id <= last_inherited_property_id)
         return true;
     return false;
 }
@@ -725,6 +723,32 @@ bool property_needs_layout_for_getcomputedstyle(PropertyID property_id)
             return;
 
         if (value.as_object().get_bool("needs-layout-for-getcomputedstyle"sv).value_or(false)) {
+            auto member_generator = generator.fork();
+            member_generator.set("name:titlecase", title_casify(name));
+            member_generator.append(R"~~~(
+    case PropertyID::@name:titlecase@:
+)~~~");
+        }
+    });
+
+    generator.append(R"~~~(
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool property_needs_layout_node_for_resolved_value(PropertyID property_id)
+{
+    switch (property_id) {
+)~~~");
+
+    properties.for_each_member([&](auto& name, auto& value) {
+        VERIFY(value.is_object());
+        if (is_legacy_alias(value.as_object()))
+            return;
+
+        if (value.as_object().get_bool("needs-layout-node-for-resolved-value"sv).value_or(false)) {
             auto member_generator = generator.fork();
             member_generator.set("name:titlecase", title_casify(name));
             member_generator.append(R"~~~(

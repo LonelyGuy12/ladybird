@@ -4,7 +4,7 @@
  * Copyright (c) 2021-2025, Luke Wilde <luke@ladybird.org>
  * Copyright (c) 2022, Ali Mohammad Pur <mpfard@serenityos.org>
  * Copyright (c) 2023-2024, Kenneth Myhra <kennethmyhra@serenityos.org>
- * Copyright (c) 2023-2025, Shannon Booth <shannon@serenityos.org>
+ * Copyright (c) 2023-2026, Shannon Booth <shannon@serenityos.org>
  * Copyright (c) 2023-2024, Matthew Olsson <mattco@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -72,6 +72,7 @@ static bool is_platform_object(Type const& type)
         "DynamicsCompressorNode"sv,
         "ElementInternals"sv,
         "EventTarget"sv,
+        "External"sv,
         "FederatedCredential"sv,
         "File"sv,
         "FileList"sv,
@@ -105,13 +106,13 @@ static bool is_platform_object(Type const& type)
         "Node"sv,
         "OffscreenCanvas"sv,
         "OffscreenCanvasRenderingContext2D"sv,
+        "Origin"sv,
         "PasswordCredential"sv,
         "Path2D"sv,
         "PerformanceEntry"sv,
         "PerformanceMark"sv,
         "PerformanceNavigation"sv,
         "PeriodicWave"sv,
-        "PointerEvent"sv,
         "ReadableStreamBYOBReader"sv,
         "ReadableStreamDefaultReader"sv,
         "RadioNodeList"sv,
@@ -121,12 +122,21 @@ static bool is_platform_object(Type const& type)
         "Selection"sv,
         "ServiceWorkerContainer"sv,
         "ServiceWorkerRegistration"sv,
-        "SVGAnimationElement"sv,
         "SVGLength"sv,
         "SVGNumber"sv,
         "SVGTransform"sv,
         "ShadowRoot"sv,
         "SourceBuffer"sv,
+        "SpeechGrammar"sv,
+        "SpeechGrammarList"sv,
+        "SpeechRecognition"sv,
+        "SpeechRecognitionAlternative"sv,
+        "SpeechRecognitionPhrase"sv,
+        "SpeechRecognitionResult"sv,
+        "SpeechRecognitionResultList"sv,
+        "SpeechSynthesis"sv,
+        "SpeechSynthesisUtterance"sv,
+        "SpeechSynthesisVoice"sv,
         "Storage"sv,
         "Table"sv,
         "Text"sv,
@@ -165,6 +175,7 @@ static bool is_platform_object(Type const& type)
         "WindowProxy"sv,
         "WritableStream"sv,
         "XPathResult"sv,
+        "XRSession"sv,
     };
     if (type.name().ends_with("Element"sv))
         return true;
@@ -244,7 +255,7 @@ static ByteString union_type_to_variant(UnionType const& union_type, Interface c
 
 CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
 {
-    if (is_platform_object(type) || type.name() == "WindowProxy"sv)
+    if (is_platform_object(type))
         return { .name = ByteString::formatted("GC::Root<{}>", type.name()), .sequence_storage_type = SequenceStorageType::RootVector };
 
     if (is_javascript_builtin(type))
@@ -596,7 +607,7 @@ static void generate_to_integral(SourceGenerator& scoped_generator, ParameterTyp
     scoped_generator.set("enforce_range", parameter.extended_attributes.contains("EnforceRange") ? "Yes" : "No");
     scoped_generator.set("clamp", parameter.extended_attributes.contains("Clamp") ? "Yes" : "No");
 
-    if ((!optional && !parameter.type->is_nullable()) || optional_default_value.has_value()) {
+    if ((!optional && !parameter.type->is_nullable()) || (optional_default_value.has_value() && optional_default_value != "null"sv)) {
         scoped_generator.append(R"~~~(
     @cpp_type@ @cpp_name@;
 )~~~");
@@ -1597,8 +1608,8 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
             // NOTE: generate_to_cpp doesn't use the parameter name.
             // NOTE: generate_to_cpp will use to_{u32,etc.} which uses to_number internally and will thus use TRY, but it cannot throw as we know we are dealing with a number.
-            IDL::Parameter parameter { .type = *numeric_type, .name = ByteString::empty(), .optional_default_value = {}, .extended_attributes = {} };
-            generate_to_cpp(union_generator, parameter, js_name, js_suffix, ByteString::formatted("{}{}_number", js_name, js_suffix), interface, false, false, {}, false, recursion_depth + 1);
+            IDL::Parameter idl_parameter { .type = *numeric_type, .name = parameter.name, .optional_default_value = {}, .extended_attributes = {} };
+            generate_to_cpp(union_generator, idl_parameter, js_name, js_suffix, ByteString::formatted("{}{}_number", js_name, js_suffix), interface, false, false, {}, false, recursion_depth + 1);
 
             union_generator.append(R"~~~(
             return { @js_name@@js_suffix@_number };
@@ -1623,6 +1634,47 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
         }
 
+        bool includes_enumeration = false;
+        for (auto& type : types) {
+            if (interface.enumerations.contains(type->name())) {
+                includes_enumeration = true;
+                break;
+            }
+        }
+
+        // If V is a string and types includes an enumeration type, attempt to convert the string to that enumeration.
+        // Example: Libraries/LibWeb/WebAudio/AudioContext.idl (AudioContextOptions.latencyHint: (AudioContextLatencyCategory or double)).
+        if (includes_enumeration) {
+            union_generator.append(R"~~~(
+        if (@js_name@@js_suffix@.is_string()) {
+            auto @js_name@@js_suffix@_enum_string = TRY(@js_name@@js_suffix@.to_string(vm));
+)~~~");
+
+            for (auto& type : types) {
+                if (!interface.enumerations.contains(type->name()))
+                    continue;
+
+                auto& enumeration = interface.enumerations.find(type->name())->value;
+                auto enum_type = IDL::idl_type_name_to_cpp_type(*type, interface);
+
+                auto enum_generator = union_generator.fork();
+                enum_generator.set("enum.type", enum_type.name);
+
+                for (auto& it : enumeration.translated_cpp_names) {
+                    enum_generator.set("enum.alt.name", it.key);
+                    enum_generator.set("enum.alt.value", it.value);
+                    enum_generator.append(R"~~~(
+            if (@js_name@@js_suffix@_enum_string == "@enum.alt.name@"sv)
+                return @union_type@ { @enum.type@::@enum.alt.value@ };
+)~~~");
+                }
+            }
+
+            union_generator.append(R"~~~(
+        }
+)~~~");
+        }
+
         RefPtr<IDL::Type const> string_type;
         for (auto& type : types) {
             if (type->is_string()) {
@@ -1635,8 +1687,8 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
             // 14. If types includes a string type, then return the result of converting V to that type.
             // NOTE: Currently all string types are converted to String.
 
-            IDL::Parameter parameter { .type = *string_type, .name = ByteString::empty(), .optional_default_value = {}, .extended_attributes = {} };
-            generate_to_cpp(union_generator, parameter, js_name, js_suffix, ByteString::formatted("{}{}_string", js_name, js_suffix), interface, legacy_null_to_empty_string, false, {}, false, recursion_depth + 1);
+            IDL::Parameter idl_parameter { .type = *string_type, .name = parameter.name, .optional_default_value = {}, .extended_attributes = {} };
+            generate_to_cpp(union_generator, idl_parameter, js_name, js_suffix, ByteString::formatted("{}{}_string", js_name, js_suffix), interface, legacy_null_to_empty_string, false, {}, false, recursion_depth + 1);
 
             union_generator.append(R"~~~(
         return { @js_name@@js_suffix@_string };
@@ -1664,8 +1716,8 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
             // NOTE: generate_to_cpp doesn't use the parameter name.
             // NOTE: generate_to_cpp will use to_{u32,etc.} which uses to_number internally and will thus use TRY, but it cannot throw as we know we are dealing with a number.
-            IDL::Parameter parameter { .type = *numeric_type, .name = ByteString::empty(), .optional_default_value = {}, .extended_attributes = {} };
-            generate_to_cpp(union_numeric_type_generator, parameter, "x", ByteString::empty(), "x_number", interface, false, false, {}, false, recursion_depth + 1);
+            IDL::Parameter idl_parameter { .type = *numeric_type, .name = parameter.name, .optional_default_value = {}, .extended_attributes = {} };
+            generate_to_cpp(union_numeric_type_generator, idl_parameter, "x", ByteString::empty(), "x_number", interface, false, false, {}, false, recursion_depth + 1);
 
             union_numeric_type_generator.append(R"~~~(
         return x_number;
@@ -1675,8 +1727,8 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
             // NOTE: generate_to_cpp doesn't use the parameter name.
             // NOTE: generate_to_cpp will use to_{u32,etc.} which uses to_number internally and will thus use TRY, but it cannot throw as we know we are dealing with a number.
-            IDL::Parameter parameter { .type = *numeric_type, .name = ByteString::empty(), .optional_default_value = {}, .extended_attributes = {} };
-            generate_to_cpp(union_generator, parameter, js_name, js_suffix, ByteString::formatted("{}{}_number", js_name, js_suffix), interface, false, false, {}, false, recursion_depth + 1);
+            IDL::Parameter idl_parameter { .type = *numeric_type, .name = parameter.name, .optional_default_value = {}, .extended_attributes = {} };
+            generate_to_cpp(union_generator, idl_parameter, js_name, js_suffix, ByteString::formatted("{}{}_number", js_name, js_suffix), interface, false, false, {}, false, recursion_depth + 1);
 
             union_generator.append(R"~~~(
         return { @js_name@@js_suffix@_number };
@@ -1726,12 +1778,12 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 )~~~");
                     } else if (optional_default_value == "\"\"") {
                         union_generator.append(R"~~~(
-    @union_type@ @cpp_name@ = @js_name@@js_suffix@.is_undefined() ? String {} : TRY(@js_name@@js_suffix@_to_variant(@js_name@@js_suffix@));
+    @union_type@ @cpp_name@ = @js_name@@js_suffix@.is_undefined() ? TRY(@js_name@@js_suffix@_to_variant(JS::Value(JS::PrimitiveString::create(vm, String {})))) : TRY(@js_name@@js_suffix@_to_variant(@js_name@@js_suffix@));
 )~~~");
                     } else if (optional_default_value->starts_with("\""sv) && optional_default_value->ends_with("\""sv)) {
                         union_generator.set("default_string_value", optional_default_value.value());
                         union_generator.append(R"~~~(
-    @union_type@ @cpp_name@ = @js_name@@js_suffix@.is_undefined() ? MUST(String::from_utf8(@default_string_value@sv)) : TRY(@js_name@@js_suffix@_to_variant(@js_name@@js_suffix@));
+    @union_type@ @cpp_name@ = @js_name@@js_suffix@.is_undefined() ? TRY(@js_name@@js_suffix@_to_variant(JS::Value(JS::PrimitiveString::create(vm, MUST(String::from_utf8(@default_string_value@sv)))))) : TRY(@js_name@@js_suffix@_to_variant(@js_name@@js_suffix@));
 )~~~");
                     } else if (optional_default_value == "{}") {
                         VERIFY(dictionary_type);
@@ -3435,6 +3487,7 @@ GC_DEFINE_ALLOCATOR(@named_properties_class@);
 
 void @named_properties_class@::initialize(JS::Realm& realm)
 {
+    Base::initialize(realm);
     auto& vm = realm.vm();
 
     // The class string of a named properties object is the concatenation of the interface's identifier and the string "Properties".
@@ -3576,11 +3629,13 @@ static void generate_prototype_or_global_mixin_initialization(IDL::Interface con
     bool define_on_existing_object = is_global_interface || generate_unforgeables == GenerateUnforgeables::Yes;
 
     if (define_on_existing_object) {
+        generator.set("define_direct_accessor", "object.define_direct_accessor");
         generator.set("define_direct_property", "object.define_direct_property");
         generator.set("define_native_accessor", "object.define_native_accessor");
         generator.set("define_native_function", "object.define_native_function");
         generator.set("set_prototype", "object.set_prototype");
     } else {
+        generator.set("define_direct_accessor", "define_direct_accessor");
         generator.set("define_direct_property", "define_direct_property");
         generator.set("define_native_accessor", "define_native_accessor");
         generator.set("define_native_function", "define_native_function");
@@ -3685,11 +3740,33 @@ void @class_name@::initialize(JS::Realm& realm)
 
         attribute_generator.set("attribute.name", attribute.name);
         attribute_generator.set("attribute.getter_callback", attribute.getter_callback_name);
+        attribute_generator.set("attribute.setter_callback", attribute.setter_callback_name);
 
-        if (!attribute.readonly || attribute.extended_attributes.contains("Replaceable"sv) || attribute.extended_attributes.contains("PutForwards"sv))
-            attribute_generator.set("attribute.setter_callback", attribute.setter_callback_name);
-        else
-            attribute_generator.set("attribute.setter_callback", "nullptr");
+        if (has_unforgeable_attribute) {
+            attribute_generator.append(R"~~~(
+    auto native_@attribute.getter_callback@ = host_defined_intrinsics(realm).ensure_web_unforgeable_function("@namespaced_name@"_utf16_fly_string, "@attribute.name@"_utf16_fly_string, @attribute.getter_callback@, UnforgeableKey::Type::Getter);
+)~~~");
+        } else {
+            attribute_generator.append(R"~~~(
+    auto native_@attribute.getter_callback@ = JS::NativeFunction::create(realm, @attribute.getter_callback@, 0, "@attribute.name@"_utf16_fly_string, &realm, "get"sv);
+)~~~");
+        }
+
+        if (!attribute.readonly || attribute.extended_attributes.contains("Replaceable"sv) || attribute.extended_attributes.contains("PutForwards"sv)) {
+            if (has_unforgeable_attribute) {
+                attribute_generator.append(R"~~~(
+    auto native_@attribute.setter_callback@ = host_defined_intrinsics(realm).ensure_web_unforgeable_function("@namespaced_name@"_utf16_fly_string, "@attribute.name@"_utf16_fly_string, @attribute.setter_callback@, UnforgeableKey::Type::Setter);
+)~~~");
+            } else {
+                attribute_generator.append(R"~~~(
+    auto native_@attribute.setter_callback@ = JS::NativeFunction::create(realm, @attribute.setter_callback@, 1, "@attribute.name@"_utf16_fly_string, &realm, "set"sv);
+)~~~");
+            }
+        } else {
+            attribute_generator.append(R"~~~(
+    GC::Ptr<JS::NativeFunction> native_@attribute.setter_callback@;
+)~~~");
+        }
 
         if (attribute.extended_attributes.contains("Unscopable")) {
             attribute_generator.append(R"~~~(
@@ -3698,7 +3775,7 @@ void @class_name@::initialize(JS::Realm& realm)
         }
 
         attribute_generator.append(R"~~~(
-    @define_native_accessor@(realm, "@attribute.name@"_utf16_fly_string, @attribute.getter_callback@, @attribute.setter_callback@, default_attributes);
+    @define_direct_accessor@("@attribute.name@"_utf16_fly_string, native_@attribute.getter_callback@, native_@attribute.setter_callback@, default_attributes);
 )~~~");
     }
 
@@ -4370,20 +4447,34 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.getter_callback@)
 }
 )~~~");
 
-        if (!attribute.readonly) {
-            // For [CEReactions]: https://html.spec.whatwg.org/multipage/custom-elements.html#cereactions
-
+        // https://webidl.spec.whatwg.org/#dfn-attribute-setter
+        // 2. If attribute is read only and does not have a [LegacyLenientSetter], [PutForwards] or [Replaceable] extended attribute, return undefined; there is no attribute setter function.
+        if (!attribute.readonly || attribute.extended_attributes.contains("PutForwards"sv) || attribute.extended_attributes.contains("Replaceable"sv)) {
             attribute_generator.append(R"~~~(
 JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
 {
     WebIDL::log_trace(vm, "@class_name@::@attribute.setter_callback@");
     [[maybe_unused]] auto& realm = *vm.current_realm();
-    auto* impl = TRY(impl_from(vm));
-    if (vm.argument_count() < 1)
-        return vm.throw_completion<JS::TypeError>(JS::ErrorType::BadArgCountOne, "@namespaced_name@ setter");
 
-    auto value = vm.argument(0);
+    // 1. Let V be undefined.
+    auto value = JS::js_undefined();
+
+    // 2. If any arguments were passed, then set V to the value of the first argument passed.
+    if (vm.argument_count() > 0)
+        value = vm.argument(0);
+
+    // 3. Let id be attribute’s identifier.
+    // 4. Let idlObject be null.
+    // 5. If attribute is a regular attribute:
+
+    // FIXME: 1. Let jsValue be the this value, if it is not null or undefined, or realm’s global object otherwise. (This will subsequently cause a TypeError in a few steps, if the global object does not implement target and [LegacyLenientThis] is not specified.)
+    auto* impl = TRY(impl_from(vm));
+
+    // FIXME: 2. If jsValue is a platform object, then perform a security check, passing jsValue, id, and "setter".
+    // FIXME: 3. Let validThis be true if jsValue implements target, or false otherwise.
+    // FIXME: 4. If validThis is false and attribute was not specified with the [LegacyLenientThis] extended attribute, then throw a TypeError.
 )~~~");
+            // For [CEReactions]: https://html.spec.whatwg.org/multipage/custom-elements.html#cereactions
 
             if (attribute.extended_attributes.contains("CEReactions")) {
                 // 1. Push a new element queue onto this object's relevant agent's custom element reactions stack.
@@ -4393,47 +4484,84 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
 )~~~");
             }
 
-            generate_to_cpp(generator, attribute, "value", "", "cpp_value", interface, attribute.extended_attributes.contains("LegacyNullToEmptyString"));
+            // 5. If attribute is declared with the [Replaceable] extended attribute, then:
+            if (attribute.extended_attributes.contains("Replaceable"sv)) {
+                attribute_generator.append(R"~~~(
+    // 1. Perform ? CreateDataPropertyOrThrow(jsValue, id, V).
+    TRY(impl->create_data_property_or_throw("@attribute.name@"_utf16_fly_string, value));
 
-            if (attribute.extended_attributes.contains("Reflect")) {
-                if (attribute.type->name() == "boolean") {
-                    attribute_generator.append(R"~~~(
+    // 2. Return undefined.
+    return JS::js_undefined();
+}
+)~~~");
+            }
+            // FIXME: 6. If validThis is false, then return undefined.
+            // FIXME: 7. If attribute is declared with a [LegacyLenientSetter] extended attribute, then return undefined.
+            // 8. If attribute is declared with a [PutForwards] extended attribute, then:
+            else if (auto put_forwards_identifier = attribute.extended_attributes.get("PutForwards"sv); put_forwards_identifier.has_value()) {
+                attribute_generator.set("put_forwards_identifier"sv, *put_forwards_identifier);
+                VERIFY(!put_forwards_identifier->is_empty() && !is_ascii_digit(put_forwards_identifier->byte_at(0))); // Ensure `PropertyKey`s are not Numbers.
+
+                attribute_generator.append(R"~~~(
+    // 1. Let Q be ? Get(jsValue, id).
+    auto receiver_value = TRY(impl->get("@attribute.name@"_utf16_fly_string));
+
+    // 2. If Q is not an Object, then throw a TypeError.
+    if (!receiver_value.is_object())
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObject, receiver_value);
+    auto& receiver = receiver_value.as_object();
+
+    // 3. Let forwardId be the identifier argument of the [PutForwards] extended attribute.
+    auto forward_id = "@put_forwards_identifier@"_utf16_fly_string;
+
+    // 4. Perform ? Set(Q, forwardId, V, false).
+    TRY(receiver.set(JS::PropertyKey { forward_id, JS::PropertyKey::StringMayBeNumber::No }, value, JS::Object::ShouldThrowExceptions::No));
+
+    // 5. Return undefined.
+    return JS::js_undefined();
+}
+)~~~");
+            } else {
+                generate_to_cpp(generator, attribute, "value", "", "cpp_value", interface, attribute.extended_attributes.contains("LegacyNullToEmptyString"));
+                if (attribute.extended_attributes.contains("Reflect")) {
+                    if (attribute.type->name() == "boolean") {
+                        attribute_generator.append(R"~~~(
     if (!cpp_value)
         impl->remove_attribute("@attribute.reflect_name@"_fly_string);
     else
         impl->set_attribute_value("@attribute.reflect_name@"_fly_string, String {});
 )~~~");
-                } else if (attribute.type->name() == "unsigned long") {
-                    // The setter steps are:
-                    // FIXME: 1. If the reflected IDL attribute is limited to only positive numbers and the given value is 0, then throw an "IndexSizeError" DOMException.
-                    // 2. Let minimum be 0.
-                    // FIXME: 3. If the reflected IDL attribute is limited to only positive numbers or limited to only positive numbers with fallback, then set minimum to 1.
-                    // 4. Let newValue be minimum.
-                    // FIXME: 5. If the reflected IDL attribute has a default value, then set newValue to defaultValue.
-                    // 6. If the given value is in the range minimum to 2147483647, inclusive, then set newValue to it.
-                    // 7. Run this's set the content attribute with newValue converted to the shortest possible string representing the number as a valid non-negative integer.
-                    attribute_generator.append(R"~~~(
+                    } else if (attribute.type->name() == "unsigned long") {
+                        // The setter steps are:
+                        // FIXME: 1. If the reflected IDL attribute is limited to only positive numbers and the given value is 0, then throw an "IndexSizeError" DOMException.
+                        // 2. Let minimum be 0.
+                        // FIXME: 3. If the reflected IDL attribute is limited to only positive numbers or limited to only positive numbers with fallback, then set minimum to 1.
+                        // 4. Let newValue be minimum.
+                        // FIXME: 5. If the reflected IDL attribute has a default value, then set newValue to defaultValue.
+                        // 6. If the given value is in the range minimum to 2147483647, inclusive, then set newValue to it.
+                        // 7. Run this's set the content attribute with newValue converted to the shortest possible string representing the number as a valid non-negative integer.
+                        attribute_generator.append(R"~~~(
     u32 minimum = 0;
     u32 new_value = minimum;
     if (cpp_value >= minimum && cpp_value <= 2147483647)
         new_value = cpp_value;
     impl->set_attribute_value("@attribute.reflect_name@"_fly_string, String::number(new_value));
 )~~~");
-                } else if (attribute.type->is_integer() && !attribute.type->is_nullable()) {
-                    attribute_generator.append(R"~~~(
+                    } else if (attribute.type->is_integer() && !attribute.type->is_nullable()) {
+                        attribute_generator.append(R"~~~(
     impl->set_attribute_value("@attribute.reflect_name@"_fly_string, String::number(cpp_value));
 )~~~");
-                }
-                // If a reflected IDL attribute has the type T?, where T is either Element or an interface that inherits
-                // from Element, then with attr being the reflected content attribute name:
-                // FIXME: Handle "an interface that inherits from Element".
-                else if (attribute.type->is_nullable() && attribute.type->name() == "Element") {
-                    // The setter steps are:
-                    // 1. If the given value is null, then:
-                    //     1. Set this's explicitly set attr-element to null.
-                    //     2. Run this's delete the content attribute.
-                    //     3. Return.
-                    attribute_generator.append(R"~~~(
+                    }
+                    // If a reflected IDL attribute has the type T?, where T is either Element or an interface that inherits
+                    // from Element, then with attr being the reflected content attribute name:
+                    // FIXME: Handle "an interface that inherits from Element".
+                    else if (attribute.type->is_nullable() && attribute.type->name() == "Element") {
+                        // The setter steps are:
+                        // 1. If the given value is null, then:
+                        //     1. Set this's explicitly set attr-element to null.
+                        //     2. Run this's delete the content attribute.
+                        //     3. Return.
+                        attribute_generator.append(R"~~~(
     static auto content_attribute = "@attribute.reflect_name@"_fly_string;
 
     if (!cpp_value) {
@@ -4442,24 +4570,24 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
         return JS::js_undefined();
     }
 )~~~");
-                    // 2. Run this's set the content attribute with the empty string.
-                    attribute_generator.append(R"~~~(
+                        // 2. Run this's set the content attribute with the empty string.
+                        attribute_generator.append(R"~~~(
     impl->set_attribute_value(content_attribute, String {});
 )~~~");
-                    // 3. Set this's explicitly set attr-element to a weak reference to the given value.
-                    attribute_generator.append(R"~~~(
+                        // 3. Set this's explicitly set attr-element to a weak reference to the given value.
+                        attribute_generator.append(R"~~~(
     impl->set_@attribute.cpp_name@(*cpp_value);
 )~~~");
-                }
-                // If a reflected IDL attribute has the type FrozenArray<T>?, where T is either Element or an interface
-                // that inherits from Element, then with attr being the reflected content attribute name:
-                // FIXME: Handle "an interface that inherits from Element".
-                else if (is_nullable_frozen_array_of_single_type(attribute.type, "Element"sv)) {
-                    // 1. If the given value is null:
-                    //     1. Set this's explicitly set attr-elements to null.
-                    //     2. Run this's delete the content attribute.
-                    //     3. Return.
-                    attribute_generator.append(R"~~~(
+                    }
+                    // If a reflected IDL attribute has the type FrozenArray<T>?, where T is either Element or an interface
+                    // that inherits from Element, then with attr being the reflected content attribute name:
+                    // FIXME: Handle "an interface that inherits from Element".
+                    else if (is_nullable_frozen_array_of_single_type(attribute.type, "Element"sv)) {
+                        // 1. If the given value is null:
+                        //     1. Set this's explicitly set attr-elements to null.
+                        //     2. Run this's delete the content attribute.
+                        //     3. Return.
+                        attribute_generator.append(R"~~~(
     static auto content_attribute = "@attribute.reflect_name@"_fly_string;
 
     if (!cpp_value.has_value()) {
@@ -4469,16 +4597,16 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
     }
 )~~~");
 
-                    // 2. Run this's set the content attribute with the empty string.
-                    attribute_generator.append(R"~~~(
+                        // 2. Run this's set the content attribute with the empty string.
+                        attribute_generator.append(R"~~~(
     impl->set_attribute_value(content_attribute, String {});
 )~~~");
 
-                    // 3. Let elements be an empty list.
-                    // 4. For each element in the given value:
-                    //     1. Append a weak reference to element to elements.
-                    // 5. Set this's explicitly set attr-elements to elements.
-                    attribute_generator.append(R"~~~(
+                        // 3. Let elements be an empty list.
+                        // 4. For each element in the given value:
+                        //     1. Append a weak reference to element to elements.
+                        // 5. Set this's explicitly set attr-elements to elements.
+                        attribute_generator.append(R"~~~(
     Vector<GC::Weak<DOM::Element>> elements;
     elements.ensure_capacity(cpp_value->size());
 
@@ -4488,42 +4616,42 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
 
     impl->set_@attribute.cpp_name@(move(elements));
 )~~~");
-                } else if (attribute.type->is_nullable()) {
-                    attribute_generator.append(R"~~~(
+                    } else if (attribute.type->is_nullable()) {
+                        attribute_generator.append(R"~~~(
     if (!cpp_value.has_value())
         impl->remove_attribute("@attribute.reflect_name@"_fly_string);
     else
         impl->set_attribute_value("@attribute.reflect_name@"_fly_string, cpp_value.value());
 )~~~");
-                } else {
-                    attribute_generator.append(R"~~~(
+                    } else {
+                        attribute_generator.append(R"~~~(
     impl->set_attribute_value("@attribute.reflect_name@"_fly_string, cpp_value);
 )~~~");
-                }
+                    }
 
-                if (attribute.extended_attributes.contains("CEReactions")) {
-                    // 2. Run the originally-specified steps for this construct, catching any exceptions. If the steps return a value, let value be the returned value. If they throw an exception, let exception be the thrown exception.
-                    // 3. Let queue be the result of popping from this object's relevant agent's custom element reactions stack.
-                    // 4. Invoke custom element reactions in queue.
-                    // 5. If an exception exception was thrown by the original steps, rethrow exception.
-                    // 6. If a value value was returned from the original steps, return value.
-                    attribute_generator.append(R"~~~(
+                    if (attribute.extended_attributes.contains("CEReactions")) {
+                        // 2. Run the originally-specified steps for this construct, catching any exceptions. If the steps return a value, let value be the returned value. If they throw an exception, let exception be the thrown exception.
+                        // 3. Let queue be the result of popping from this object's relevant agent's custom element reactions stack.
+                        // 4. Invoke custom element reactions in queue.
+                        // 5. If an exception exception was thrown by the original steps, rethrow exception.
+                        // 6. If a value value was returned from the original steps, return value.
+                        attribute_generator.append(R"~~~(
     auto queue = reactions_stack.element_queue_stack.take_last();
     Bindings::invoke_custom_element_reactions(queue);
 )~~~");
-                }
-            } else {
-                if (!attribute.extended_attributes.contains("CEReactions")) {
-                    attribute_generator.append(R"~~~(
+                    }
+                } else {
+                    if (!attribute.extended_attributes.contains("CEReactions")) {
+                        attribute_generator.append(R"~~~(
     TRY(throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(cpp_value); }));
 )~~~");
-                } else {
-                    // 2. Run the originally-specified steps for this construct, catching any exceptions. If the steps return a value, let value be the returned value. If they throw an exception, let exception be the thrown exception.
-                    // 3. Let queue be the result of popping from this object's relevant agent's custom element reactions stack.
-                    // 4. Invoke custom element reactions in queue.
-                    // 5. If an exception exception was thrown by the original steps, rethrow exception.
-                    // 6. If a value value was returned from the original steps, return value.
-                    attribute_generator.append(R"~~~(
+                    } else {
+                        // 2. Run the originally-specified steps for this construct, catching any exceptions. If the steps return a value, let value be the returned value. If they throw an exception, let exception be the thrown exception.
+                        // 3. Let queue be the result of popping from this object's relevant agent's custom element reactions stack.
+                        // 4. Invoke custom element reactions in queue.
+                        // 5. If an exception exception was thrown by the original steps, rethrow exception.
+                        // 6. If a value value was returned from the original steps, return value.
+                        attribute_generator.append(R"~~~(
     auto maybe_exception = throw_dom_exception_if_needed(vm, [&] { return impl->set_@attribute.cpp_name@(cpp_value); });
 
     auto queue = reactions_stack.element_queue_stack.take_last();
@@ -4532,47 +4660,13 @@ JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
     if (maybe_exception.is_error())
         return maybe_exception.release_error();
 )~~~");
+                    }
                 }
+                attribute_generator.append(R"~~~(
+    return JS::js_undefined();
+}
+)~~~");
             }
-
-            attribute_generator.append(R"~~~(
-    return JS::js_undefined();
-}
-)~~~");
-        } else if (attribute.extended_attributes.contains("Replaceable"sv)) {
-            attribute_generator.append(R"~~~(
-JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
-{
-    WebIDL::log_trace(vm, "@class_name@::@attribute.setter_callback@");
-    if (vm.argument_count() < 1)
-        return vm.throw_completion<JS::TypeError>(JS::ErrorType::BadArgCountOne, "@namespaced_name@ setter");
-
-    auto* impl = TRY(impl_from(vm));
-    JS::PropertyDescriptor descriptor { .value = vm.argument(0), .writable = true };
-    TRY(impl->internal_define_own_property("@attribute.name@"_utf16_fly_string, descriptor));
-    return JS::js_undefined();
-}
-)~~~");
-        } else if (auto put_forwards_identifier = attribute.extended_attributes.get("PutForwards"sv); put_forwards_identifier.has_value()) {
-            attribute_generator.set("put_forwards_identifier"sv, *put_forwards_identifier);
-            VERIFY(!put_forwards_identifier->is_empty() && !is_ascii_digit(put_forwards_identifier->byte_at(0))); // Ensure `PropertyKey`s are not Numbers.
-
-            attribute_generator.append(R"~~~(
-JS_DEFINE_NATIVE_FUNCTION(@class_name@::@attribute.setter_callback@)
-{
-    WebIDL::log_trace(vm, "@class_name@::@attribute.setter_callback@");
-    auto* impl = TRY(impl_from(vm));
-    if (vm.argument_count() < 1)
-        return vm.throw_completion<JS::TypeError>(JS::ErrorType::BadArgCountOne, "@namespaced_name@ setter");
-    auto value = vm.argument(0);
-
-    auto receiver = TRY(throw_dom_exception_if_needed(vm, [&]() { return impl->@attribute.cpp_name@(); }));
-    if (receiver != JS::js_null())
-        TRY(receiver->set(JS::PropertyKey { "@put_forwards_identifier@"_utf16_fly_string, JS::PropertyKey::StringMayBeNumber::No }, value, JS::Object::ShouldThrowExceptions::Yes));
-
-    return JS::js_undefined();
-}
-)~~~");
         }
     }
 
@@ -4903,6 +4997,10 @@ private:
 
     if (interface.extended_attributes.contains("WithFinalizer"sv)) {
         generator.append(R"~~~(
+public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
+private:
     virtual void finalize() override;
 )~~~");
     }
@@ -4968,6 +5066,7 @@ using namespace Web::ResourceTiming;
 using namespace Web::Selection;
 using namespace Web::Serial;
 using namespace Web::ServiceWorker;
+using namespace Web::Speech;
 using namespace Web::StorageAPI;
 using namespace Web::Streams;
 using namespace Web::SVG;
@@ -4981,6 +5080,7 @@ using namespace Web::WebGL;
 using namespace Web::WebGL::Extensions;
 using namespace Web::WebIDL;
 using namespace Web::WebVTT;
+using namespace Web::WebXR;
 using namespace Web::XHR;
 using namespace Web::XPath;
 )~~~"sv);
@@ -5095,6 +5195,7 @@ void @namespace_class@::visit_edges(JS::Cell::Visitor& visitor)
         generator.append(R"~~~(
 void @namespace_class@::finalize()
 {
+    Base::finalize();
     @name@::finalize(*this);
 }
 )~~~");

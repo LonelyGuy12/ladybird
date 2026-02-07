@@ -7,18 +7,21 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/StringBuilder.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontStyleMapping.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AnchorSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AnchorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderImageSliceStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderRadiusRectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
@@ -26,6 +29,7 @@
 #include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleSystemStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
@@ -48,7 +52,6 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LinearGradientStyleValue.h>
-#include <LibWeb/CSS/StyleValues/MathDepthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/CSS/StyleValues/OpenTypeTaggedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PendingSubstitutionStyleValue.h>
@@ -79,6 +82,7 @@
 #include <LibWeb/CSS/StyleValues/UnicodeRangeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ViewFunctionStyleValue.h>
+#include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/Layout/Node.h>
 
@@ -92,7 +96,8 @@ ColorResolutionContext ColorResolutionContext::for_element(DOM::AbstractElement 
 
     return {
         .color_scheme = color_scheme,
-        .current_color = element.computed_properties()->color_or_fallback(PropertyID::Color, { color_scheme, CSS::InitialValues::color(), element.document(), calculation_resolution_context }, CSS::InitialValues::color()),
+        .current_color = element.computed_properties()->color_or_fallback(PropertyID::Color, { color_scheme, CSS::InitialValues::color(), CSS::SystemColor::accent_color(color_scheme), element.document(), calculation_resolution_context }, CSS::InitialValues::color()),
+        .accent_color = element.computed_properties()->color_or_fallback(PropertyID::AccentColor, { color_scheme, CSS::InitialValues::color(), CSS::SystemColor::accent_color(color_scheme), element.document(), calculation_resolution_context }, CSS::SystemColor::accent_color(color_scheme)),
         .document = element.document(),
         .calculation_resolution_context = calculation_resolution_context
     };
@@ -103,6 +108,7 @@ ColorResolutionContext ColorResolutionContext::for_layout_node_with_style(Layout
     return {
         .color_scheme = layout_node.computed_values().color_scheme(),
         .current_color = layout_node.computed_values().color(),
+        .accent_color = layout_node.computed_values().accent_color(),
         .document = layout_node.document(),
         .calculation_resolution_context = { .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node) },
     };
@@ -111,6 +117,13 @@ ColorResolutionContext ColorResolutionContext::for_layout_node_with_style(Layout
 StyleValue::StyleValue(Type type)
     : m_type(type)
 {
+}
+
+String StyleValue::to_string(SerializationMode mode) const
+{
+    StringBuilder builder;
+    serialize(builder, mode);
+    return builder.to_string_without_validation();
 }
 
 AbstractImageStyleValue const& StyleValue::as_abstract_image() const

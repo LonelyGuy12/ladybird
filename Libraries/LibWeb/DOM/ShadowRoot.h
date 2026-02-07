@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/ElementByIdMap.h>
+#include <LibWeb/DOM/SlotRegistry.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/WebIDL/ObservableArray.h>
 
@@ -20,6 +21,8 @@ class WEB_API ShadowRoot final : public DocumentFragment {
     GC_DECLARE_ALLOCATOR(ShadowRoot);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     Bindings::ShadowRootMode mode() const { return m_mode; }
 
     Bindings::SlotAssignmentMode slot_assignment() const { return m_slot_assignment; }
@@ -42,6 +45,9 @@ public:
 
     bool available_to_element_internals() const { return m_available_to_element_internals; }
     void set_available_to_element_internals(bool available_to_element_internals) { m_available_to_element_internals = available_to_element_internals; }
+
+    [[nodiscard]] bool is_user_agent_internal() const { return m_user_agent_internal; }
+    void set_user_agent_internal(bool user_agent_internal) { m_user_agent_internal = user_agent_internal; }
 
     // ^EventTarget
     virtual EventTarget* get_parent(Event const&) override;
@@ -70,6 +76,18 @@ public:
 
     ElementByIdMap& element_by_id() const;
 
+    void register_slot(HTML::HTMLSlotElement&);
+    void unregister_slot(HTML::HTMLSlotElement&);
+
+    template<typename Callback>
+    void for_each_registered_slot(Callback callback)
+    {
+        if (m_slot_registry)
+            m_slot_registry->for_each_slot(callback);
+    }
+
+    GC::Ptr<HTML::HTMLSlotElement> first_slot_with_name(FlyString const& name) const;
+
     CSS::StyleScope const& style_scope() const { return m_style_scope; }
     CSS::StyleScope& style_scope() { return m_style_scope; }
 
@@ -96,6 +114,7 @@ private:
     Bindings::SlotAssignmentMode m_slot_assignment { Bindings::SlotAssignmentMode::Named };
     bool m_delegates_focus { false };
     bool m_available_to_element_internals { false };
+    bool m_user_agent_internal { false };
 
     // https://dom.spec.whatwg.org/#shadowroot-declarative
     bool m_declarative { false };
@@ -107,6 +126,8 @@ private:
     bool m_serializable { false };
 
     mutable OwnPtr<ElementByIdMap> m_element_by_id;
+
+    OwnPtr<SlotRegistry> m_slot_registry;
 
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
