@@ -6,8 +6,6 @@
 
 #include <AK/StringView.h>
 #include <AK/Utf16String.h>
-#include <LibWeb/Bindings/PythonJSBridge.h>
-#include <LibWeb/Bindings/PythonCompat.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ExecutionContext.h>
 #include <LibJS/Runtime/FunctionObject.h>
@@ -15,8 +13,8 @@
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/Runtime/Value.h>
-#include <AK/StringView.h>
-#include <AK/Utf16String.h>
+#include <LibWeb/Bindings/PythonCompat.h>
+#include <LibWeb/Bindings/PythonJSBridge.h>
 #include <LibWeb/Bindings/PythonJSObjectWrapper.h>
 #include <cstring>
 
@@ -240,7 +238,7 @@ PyObject* PythonJSBridge::call_js_function(String const& function_name, PyObject
     }
 
     // Call the JS function using internal_call
-    auto execution_context = JS::ExecutionContext::create(0, static_cast<u32>(argc));
+    auto execution_context = JS::ExecutionContext::create(0, 0, static_cast<u32>(argc));
     execution_context->arguments = js_args.span();
     auto call_result = js_function.internal_call(*execution_context, JS::js_undefined());
     if (call_result.is_error()) {
