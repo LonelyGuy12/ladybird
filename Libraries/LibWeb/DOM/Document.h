@@ -288,6 +288,8 @@ public:
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
+    HashMap<FlyString, CSS::CustomPropertyRegistration>& registered_property_set() { return m_registered_property_set; }
+
     double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
 
     Optional<String> get_style_sheet_source(CSS::StyleSheetIdentifier const&) const;
