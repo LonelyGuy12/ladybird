@@ -289,7 +289,7 @@ public:
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
     HashMap<FlyString, CSS::CustomPropertyRegistration>& registered_property_set() { return m_registered_property_set; }
-    Optional<CSS::CustomPropertyRegistration> get_registered_custom_property(FlyString const& name) const { return m_registered_property_set.get(name); }
+    Optional<CSS::CustomPropertyRegistration const&> get_registered_custom_property(FlyString const& name) const { return m_registered_property_set.get(name); }
 
     double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
 
