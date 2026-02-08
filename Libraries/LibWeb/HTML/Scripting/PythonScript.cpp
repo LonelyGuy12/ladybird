@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Assertions.h>
 #include <AK/Debug.h>
+#include <AK/TypeCasts.h>
 #include <LibCore/ElapsedTimer.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/PythonDOMBindings.h>
@@ -13,11 +15,10 @@
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
 #include <LibWeb/HTML/Scripting/PythonScript.h>
 #include <LibWeb/HTML/Scripting/PythonSecurityModel.h>
-#include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
 #include <LibWeb/WebIDL/DOMException.h>
-#include <AK/Assertions.h>
-#include <AK/TypeCasts.h>
+#include <LibWeb/WebIDL/QuotaExceededError.h>
 #include <Python.h>
 #include <cstring>
 
@@ -54,7 +55,7 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
     auto parse_timer = Core::ElapsedTimer::start_new();
 
     dbgln("🐍 PythonScript: Compiling Python code ({} bytes)", source.length());
-    
+
     // Convert StringView to Python-compatible string
     auto source_bytes = source.to_byte_string();
     PyObject* compiled_code = Py_CompileString(source_bytes.characters(), filename.characters(), Py_file_input);
@@ -69,7 +70,7 @@ GC::Ref<PythonScript> PythonScript::create(ByteString filename, StringView sourc
         script->set_error_to_rethrow(script->parse_error());
         return script;
     }
-    
+
     dbgln("🐍 PythonScript: ✅ Compilation successful");
 
     // 9. Set script's record to compiled code.
@@ -106,164 +107,164 @@ JS::Completion PythonScript::run(RethrowErrors rethrow_errors, GC::Ptr<JS::Envir
         }
         // 6. Otherwise, execute Python script
         else {
-        [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
-        
-        dbgln("🐍 PythonScript::run() - Starting execution");
+            [[maybe_unused]] auto timer = Core::ElapsedTimer::start_new();
 
-        // Execute the Python code
-        if (m_script_record) {
-            dbgln("🐍 PythonScript::run() - Has compiled code, executing...");
-            // Create a new Python thread state to execute the script
-            PyGILState_STATE gstate = PyGILState_Ensure();
-            
-            if (!m_execution_context) {
-                m_execution_context = PyDict_New();
-                // Set up module-like globals (without builtins yet - security model will add restricted ones)
-                PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
-                Py_INCREF(Py_None);
-                PyDict_SetItemString(m_execution_context, "__package__", Py_None);
-                Py_INCREF(Py_None);
-                PyDict_SetItemString(m_execution_context, "__doc__", Py_None);
-                Py_INCREF(Py_None);
-                PyDict_SetItemString(m_execution_context, "__spec__", Py_None);
-            }
+            dbgln("🐍 PythonScript::run() - Starting execution");
 
-            if (m_execution_context) {
-                // Set up security restrictions for this script execution (this will add restricted __builtins__)
-                URL::URL origin = this->base_url().value_or(URL::URL {});
-                auto security_result = PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin);
-                if (security_result.is_error()) {
-                    evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to set up secure execution environment"sv));
-                    PyGILState_Release(gstate);
-                    // Clean up execution context before returning
-                    clean_up_after_running_script(realm);
-                    return evaluation_status;
-                }
-                
-                // Import and add the web module with Python-friendly APIs
-                if (Bindings::PythonDOMAPI::initialize_module()) {
-                    PyObject* web_module = Bindings::PythonDOMAPI::get_module();
-                    if (web_module) {
-                        PyDict_SetItemString(m_execution_context, "web", web_module);
+            // Execute the Python code
+            if (m_script_record) {
+                dbgln("🐍 PythonScript::run() - Has compiled code, executing...");
+                // Create a new Python thread state to execute the script
+                PyGILState_STATE gstate = PyGILState_Ensure();
 
-                        // Expose Python wrapper types for convenience
-                        PyObject* doc_class = PyObject_GetAttrString(web_module, "Document");
-                        if (doc_class) {
-                            PyDict_SetItemString(m_execution_context, "Document", doc_class);
-                            Py_DECREF(doc_class);
-                        }
-                        PyObject* elem_class = PyObject_GetAttrString(web_module, "Element");
-                        if (elem_class) {
-                            PyDict_SetItemString(m_execution_context, "Element", elem_class);
-                            Py_DECREF(elem_class);
-                        }
-                        PyObject* win_class = PyObject_GetAttrString(web_module, "Window");
-                        if (win_class) {
-                            PyDict_SetItemString(m_execution_context, "Window", win_class);
-                            Py_DECREF(win_class);
-                        }
+                if (!m_execution_context) {
+                    m_execution_context = PyDict_New();
+                    // Set up module-like globals (without builtins yet - security model will add restricted ones)
+                    PyDict_SetItemString(m_execution_context, "__name__", PyUnicode_FromString("__main__"));
+                    Py_INCREF(Py_None);
+                    PyDict_SetItemString(m_execution_context, "__package__", Py_None);
+                    Py_INCREF(Py_None);
+                    PyDict_SetItemString(m_execution_context, "__doc__", Py_None);
+                    Py_INCREF(Py_None);
+                    PyDict_SetItemString(m_execution_context, "__spec__", Py_None);
+                }
 
-                        // Expose current window and document instances to Python (no JS bridge)
-                        auto& window_object = HTML::relevant_global_object(realm.global_object());
-                        VERIFY(is<HTML::Window>(window_object));
-                        auto& win = static_cast<HTML::Window&>(window_object);
-                        PyObject* py_window = Bindings::PythonWindow::create_from_cpp_window(win);
-                        if (py_window) {
-                            PyDict_SetItemString(m_execution_context, "window", py_window);
-                            Py_DECREF(py_window);
-                        }
-                        auto& doc = const_cast<DOM::Document&>(*win.document());
-                        PyObject* py_document = Bindings::PythonDocument::create_from_cpp_document(doc);
-                        if (py_document) {
-                            PyDict_SetItemString(m_execution_context, "document", py_document);
-                            Py_DECREF(py_document);
-                        }
+                if (m_execution_context) {
+                    // Set up security restrictions for this script execution (this will add restricted __builtins__)
+                    URL::URL origin = this->base_url().value_or(URL::URL {});
+                    auto security_result = PythonSecurityModel::setup_sandboxed_environment(m_execution_context, origin);
+                    if (security_result.is_error()) {
+                        evaluation_status = JS::throw_completion(JS::Error::create(realm, "Failed to set up secure execution environment"sv));
+                        PyGILState_Release(gstate);
+                        // Clean up execution context before returning
+                        clean_up_after_running_script(realm);
+                        return evaluation_status;
                     }
-                }
-                
-                // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
-                // Note: Import sys module, but handle errors gracefully if it fails due to restricted builtins
-                PyObject* sys_module = PyImport_ImportModule("sys");
-                if (sys_module) {
-                    // Flush stdout before execution
-                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
-                    if (stdout_obj && stdout_obj != Py_None) {
-                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
-                        Py_XDECREF(flush_result);
-                        Py_DECREF(stdout_obj);
-                    }
-                    Py_DECREF(sys_module);
-                } else {
-                    // If sys import fails, clear the error and continue - it's not critical
-                    PyErr_Clear();
-                    dbgln("🐍 PythonScript::run() - ⚠️ Failed to import sys module (non-critical)");
-                }
-                
-                dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
-                PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
-                dbgln("🐍 PythonScript::run() - PyEval_EvalCode returned");
-                
-                // Flush stdout/stderr after execution to ensure output appears immediately
-                sys_module = PyImport_ImportModule("sys");
-                if (sys_module) {
-                    PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
-                    if (stdout_obj && stdout_obj != Py_None) {
-                        PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
-                        Py_XDECREF(flush_result);
-                        Py_DECREF(stdout_obj);
-                    }
-                    PyObject* stderr_obj = PyObject_GetAttrString(sys_module, "stderr");
-                    if (stderr_obj && stderr_obj != Py_None) {
-                        PyObject* flush_result = PyObject_CallMethod(stderr_obj, "flush", nullptr);
-                        Py_XDECREF(flush_result);
-                        Py_DECREF(stderr_obj);
-                    }
-                    Py_DECREF(sys_module);
-                }
-                
-                if (!result) {
-                    dbgln("🐍 PythonScript::run() - ❌ Execution failed with Python error");
-                    // Python error occurred
-                    PyObject* error_type = nullptr;
-                    PyObject* error_value = nullptr;
-                    PyObject* error_traceback = nullptr;
-                    
-                    PyErr_Fetch(&error_type, &error_value, &error_traceback);
-                    PyErr_NormalizeException(&error_type, &error_value, &error_traceback);
-                    
-                    if (error_value) {
-                        PyObject* error_str = PyObject_Str(error_value);
-                        if (error_str) {
-                            const char* error_cstr = PyUnicode_AsUTF8(error_str);
-                            if (error_cstr) {
-                                auto error_message = MUST(String::from_utf8(StringView { error_cstr, strlen(error_cstr) }));
-                                evaluation_status = JS::throw_completion(JS::Error::create(realm, error_message));
+
+                    // Import and add the web module with Python-friendly APIs
+                    if (Bindings::PythonDOMAPI::initialize_module()) {
+                        PyObject* web_module = Bindings::PythonDOMAPI::get_module();
+                        if (web_module) {
+                            PyDict_SetItemString(m_execution_context, "web", web_module);
+
+                            // Expose Python wrapper types for convenience
+                            PyObject* doc_class = PyObject_GetAttrString(web_module, "Document");
+                            if (doc_class) {
+                                PyDict_SetItemString(m_execution_context, "Document", doc_class);
+                                Py_DECREF(doc_class);
                             }
-                            Py_DECREF(error_str);
-                        }
-                        Py_DECREF(error_value);
-                    }
-                    if (error_type)
-                        Py_DECREF(error_type);
-                    if (error_traceback)
-                        Py_DECREF(error_traceback);
-                } else {
-                    // Execution was successful
-                    dbgln("🐍 PythonScript::run() - ✅ Execution successful!");
-                    if (result != Py_None) {
-                        // Currently unused; mark success
-                    }
-                    Py_DECREF(result);
-                    evaluation_status = JS::normal_completion(JS::js_undefined());
-                }
+                            PyObject* elem_class = PyObject_GetAttrString(web_module, "Element");
+                            if (elem_class) {
+                                PyDict_SetItemString(m_execution_context, "Element", elem_class);
+                                Py_DECREF(elem_class);
+                            }
+                            PyObject* win_class = PyObject_GetAttrString(web_module, "Window");
+                            if (win_class) {
+                                PyDict_SetItemString(m_execution_context, "Window", win_class);
+                                Py_DECREF(win_class);
+                            }
 
-                PyGILState_Release(gstate);
-            } else {
-                // No script record - this shouldn't happen, but handle it gracefully
-                dbgln("🐍 PythonScript::run() - ⚠️ No compiled script record available");
-                evaluation_status = JS::throw_completion(JS::Error::create(realm, "Python script compilation failed"sv));
+                            // Expose current window and document instances to Python (no JS bridge)
+                            auto& window_object = HTML::relevant_global_object(realm.global_object());
+                            VERIFY(is<HTML::Window>(window_object));
+                            auto& win = static_cast<HTML::Window&>(window_object);
+                            PyObject* py_window = Bindings::PythonWindow::create_from_cpp_window(win);
+                            if (py_window) {
+                                PyDict_SetItemString(m_execution_context, "window", py_window);
+                                Py_DECREF(py_window);
+                            }
+                            auto& doc = const_cast<DOM::Document&>(*win.document());
+                            PyObject* py_document = Bindings::PythonDocument::create_from_cpp_document(doc);
+                            if (py_document) {
+                                PyDict_SetItemString(m_execution_context, "document", py_document);
+                                Py_DECREF(py_document);
+                            }
+                        }
+                    }
+
+                    // Force UTF-8 encoding for stdout/stderr to handle emojis and unicode
+                    // Note: Import sys module, but handle errors gracefully if it fails due to restricted builtins
+                    PyObject* sys_module = PyImport_ImportModule("sys");
+                    if (sys_module) {
+                        // Flush stdout before execution
+                        PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                        if (stdout_obj && stdout_obj != Py_None) {
+                            PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                            Py_XDECREF(flush_result);
+                            Py_DECREF(stdout_obj);
+                        }
+                        Py_DECREF(sys_module);
+                    } else {
+                        // If sys import fails, clear the error and continue - it's not critical
+                        PyErr_Clear();
+                        dbgln("🐍 PythonScript::run() - ⚠️ Failed to import sys module (non-critical)");
+                    }
+
+                    dbgln("🐍 PythonScript::run() - Calling PyEval_EvalCode...");
+                    PyObject* result = PyEval_EvalCode(m_script_record, m_execution_context, m_execution_context);
+                    dbgln("🐍 PythonScript::run() - PyEval_EvalCode returned");
+
+                    // Flush stdout/stderr after execution to ensure output appears immediately
+                    sys_module = PyImport_ImportModule("sys");
+                    if (sys_module) {
+                        PyObject* stdout_obj = PyObject_GetAttrString(sys_module, "stdout");
+                        if (stdout_obj && stdout_obj != Py_None) {
+                            PyObject* flush_result = PyObject_CallMethod(stdout_obj, "flush", nullptr);
+                            Py_XDECREF(flush_result);
+                            Py_DECREF(stdout_obj);
+                        }
+                        PyObject* stderr_obj = PyObject_GetAttrString(sys_module, "stderr");
+                        if (stderr_obj && stderr_obj != Py_None) {
+                            PyObject* flush_result = PyObject_CallMethod(stderr_obj, "flush", nullptr);
+                            Py_XDECREF(flush_result);
+                            Py_DECREF(stderr_obj);
+                        }
+                        Py_DECREF(sys_module);
+                    }
+
+                    if (!result) {
+                        dbgln("🐍 PythonScript::run() - ❌ Execution failed with Python error");
+                        // Python error occurred
+                        PyObject* error_type = nullptr;
+                        PyObject* error_value = nullptr;
+                        PyObject* error_traceback = nullptr;
+
+                        PyErr_Fetch(&error_type, &error_value, &error_traceback);
+                        PyErr_NormalizeException(&error_type, &error_value, &error_traceback);
+
+                        if (error_value) {
+                            PyObject* error_str = PyObject_Str(error_value);
+                            if (error_str) {
+                                char const* error_cstr = PyUnicode_AsUTF8(error_str);
+                                if (error_cstr) {
+                                    auto error_message = MUST(String::from_utf8(StringView { error_cstr, strlen(error_cstr) }));
+                                    evaluation_status = JS::throw_completion(JS::Error::create(realm, error_message));
+                                }
+                                Py_DECREF(error_str);
+                            }
+                            Py_DECREF(error_value);
+                        }
+                        if (error_type)
+                            Py_DECREF(error_type);
+                        if (error_traceback)
+                            Py_DECREF(error_traceback);
+                    } else {
+                        // Execution was successful
+                        dbgln("🐍 PythonScript::run() - ✅ Execution successful!");
+                        if (result != Py_None) {
+                            // Currently unused; mark success
+                        }
+                        Py_DECREF(result);
+                        evaluation_status = JS::normal_completion(JS::js_undefined());
+                    }
+
+                    PyGILState_Release(gstate);
+                } else {
+                    // No script record - this shouldn't happen, but handle it gracefully
+                    dbgln("🐍 PythonScript::run() - ⚠️ No compiled script record available");
+                    evaluation_status = JS::throw_completion(JS::Error::create(realm, "Python script compilation failed"sv));
+                }
             }
-        }
         }
 
         // 7. If evaluationStatus is an abrupt completion, then:
