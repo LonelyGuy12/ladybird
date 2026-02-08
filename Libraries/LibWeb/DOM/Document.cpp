@@ -5479,7 +5479,7 @@ void Document::update_animations_and_send_events(Optional<double> const& timesta
         //   updated.
         // - Queueing animation events for any such animations.
         for (auto const& timeline : timelines_to_update) {
-            timeline->update_current_time(timestamp);
+            timeline->update_current_time(timestamp.value_or(0.0));
 
             for (auto const& animation : timeline->associated_animations())
                 animation->update();
