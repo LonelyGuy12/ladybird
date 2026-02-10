@@ -82,6 +82,10 @@
 #    cmakedefine01 FLAC_ENCODER_DEBUG
 #endif
 
+#ifndef FORMATTING_CONTEXT_TRACE_DEBUG
+#    cmakedefine01 FORMATTING_CONTEXT_TRACE_DEBUG
+#endif
+
 #ifndef GENERATE_DEBUG
 #    cmakedefine01 GENERATE_DEBUG
 #endif
@@ -340,10 +344,6 @@
 
 #ifndef WEBP_DEBUG
 #    cmakedefine01 WEBP_DEBUG
-#endif
-
-#ifndef WORKER_THREAD_DEBUG
-#    cmakedefine01 WORKER_THREAD_DEBUG
 #endif
 
 #ifndef XML_PARSER_DEBUG

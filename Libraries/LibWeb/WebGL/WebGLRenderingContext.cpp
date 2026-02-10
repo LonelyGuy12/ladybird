@@ -17,6 +17,7 @@
 #include <LibWeb/WebGL/Extensions/ANGLEInstancedArrays.h>
 #include <LibWeb/WebGL/Extensions/EXTBlendMinMax.h>
 #include <LibWeb/WebGL/Extensions/EXTTextureFilterAnisotropic.h>
+#include <LibWeb/WebGL/Extensions/OESElementIndexUint.h>
 #include <LibWeb/WebGL/Extensions/OESStandardDerivatives.h>
 #include <LibWeb/WebGL/Extensions/OESVertexArrayObject.h>
 #include <LibWeb/WebGL/Extensions/WebGLCompressedTextureS3tc.h>
@@ -75,8 +76,7 @@ JS::ThrowCompletionOr<GC::Ptr<WebGLRenderingContext>> WebGLRenderingContext::cre
 }
 
 WebGLRenderingContext::WebGLRenderingContext(JS::Realm& realm, HTML::HTMLCanvasElement& canvas_element, NonnullOwnPtr<OpenGLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters)
-    : PlatformObject(realm)
-    , WebGLRenderingContextOverloads(realm, move(context))
+    : WebGLRenderingContextOverloads(realm, move(context))
     , m_canvas_element(canvas_element)
     , m_context_creation_parameters(context_creation_parameters)
     , m_actual_context_parameters(actual_context_parameters)
@@ -99,6 +99,7 @@ void WebGLRenderingContext::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_angle_instanced_arrays_extension);
     visitor.visit(m_ext_blend_min_max_extension);
     visitor.visit(m_ext_texture_filter_anisotropic);
+    visitor.visit(m_oes_element_index_uint_object_extension);
     visitor.visit(m_oes_standard_derivatives_object_extension);
     visitor.visit(m_oes_vertex_array_object_extension);
     visitor.visit(m_webgl_compressed_texture_s3tc_extension);
@@ -203,11 +204,20 @@ JS::Object* WebGLRenderingContext::get_extension(String const& name)
 
     if (name.equals_ignoring_ascii_case("EXT_texture_filter_anisotropic"sv)) {
         if (!m_ext_texture_filter_anisotropic) {
-            m_ext_texture_filter_anisotropic = MUST(Extensions::EXTTextureFilterAnisotropic::create(realm(), this));
+            m_ext_texture_filter_anisotropic = MUST(Extensions::EXTTextureFilterAnisotropic::create(realm(), *this));
         }
 
         VERIFY(m_ext_texture_filter_anisotropic);
         return m_ext_texture_filter_anisotropic;
+    }
+
+    if (name.equals_ignoring_ascii_case("OES_element_index_uint"sv)) {
+        if (!m_oes_element_index_uint_object_extension) {
+            m_oes_element_index_uint_object_extension = MUST(Extensions::OESElementIndexUint::create(realm(), *this));
+        }
+
+        VERIFY(m_oes_element_index_uint_object_extension);
+        return m_oes_element_index_uint_object_extension;
     }
 
     if (name.equals_ignoring_ascii_case("OES_standard_derivatives"sv)) {
@@ -230,7 +240,7 @@ JS::Object* WebGLRenderingContext::get_extension(String const& name)
 
     if (name.equals_ignoring_ascii_case("WEBGL_compressed_texture_s3tc"sv)) {
         if (!m_webgl_compressed_texture_s3tc_extension) {
-            m_webgl_compressed_texture_s3tc_extension = MUST(Extensions::WebGLCompressedTextureS3tc::create(realm(), this));
+            m_webgl_compressed_texture_s3tc_extension = MUST(Extensions::WebGLCompressedTextureS3tc::create(realm(), *this));
 
             m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
             m_enabled_compressed_texture_formats.append(GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
@@ -244,7 +254,7 @@ JS::Object* WebGLRenderingContext::get_extension(String const& name)
 
     if (name.equals_ignoring_ascii_case("WEBGL_compressed_texture_s3tc_srgb"sv)) {
         if (!m_webgl_compressed_texture_s3tc_srgb_extension) {
-            m_webgl_compressed_texture_s3tc_srgb_extension = MUST(Extensions::WebGLCompressedTextureS3tcSrgb::create(realm(), this));
+            m_webgl_compressed_texture_s3tc_srgb_extension = MUST(Extensions::WebGLCompressedTextureS3tcSrgb::create(realm(), *this));
 
             m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
             m_enabled_compressed_texture_formats.append(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT);

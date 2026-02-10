@@ -390,12 +390,24 @@ struct HideCursor {
                     [[NSCursor resizeUpDownCursor] set];
                     break;
                 case Gfx::StandardCursor::ResizeDiagonalTLBR:
-                    // FIXME: AppKit does not have a corresponding cursor, so we should make one.
-                    [[NSCursor arrowCursor] set];
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+                    if (@available(macOS 15.0, *))
+                        [[NSCursor frameResizeCursorFromPosition:NSCursorFrameResizePositionBottomRight
+                                                    inDirections:NSCursorFrameResizeDirectionsAll] set];
+                    else
+#endif
+                        // FIXME: AppKit does not have a corresponding cursor, so we should make one.
+                        [[NSCursor arrowCursor] set];
                     break;
                 case Gfx::StandardCursor::ResizeDiagonalBLTR:
-                    // FIXME: AppKit does not have a corresponding cursor, so we should make one.
-                    [[NSCursor arrowCursor] set];
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+                    if (@available(macOS 15.0, *))
+                        [[NSCursor frameResizeCursorFromPosition:NSCursorFrameResizePositionBottomLeft
+                                                    inDirections:NSCursorFrameResizeDirectionsAll] set];
+                    else
+#endif
+                        // FIXME: AppKit does not have a corresponding cursor, so we should make one.
+                        [[NSCursor arrowCursor] set];
                     break;
                 case Gfx::StandardCursor::ResizeColumn:
                     [[NSCursor resizeLeftRightCursor] set];

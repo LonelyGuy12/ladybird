@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2024-2026, Sam Atkins <sam@ladybird.org>
  * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -39,10 +39,20 @@ Optional<Color> OKLabColorStyleValue::to_color(ColorResolutionContext color_reso
     return Color::from_oklab(clamp(l_val.value(), 0, 1), a_val.value(), b_val.value(), alpha_val.value());
 }
 
-// https://www.w3.org/TR/css-color-4/#serializing-oklab-oklch
-String OKLabColorStyleValue::to_string(SerializationMode mode) const
+ValueComparingNonnullRefPtr<StyleValue const> OKLabColorStyleValue::absolutized(ComputationContext const& context) const
 {
-    StringBuilder builder;
+    auto l = m_properties.l->absolutized(context);
+    auto a = m_properties.a->absolutized(context);
+    auto b = m_properties.b->absolutized(context);
+    auto alpha = m_properties.alpha->absolutized(context);
+    if (l == m_properties.l && a == m_properties.a && b == m_properties.b && alpha == m_properties.alpha)
+        return *this;
+    return LabLikeColorStyleValue::create<OKLabColorStyleValue>(move(l), move(a), move(b), move(alpha));
+}
+
+// https://www.w3.org/TR/css-color-4/#serializing-oklab-oklch
+void OKLabColorStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
+{
     builder.append("oklab("sv);
     serialize_color_component(builder, mode, m_properties.l, 1.0f, 0, 1);
     builder.append(' ');
@@ -56,7 +66,6 @@ String OKLabColorStyleValue::to_string(SerializationMode mode) const
     }
 
     builder.append(')');
-    return MUST(builder.to_string());
 }
 
 Optional<Color> LabColorStyleValue::to_color(ColorResolutionContext color_resolution_context) const
@@ -72,10 +81,20 @@ Optional<Color> LabColorStyleValue::to_color(ColorResolutionContext color_resolu
     return Color::from_lab(clamp(l_val.value(), 0, 100), a_val.value(), b_val.value(), alpha_val.value());
 }
 
-// https://www.w3.org/TR/css-color-4/#serializing-lab-lch
-String LabColorStyleValue::to_string(SerializationMode mode) const
+ValueComparingNonnullRefPtr<StyleValue const> LabColorStyleValue::absolutized(ComputationContext const& context) const
 {
-    StringBuilder builder;
+    auto l = m_properties.l->absolutized(context);
+    auto a = m_properties.a->absolutized(context);
+    auto b = m_properties.b->absolutized(context);
+    auto alpha = m_properties.alpha->absolutized(context);
+    if (l == m_properties.l && a == m_properties.a && b == m_properties.b && alpha == m_properties.alpha)
+        return *this;
+    return LabLikeColorStyleValue::create<LabColorStyleValue>(l, a, b, alpha);
+}
+
+// https://www.w3.org/TR/css-color-4/#serializing-lab-lch
+void LabColorStyleValue::serialize(StringBuilder& builder, SerializationMode mode) const
+{
     builder.append("lab("sv);
     serialize_color_component(builder, mode, m_properties.l, 100, 0, 100);
     builder.append(' ');
@@ -89,7 +108,6 @@ String LabColorStyleValue::to_string(SerializationMode mode) const
     }
 
     builder.append(')');
-    return MUST(builder.to_string());
 }
 
 }

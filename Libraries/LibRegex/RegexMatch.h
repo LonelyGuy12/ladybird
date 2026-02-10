@@ -16,6 +16,7 @@
 #include <AK/MemMem.h>
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
+#include <AK/UnicodeUtils.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
 #include <AK/Utf32View.h>
@@ -49,6 +50,11 @@ public:
     Utf16View const& u16_view() const
     {
         return m_view.get<Utf16View>();
+    }
+
+    bool is_u16_view() const
+    {
+        return m_view.has<Utf16View>();
     }
 
     bool unicode() const { return m_unicode; }
@@ -266,7 +272,12 @@ public:
             [&](StringView view) {
                 return other.m_view.visit(
                     [&](StringView other_view) { return view.equals_ignoring_ascii_case(other_view); },
-                    [](auto&) -> bool { TODO(); });
+                    [&](Utf16View other_view) -> bool {
+                        auto result = other_view.to_utf8();
+                        if (result.is_error())
+                            return false;
+                        return view.equals_ignoring_ascii_case(result.value().bytes_as_string_view());
+                    });
             },
             [&](Utf16View view) {
                 return other.m_view.visit(
@@ -283,6 +294,101 @@ public:
                 TODO();
             },
             [&](StringView view) { return view.starts_with(str); });
+    }
+
+    struct FoundIndex {
+        size_t code_unit_index;
+        size_t code_point_index;
+    };
+    Optional<FoundIndex> find_index_of_previous(u32 code_point, size_t end_code_point_index, size_t end_code_unit_index) const
+    {
+        return m_view.visit(
+            [&](Utf16View const& view) -> Optional<FoundIndex> {
+                auto result = view.find_last_code_point_offset(code_point, end_code_unit_index);
+                if (!result.has_value())
+                    return {};
+                return FoundIndex { result.value(), view.code_point_offset_of(result.value()) };
+            },
+            [&](StringView const& view) -> Optional<FoundIndex> {
+                if (unicode()) {
+                    Utf8View utf8_view { view };
+                    auto it = utf8_view.begin();
+                    size_t current_code_point_index = 0;
+                    Optional<FoundIndex> found_index;
+
+                    for (; it != utf8_view.end(); ++it, ++current_code_point_index) {
+                        if (current_code_point_index >= end_code_point_index)
+                            break;
+                        if (*it == code_point) {
+                            auto byte_index = utf8_view.byte_offset_of(it);
+                            found_index = { byte_index, current_code_point_index };
+                        }
+                    }
+
+                    return found_index;
+                }
+
+                auto byte_index = view.substring_view(0, min(end_code_unit_index, view.length())).find_last(code_point);
+                if (!byte_index.has_value())
+                    return {};
+                return FoundIndex { byte_index.value(), byte_index.value() };
+            });
+    }
+
+    FoundIndex find_end_of_line(size_t start_code_point_index, size_t start_code_unit_index) const
+    {
+        constexpr auto is_newline = [](u32 ch) { return ch == '\n' || ch == '\r' || ch == 0x2028 || ch == 0x2029; };
+
+        return m_view.visit(
+            [&](Utf16View const& view) -> FoundIndex {
+                size_t code_unit_index = start_code_unit_index;
+                size_t code_point_index = start_code_point_index;
+                while (code_unit_index < view.length_in_code_units()) {
+                    auto code_unit = view.code_unit_at(code_unit_index);
+                    u32 ch = code_unit;
+                    size_t code_units_for_this = 1;
+                    if (AK::UnicodeUtils::is_utf16_high_surrogate(code_unit) && code_unit_index + 1 < view.length_in_code_units()) {
+                        auto next_code_unit = view.code_unit_at(code_unit_index + 1);
+                        if (AK::UnicodeUtils::is_utf16_low_surrogate(next_code_unit)) {
+                            ch = AK::UnicodeUtils::decode_utf16_surrogate_pair(code_unit, next_code_unit);
+                            code_units_for_this = 2;
+                        }
+                    }
+
+                    if (is_newline(ch))
+                        return FoundIndex { code_unit_index, code_point_index };
+                    code_unit_index += code_units_for_this;
+                    ++code_point_index;
+                }
+                return FoundIndex { view.length_in_code_units(), code_point_index };
+            },
+            [&](StringView const& view) -> FoundIndex {
+                if (unicode()) {
+                    Utf8View utf8_view { view };
+                    auto it = utf8_view.begin();
+                    size_t current_code_point_index = 0;
+
+                    // Skip to start position
+                    while (it != utf8_view.end() && current_code_point_index < start_code_point_index) {
+                        ++it;
+                        ++current_code_point_index;
+                    }
+
+                    for (; it != utf8_view.end(); ++it, ++current_code_point_index) {
+                        if (is_newline(*it)) {
+                            return FoundIndex { utf8_view.byte_offset_of(it), current_code_point_index };
+                        }
+                    }
+
+                    return FoundIndex { view.length(), utf8_view.length() };
+                }
+
+                for (size_t i = start_code_unit_index; i < view.length(); ++i) {
+                    if (is_newline(static_cast<u8>(view[i])))
+                        return FoundIndex { i, i };
+                }
+                return FoundIndex { view.length(), view.length() };
+            });
     }
 
 private:
@@ -354,6 +460,9 @@ struct MatchInput {
     mutable Vector<size_t> saved_code_unit_positions;
     mutable Vector<size_t> saved_forks_since_last_save;
     mutable Optional<size_t> fork_to_replace;
+
+    bool in_the_middle_of_a_line { false };
+    StringView pattern {};
 };
 
 struct MatchState {
@@ -364,14 +473,20 @@ struct MatchState {
     size_t instruction_position { 0 };
     size_t fork_at_position { 0 };
     size_t forks_since_last_save { 0 };
+    size_t string_position_before_rseek { NumericLimits<size_t>::max() };
+    size_t string_position_in_code_units_before_rseek { NumericLimits<size_t>::max() };
     Optional<size_t> initiating_fork;
     COWVector<Match> matches;
     COWVector<Match> flat_capture_group_matches; // Vector<Vector<Match>> indexed by match index, then by capture group id; flattened for performance
     COWVector<u64> repetition_marks;
     Vector<u64, 64> checkpoints;
+    Vector<i64> step_backs;
+    Vector<FlagsUnderlyingType, 1> modifier_stack;
+    AllOptions current_options;
 
-    explicit MatchState(size_t capture_group_count)
+    explicit MatchState(size_t capture_group_count, AllOptions options = {})
         : capture_group_count(capture_group_count)
+        , current_options(options)
     {
     }
 
@@ -422,6 +537,7 @@ struct MatchState {
         combine(initiating_fork.value_or(0) + initiating_fork.has_value());
         combine_vector(repetition_marks, 0xbeefbeefbeefbeef);
         combine_vector(checkpoints, 0xfacefacefaceface);
+        combine_vector(step_backs, 0xfedefedefedefede);
 
         return hash;
     }

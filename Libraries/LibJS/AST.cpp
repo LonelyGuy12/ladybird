@@ -41,15 +41,8 @@
 namespace JS {
 
 ASTNode::ASTNode(SourceRange source_range)
-    : m_start_offset(source_range.start.offset)
-    , m_source_code(source_range.code)
-    , m_end_offset(source_range.end.offset)
+    : m_source_range(move(source_range))
 {
-}
-
-SourceRange ASTNode::source_range() const
-{
-    return m_source_code->range_from_offsets(m_start_offset, m_end_offset);
 }
 
 ByteString ASTNode::class_name() const
@@ -1002,7 +995,7 @@ void Identifier::dump(int indent) const
 {
     print_indent(indent);
     if (is_local()) {
-        outln("Identifier \"{}\" is_local=(true) index=({})", m_string, m_local_index->index);
+        outln("Identifier \"{}\" is_local=(true) index=({})", m_string, m_local_index);
     } else if (is_global()) {
         outln("Identifier \"{}\" is_global=(true)", m_string);
     } else {
@@ -1504,6 +1497,55 @@ void ScopeNode::add_hoisted_function(NonnullRefPtr<FunctionDeclaration const> de
     m_functions_hoistable_with_annexB_extension.append(move(declaration));
 }
 
+void ScopeNode::ensure_function_scope_data() const
+{
+    if (m_function_scope_data)
+        return;
+
+    auto data = make<FunctionScopeData>();
+
+    // Extract functions_to_initialize from var-scoped function declarations (in reverse order, deduplicated).
+    HashTable<Utf16FlyString> seen_function_names;
+    for (ssize_t i = m_var_declarations.size() - 1; i >= 0; i--) {
+        auto const& declaration = m_var_declarations[i];
+        if (is<FunctionDeclaration>(declaration)) {
+            auto& function_decl = static_cast<FunctionDeclaration const&>(*declaration);
+            if (seen_function_names.set(function_decl.name()) == AK::HashSetResult::InsertedNewEntry)
+                data->functions_to_initialize.append(static_ptr_cast<FunctionDeclaration const>(declaration));
+        }
+    }
+
+    data->has_function_named_arguments = seen_function_names.contains("arguments"_utf16_fly_string);
+
+    // Check if "arguments" is lexically declared.
+    MUST(for_each_lexically_declared_identifier([&](auto const& identifier) {
+        if (identifier.string() == "arguments"_utf16_fly_string)
+            data->has_lexically_declared_arguments = true;
+    }));
+
+    // Extract vars_to_initialize from var declarations.
+    HashTable<Utf16FlyString> seen_var_names;
+    MUST(for_each_var_declared_identifier([&](Identifier const& identifier) {
+        auto const& name = identifier.string();
+        if (seen_var_names.set(name) == AK::HashSetResult::InsertedNewEntry) {
+            data->vars_to_initialize.append({
+                .identifier = identifier,
+                .is_parameter = false,
+                .is_function_name = seen_function_names.contains(name),
+            });
+
+            data->var_names.set(name);
+
+            if (!identifier.is_local()) {
+                data->non_local_var_count++;
+                data->non_local_var_count_for_parameter_expressions++;
+            }
+        }
+    }));
+
+    m_function_scope_data = move(data);
+}
+
 Utf16FlyString ExportStatement::local_name_for_default = "*default*"_utf16_fly_string;
 
 static void dump_assert_clauses(ModuleRequest const& request)
@@ -1572,7 +1614,7 @@ void ImportStatement::dump(int indent) const
 
 bool ExportStatement::has_export(Utf16FlyString const& export_name) const
 {
-    return any_of(m_entries.begin(), m_entries.end(), [&](auto& entry) {
+    return m_entries.contains([&](auto& entry) {
         // Make sure that empty exported names does not overlap with anything
         if (entry.kind != ExportEntry::Kind::NamedExport)
             return false;
@@ -1582,9 +1624,7 @@ bool ExportStatement::has_export(Utf16FlyString const& export_name) const
 
 bool ImportStatement::has_bound_name(Utf16FlyString const& name) const
 {
-    return any_of(m_entries.begin(), m_entries.end(), [&](auto& entry) {
-        return entry.local_name == name;
-    });
+    return m_entries.contains([&](auto& entry) { return entry.local_name == name; });
 }
 
 // 16.1.7 GlobalDeclarationInstantiation ( script, env ), https://tc39.es/ecma262/#sec-globaldeclarationinstantiation

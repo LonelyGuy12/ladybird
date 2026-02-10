@@ -24,7 +24,14 @@ Messages::WebWorkerClient::DidRequestCookieResponse WebWorkerClient::did_request
 {
     if (on_request_cookie)
         return on_request_cookie(url, source);
-    return String {};
+    return Cookie::VersionedCookie {};
+}
+
+Messages::WebWorkerClient::RequestWorkerAgentResponse WebWorkerClient::request_worker_agent(Web::Bindings::AgentType worker_type)
+{
+    if (on_request_worker_agent)
+        return on_request_worker_agent(worker_type);
+    return IPC::File {};
 }
 
 WebWorkerClient::WebWorkerClient(NonnullOwnPtr<IPC::Transport> transport)

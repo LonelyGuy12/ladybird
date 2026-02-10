@@ -17,6 +17,7 @@
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/EasingFunction.h>
+#include <LibWeb/CSS/FontFeatureData.h>
 #include <LibWeb/CSS/LengthBox.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PseudoClass.h>
@@ -25,6 +26,14 @@
 #include <LibWeb/Export.h>
 
 namespace Web::CSS {
+
+struct TransitionProperties {
+    Vector<PropertyID> properties;
+    double duration;
+    EasingFunction timing_function;
+    double delay;
+    TransitionBehavior transition_behavior;
+};
 
 enum class AnimatedPropertyResultOfTransition : u8 {
     No,
@@ -80,12 +89,7 @@ public:
     Size size_value(PropertyID) const;
     [[nodiscard]] Variant<LengthPercentage, NormalGap> gap_value(PropertyID) const;
     Length length(PropertyID) const;
-    enum class ClampNegativeLengths {
-        No,
-        Yes,
-    };
-    Optional<LengthPercentage> length_percentage(PropertyID, Layout::NodeWithStyle const&, ClampNegativeLengths) const;
-    LengthBox length_box(PropertyID left_id, PropertyID top_id, PropertyID right_id, PropertyID bottom_id, Layout::NodeWithStyle const&, ClampNegativeLengths, LengthPercentageOrAuto const& default_value) const;
+    LengthBox length_box(PropertyID left_id, PropertyID top_id, PropertyID right_id, PropertyID bottom_id, LengthPercentageOrAuto const& default_value) const;
     Color color_or_fallback(PropertyID, ColorResolutionContext, Color fallback) const;
     HashMap<PropertyID, StyleValueVector> assemble_coordinated_value_list(PropertyID base_property_id, Vector<PropertyID> const& property_ids) const;
     ColorInterpolation color_interpolation() const;
@@ -98,6 +102,7 @@ public:
     CSSPixels text_underline_offset() const;
     TextUnderlinePosition text_underline_position() const;
     Vector<BackgroundLayerData> background_layers() const;
+    BackgroundBox background_color_clip() const;
     Length border_spacing_horizontal(Layout::Node const&) const;
     Length border_spacing_vertical(Layout::Node const&) const;
     CaptionSide caption_side() const;
@@ -156,7 +161,7 @@ public:
     BoxSizing box_sizing() const;
     PointerEvents pointer_events() const;
     Variant<VerticalAlign, LengthPercentage> vertical_align() const;
-    Gfx::ShapeFeatures font_features() const;
+    FontFeatureData font_feature_data() const;
     Optional<Gfx::FontVariantAlternates> font_variant_alternates() const;
     FontVariantCaps font_variant_caps() const;
     Optional<Gfx::FontVariantEastAsian> font_variant_east_asian() const;
@@ -166,7 +171,7 @@ public:
     FontVariantPosition font_variant_position() const;
     FontKerning font_kerning() const;
     Optional<FlyString> font_language_override() const;
-    HashMap<StringView, u8> font_feature_settings() const;
+    HashMap<FlyString, u8> font_feature_settings() const;
     HashMap<FlyString, double> font_variation_settings() const;
     GridTrackSizeList grid_auto_columns() const;
     GridTrackSizeList grid_auto_rows() const;
@@ -205,6 +210,7 @@ public:
         FlyString name;
     };
     Vector<AnimationProperties> animations() const;
+    Vector<TransitionProperties> transitions() const;
 
     Display display_before_box_type_transformation() const;
     void set_display_before_box_type_transformation(Display value);
@@ -239,25 +245,26 @@ public:
     ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> computed_font_list(FontComputer const&) const;
     ValueComparingNonnullRefPtr<Gfx::Font const> first_available_computed_font(FontComputer const&) const;
 
+    MathStyle math_style() const;
+    int math_depth() const;
     [[nodiscard]] CSSPixels line_height() const;
     [[nodiscard]] CSSPixels font_size() const;
     double font_weight() const;
     Percentage font_width() const;
     int font_slope() const;
+    FontOpticalSizing font_optical_sizing() const;
 
     bool operator==(ComputedProperties const&) const;
 
     Positioning position() const;
     Optional<int> z_index() const;
 
-    void set_math_depth(int math_depth);
-    int math_depth() const { return m_math_depth; }
-
     QuotesData quotes() const;
     Vector<CounterData> counter_data(PropertyID) const;
 
     ScrollbarColorData scrollbar_color(Layout::NodeWithStyle const& layout_node) const;
     ScrollbarWidth scrollbar_width() const;
+    Resize resize() const;
 
     static NonnullRefPtr<Gfx::Font const> font_fallback(bool monospace, bool bold, float point_size);
 
@@ -289,8 +296,6 @@ private:
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_animated_property_values;
 
     Display m_display_before_box_type_transformation { InitialValues::display() };
-
-    int m_math_depth { InitialValues::math_depth() };
 
     RefPtr<Gfx::FontCascadeList const> m_cached_computed_font_list;
     RefPtr<Gfx::Font const> m_cached_first_available_computed_font;

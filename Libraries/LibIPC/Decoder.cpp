@@ -5,8 +5,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/IPv4Address.h>
+#include <AK/IPv6Address.h>
 #include <AK/JsonValue.h>
 #include <AK/NumericLimits.h>
+#include <AK/Types.h>
 #include <AK/Utf16String.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/Proxy.h>
@@ -18,9 +21,16 @@
 
 namespace IPC {
 
+// Maximum size for decoded containers (strings, buffers, vectors, etc.)
+// This prevents a malicious peer from claiming huge sizes to cause OOM.
+static constexpr size_t MAX_DECODED_SIZE = 64 * MiB;
+
 ErrorOr<size_t> Decoder::decode_size()
 {
-    return static_cast<size_t>(TRY(decode<u32>()));
+    auto size = static_cast<size_t>(TRY(decode<u32>()));
+    if (size > MAX_DECODED_SIZE)
+        return Error::from_string_literal("IPC decode: Size exceeds maximum allowed");
+    return size;
 }
 
 template<>
@@ -88,6 +98,20 @@ ErrorOr<UnixDateTime> decode(Decoder& decoder)
 }
 
 template<>
+ErrorOr<IPv4Address> decode(Decoder& decoder)
+{
+    auto ipv4 = TRY(decoder.decode<u32>());
+    return IPv4Address(ipv4);
+}
+
+template<>
+ErrorOr<IPv6Address> decode(Decoder& decoder)
+{
+    auto ipv6 = TRY(decoder.decode<Array<u8, 16>>());
+    return IPv6Address(ipv6);
+}
+
+template<>
 ErrorOr<URL::URL> decode(Decoder& decoder)
 {
     auto url_string = TRY(decoder.decode<ByteString>());
@@ -119,8 +143,9 @@ ErrorOr<URL::Origin> decode(Decoder& decoder)
     auto scheme = TRY(decoder.decode<Optional<String>>());
     auto host = TRY(decoder.decode<URL::Host>());
     auto port = TRY(decoder.decode<Optional<u16>>());
+    auto domain = TRY(decoder.decode<Optional<String>>());
 
-    return URL::Origin { move(scheme), move(host), port };
+    return URL::Origin { move(scheme), move(host), port, move(domain) };
 }
 
 template<>
@@ -142,7 +167,10 @@ ErrorOr<Core::AnonymousBuffer> decode(Decoder& decoder)
     if (auto valid = TRY(decoder.decode<bool>()); !valid)
         return Core::AnonymousBuffer {};
 
-    auto size = TRY(decoder.decode_size());
+    // NOTE: We don't use decode_size() here since AnonymousBuffer is backed by
+    // shared memory, not heap allocation. The MAX_DECODED_SIZE limit doesn't
+    // apply because the memory is already allocated by the sender.
+    auto size = static_cast<size_t>(TRY(decoder.decode<u32>()));
     auto anon_file = TRY(decoder.decode<IPC::File>());
 
     return Core::AnonymousBuffer::create_from_anon_fd(anon_file.take_fd(), size);
@@ -152,8 +180,8 @@ template<>
 ErrorOr<Core::ProxyData> decode(Decoder& decoder)
 {
     auto type = TRY(decoder.decode<Core::ProxyData::Type>());
-    auto host_ipv4 = TRY(decoder.decode<u32>());
-    auto port = TRY(decoder.decode<int>());
+    auto host_ipv4 = IPv4Address(TRY(decoder.decode<u32>()));
+    auto port = TRY(decoder.decode<u16>());
 
     return Core::ProxyData { type, host_ipv4, port };
 }

@@ -25,6 +25,8 @@ class HTMLVideoElement final : public HTMLMediaElement {
     GC_DECLARE_ALLOCATOR(HTMLVideoElement);
 
 public:
+    static constexpr bool OVERRIDES_FINALIZE = true;
+
     virtual ~HTMLVideoElement() override;
 
     Layout::VideoBox* layout_node();
@@ -39,7 +41,7 @@ public:
     RefPtr<Gfx::Bitmap> const& poster_frame() const { return m_poster_frame; }
 
     // FIXME: This is a hack for images used as CanvasImageSource. Do something more elegant.
-    RefPtr<Gfx::Bitmap> bitmap() const;
+    RefPtr<Gfx::ImmutableBitmap> bitmap() const;
 
 private:
     HTMLVideoElement(DOM::Document&, DOM::QualifiedName);

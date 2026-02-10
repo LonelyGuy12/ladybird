@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ * Copyright (c) 2023-2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -9,6 +9,7 @@
 #include <AK/Forward.h>
 #include <AK/Vector.h>
 #include <LibGfx/Color.h>
+#include <LibGfx/CompositingAndBlendingOperator.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/LineStyle.h>
 #include <LibGfx/PaintStyle.h>
@@ -19,9 +20,9 @@
 #include <LibGfx/ScalingMode.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/BorderRadiiData.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
-#include <LibWeb/Painting/ClipFrame.h>
 #include <LibWeb/Painting/GradientData.h>
 #include <LibWeb/Painting/PaintBoxShadowParams.h>
 #include <LibWeb/Painting/PaintStyle.h>
@@ -29,22 +30,13 @@
 
 namespace Web::Painting {
 
-struct StackingContextTransform {
-    Gfx::FloatPoint origin;
-    Gfx::FloatMatrix4x4 matrix;
-    Optional<Gfx::FloatMatrix4x4> parent_perspective_matrix;
-
-    StackingContextTransform(Gfx::FloatPoint origin, Gfx::FloatMatrix4x4 matrix, Optional<Gfx::FloatMatrix4x4> parent_perspective_matrix, float scale);
-
-    [[nodiscard]] bool is_identity() const { return matrix.is_identity(); }
-};
-
 class WEB_API DisplayListRecorder {
     AK_MAKE_NONCOPYABLE(DisplayListRecorder);
     AK_MAKE_NONMOVABLE(DisplayListRecorder);
 
 public:
     void fill_rect(Gfx::IntRect const& rect, Color color);
+    void fill_rect_transparent(Gfx::IntRect const& rect);
 
     struct FillPathParams {
         Gfx::Path path;
@@ -95,31 +87,17 @@ public:
 
     void translate(Gfx::IntPoint delta);
 
-    void push_scroll_frame_id(Optional<i32> id);
-    void pop_scroll_frame_id();
-
-    void push_clip_frame(RefPtr<ClipFrame const>);
-    void pop_clip_frame();
+    void set_accumulated_visual_context(RefPtr<AccumulatedVisualContext const> state) { m_accumulated_visual_context = move(state); }
+    RefPtr<AccumulatedVisualContext const> accumulated_visual_context() const { return m_accumulated_visual_context; }
 
     void save();
     void save_layer();
     void restore();
 
-    struct PushStackingContextParams {
-        float opacity;
-        Gfx::CompositingAndBlendingOperator compositing_and_blending_operator;
-        bool isolate;
-        StackingContextTransform transform;
-        Optional<Gfx::Path> clip_path = {};
-        Optional<Gfx::IntRect> bounding_rect {};
-    };
-    void push_stacking_context(PushStackingContextParams params);
-    void pop_stacking_context();
-
     void paint_nested_display_list(RefPtr<DisplayList> display_list, Gfx::IntRect rect);
 
     void add_rounded_rect_clip(CornerRadii corner_radii, Gfx::IntRect border_rect, CornerClip corner_clip);
-    void add_mask(RefPtr<DisplayList> display_list, Gfx::IntRect rect);
+    void add_mask(RefPtr<DisplayList> display_list, Gfx::IntRect rect, Gfx::MaskKind kind);
 
     void apply_backdrop_filter(Gfx::IntRect const& backdrop_region, BorderRadiiData const& border_radii_data, Gfx::Filter const& backdrop_filter);
 
@@ -133,11 +111,7 @@ public:
 
     void paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, CSSPixelFraction scroll_size, Color thumb_color, Color track_color, bool vertical);
 
-    void apply_opacity(float opacity);
-    void apply_compositing_and_blending_operator(Gfx::CompositingAndBlendingOperator compositing_and_blending_operator);
-    void apply_filter(Gfx::Filter filter);
-    void apply_transform(Gfx::FloatPoint origin, Gfx::FloatMatrix4x4);
-    void apply_mask_bitmap(Gfx::IntPoint origin, Gfx::ImmutableBitmap const&, Gfx::MaskKind);
+    void apply_effects(float opacity = 1.0f, Gfx::CompositingAndBlendingOperator = Gfx::CompositingAndBlendingOperator::Normal, Optional<Gfx::Filter> filter = {});
 
     DisplayListRecorder(DisplayList&);
     ~DisplayListRecorder();
@@ -145,8 +119,7 @@ public:
     int m_save_nesting_level { 0 };
 
 private:
-    Vector<Optional<i32>> m_scroll_frame_id_stack;
-    Vector<RefPtr<ClipFrame const>> m_clip_frame_stack;
+    RefPtr<AccumulatedVisualContext const> m_accumulated_visual_context;
     Vector<size_t> m_push_sc_index_stack;
     DisplayList& m_display_list;
 };

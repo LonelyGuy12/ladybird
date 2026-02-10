@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2023, Luke Wilde <lukew@serenityos.org>
- * Copyright (c) 2024-2025, Shannon Booth <shannon@serenityos.org>
+ * Copyright (c) 2024-2026, Shannon Booth <shannon@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -14,6 +14,7 @@
 #include <LibWeb/HTML/Storage.h>
 #include <LibWeb/HTML/StorageEvent.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/WebIDL/QuotaExceededError.h>
 
 namespace Web::HTML {
 
@@ -37,7 +38,7 @@ Storage::Storage(JS::Realm& realm, Type type, GC::Ref<StorageAPI::StorageBottle>
     , m_storage_bottle(move(storage_bottle))
 {
     m_legacy_platform_object_flags = LegacyPlatformObjectFlags {
-        .supports_indexed_properties = true,
+        .supports_indexed_properties = false,
         .supports_named_properties = true,
         .has_indexed_property_setter = true,
         .has_named_property_setter = true,
@@ -60,6 +61,7 @@ void Storage::initialize(JS::Realm& realm)
 
 void Storage::finalize()
 {
+    Base::finalize();
     all_storages().remove(*this);
 }
 
@@ -102,17 +104,33 @@ Optional<String> Storage::get_item(String const& key) const
 WebIDL::ExceptionOr<void> Storage::set_item(String const& key, String const& value)
 {
     // 1. Let oldValue be null.
-    Optional<String> old_value;
-
     // 2. Let reorder be true.
-    // 3. If this's map[key] exists:
+    bool reorder = true;
 
+    // 3. If this's map[key] exists:
+    //     1. Set oldValue to this's map[key].
+    //     2. If oldValue is value, then return.
+    //     3. Set reorder to false.
     // 4. If value cannot be stored, then throw a "QuotaExceededError" DOMException.
     // 5. Set this's map[key] to value.
-    auto error = m_storage_bottle->set(key, value);
-    if (error == WebView::StorageOperationError::QuotaExceededError) {
+
+    auto result = m_storage_bottle->set(key, value);
+
+    if (result.has<WebView::StorageOperationError>())
         return WebIDL::QuotaExceededError::create(realm(), Utf16String::formatted("Unable to store more than {} bytes in storage", *m_storage_bottle->quota()));
+
+    auto old_value = result.get<Optional<String>>();
+
+    if (old_value.has_value()) {
+        if (old_value.value() == value)
+            return {};
+
+        reorder = false;
     }
+
+    // 6. If reorder is true, then reorder this.
+    if (reorder)
+        this->reorder();
 
     // 7. Broadcast this with key, oldValue, and value.
     broadcast(key, old_value, value);
@@ -142,10 +160,14 @@ void Storage::remove_item(String const& key)
 // https://html.spec.whatwg.org/multipage/webstorage.html#dom-storage-clear
 void Storage::clear()
 {
-    // 1. Clear this's map.
+    // 1. If this's map is empty, then return.
+    if (m_storage_bottle->size() == 0)
+        return;
+
+    // 2. Clear this's map.
     m_storage_bottle->clear();
 
-    // 2. Broadcast this with null, null, and null.
+    // 3. Broadcast this with null, null, and null.
     broadcast({}, {}, {});
 }
 

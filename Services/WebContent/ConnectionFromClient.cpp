@@ -53,6 +53,7 @@
 #include <LibWeb/PermissionsPolicy/AutoplayAllowlist.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWebView/Attribute.h>
+#include <LibWebView/ViewImplementation.h>
 #include <WebContent/ConnectionFromClient.h>
 #include <WebContent/PageClient.h>
 #include <WebContent/PageHost.h>
@@ -657,6 +658,21 @@ void ConnectionFromClient::set_listen_for_dom_mutations(u64 page_id, bool listen
     page->page().set_listen_for_dom_mutations(listen_for_dom_mutations);
 }
 
+void ConnectionFromClient::did_connect_devtools_client(u64 page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->did_connect_devtools_client();
+}
+
+void ConnectionFromClient::did_disconnect_devtools_client(u64 page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->did_disconnect_devtools_client();
+}
+
 void ConnectionFromClient::get_dom_node_inner_html(u64 page_id, Web::UniqueNodeID node_id)
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
@@ -1009,7 +1025,7 @@ void ConnectionFromClient::request_internal_page_info(u64 page_id, WebView::Page
 {
     auto page = this->page(page_id);
     if (!page.has_value()) {
-        async_did_get_internal_page_info(page_id, type, "(no page)"_string);
+        async_did_get_internal_page_info(page_id, type, {});
         return;
     }
 
@@ -1043,7 +1059,9 @@ void ConnectionFromClient::request_internal_page_info(u64 page_id, WebView::Page
         append_gc_graph(builder);
     }
 
-    async_did_get_internal_page_info(page_id, type, MUST(builder.to_string()));
+    auto buffer = MUST(Core::AnonymousBuffer::create_with_size(builder.length()));
+    memcpy(buffer.data<void>(), builder.string_view().characters_without_null_termination(), builder.length());
+    async_did_get_internal_page_info(page_id, type, buffer);
 }
 
 Messages::WebContentServer::GetSelectedTextResponse ConnectionFromClient::get_selected_text(u64 page_id)
@@ -1172,10 +1190,16 @@ void ConnectionFromClient::set_is_scripting_enabled(u64 page_id, bool is_scripti
         page->set_is_scripting_enabled(is_scripting_enabled);
 }
 
-void ConnectionFromClient::set_device_pixels_per_css_pixel(u64 page_id, float device_pixels_per_css_pixel)
+void ConnectionFromClient::set_device_pixel_ratio(u64 page_id, double device_pixel_ratio)
 {
     if (auto page = this->page(page_id); page.has_value())
-        page->set_device_pixels_per_css_pixel(device_pixels_per_css_pixel);
+        page->set_device_pixel_ratio(device_pixel_ratio);
+}
+
+void ConnectionFromClient::set_zoom_level(u64 page_id, double zoom_level)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_zoom_level(zoom_level);
 }
 
 void ConnectionFromClient::set_maximum_frames_per_second(u64 page_id, double maximum_frames_per_second)
@@ -1247,12 +1271,6 @@ void ConnectionFromClient::run_javascript(u64 page_id, String js_source)
 {
     if (auto page = this->page(page_id); page.has_value())
         page->run_javascript(js_source);
-}
-
-void ConnectionFromClient::js_console_request_messages(u64 page_id, i32 start_index)
-{
-    if (auto page = this->page(page_id); page.has_value())
-        page->js_console_request_messages(start_index);
 }
 
 void ConnectionFromClient::alert_closed(u64 page_id)
@@ -1339,13 +1357,26 @@ void ConnectionFromClient::system_time_zone_changed()
     Unicode::clear_system_time_zone_cache();
 }
 
-void ConnectionFromClient::cookies_changed(Vector<Web::Cookie::Cookie> cookies)
+void ConnectionFromClient::set_document_cookie_version_buffer(u64 page_id, Core::AnonymousBuffer document_cookie_version_buffer)
 {
-    for (auto& navigable : Web::HTML::all_navigables()) {
-        auto window = navigable->active_window();
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().client().page_did_receive_document_cookie_version_buffer(move(document_cookie_version_buffer));
+}
+
+void ConnectionFromClient::set_document_cookie_version_index(u64 page_id, i64 document_id, Core::SharedVersionIndex document_index)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().client().page_did_receive_document_cookie_version_index(document_id, document_index);
+}
+
+void ConnectionFromClient::cookies_changed(u64 page_id, Vector<Web::Cookie::Cookie> cookies)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        auto window = page->page().top_level_traversable()->active_window();
         if (!window)
             return;
-        window->cookie_store()->process_cookie_changes(cookies);
+
+        window->cookie_store()->process_cookie_changes(move(cookies));
     }
 }
 

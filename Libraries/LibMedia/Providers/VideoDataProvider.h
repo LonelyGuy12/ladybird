@@ -38,7 +38,7 @@ public:
     using SeekCompletionHandler = Function<void(AK::Duration)>;
     using FramesQueueIsFullHandler = Function<void()>;
 
-    static DecoderErrorOr<NonnullRefPtr<VideoDataProvider>> try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const&, NonnullRefPtr<IncrementallyPopulatedStream> const&, Track const&, RefPtr<MediaTimeProvider> const& = nullptr);
+    static DecoderErrorOr<NonnullRefPtr<VideoDataProvider>> try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<Demuxer> const&, Track const&, RefPtr<MediaTimeProvider> const& = nullptr);
 
     VideoDataProvider(NonnullRefPtr<ThreadData> const&);
     ~VideoDataProvider();
@@ -48,6 +48,8 @@ public:
     void set_frames_queue_is_full_handler(FramesQueueIsFullHandler&&);
 
     void start();
+    void suspend();
+    void resume();
 
     TimedImage retrieve_frame();
 
@@ -58,7 +60,7 @@ public:
 private:
     class ThreadData final : public AtomicRefCounted<ThreadData> {
     public:
-        ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<MutexedDemuxer> const&, NonnullRefPtr<IncrementallyPopulatedStream::Cursor> const&, Track const&, NonnullOwnPtr<VideoDecoder>&&, RefPtr<MediaTimeProvider> const&);
+        ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<Demuxer> const&, Track const&, RefPtr<MediaTimeProvider> const&);
         ~ThreadData();
 
         void set_error_handler(ErrorHandler&&);
@@ -66,6 +68,9 @@ private:
         void set_frames_queue_is_full_handler(FramesQueueIsFullHandler&&);
 
         void start();
+        DecoderErrorOr<void> create_decoder();
+        void suspend();
+        void resume();
         void exit();
 
         ImageQueue& queue();
@@ -74,14 +79,15 @@ private:
         void seek(AK::Duration timestamp, SeekMode, SeekCompletionHandler&&);
 
         void wait_for_start();
+        bool should_thread_exit_while_locked() const;
         bool should_thread_exit() const;
+        bool handle_suspension();
         template<typename Invokee>
         void invoke_on_main_thread_while_locked(Invokee);
         template<typename Invokee>
         void invoke_on_main_thread(Invokee);
         void dispatch_frame_end_time(CodedFrame const&);
-        void set_cicp_values(VideoFrame&);
-        void queue_frame(TimedImage&&);
+        void queue_frame(NonnullOwnPtr<VideoFrame> const&);
         bool handle_seek();
         template<typename Callback>
         void process_seek_on_main_thread(u32 seek_id, Callback);
@@ -96,6 +102,7 @@ private:
         enum class RequestedState : u8 {
             None,
             Running,
+            Suspended,
             Exit,
         };
 
@@ -105,10 +112,10 @@ private:
         mutable Threading::ConditionVariable m_wait_condition { m_mutex };
         RequestedState m_requested_state { RequestedState::None };
 
-        NonnullRefPtr<MutexedDemuxer> m_demuxer;
-        NonnullRefPtr<IncrementallyPopulatedStream::Cursor> m_stream_cursor;
+        NonnullRefPtr<Demuxer> m_demuxer;
         Track m_track;
-        NonnullOwnPtr<VideoDecoder> m_decoder;
+        OwnPtr<VideoDecoder> m_decoder;
+        bool m_decoder_needs_keyframe_next_seek { false };
 
         RefPtr<MediaTimeProvider> m_time_provider;
 

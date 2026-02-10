@@ -36,7 +36,7 @@ WorkerHost::WorkerHost(URL::URL url, Web::Bindings::WorkerType type, String name
 WorkerHost::~WorkerHost() = default;
 
 // https://html.spec.whatwg.org/multipage/workers.html#run-a-worker
-void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder message_port_data, Web::HTML::SerializedEnvironmentSettingsObject const& outside_settings_snapshot, Web::Bindings::RequestCredentials credentials, bool is_shared)
+void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder message_port_data, Web::HTML::SerializedEnvironmentSettingsObject const& outside_settings_snapshot, Web::Bindings::RequestCredentials credentials, bool is_shared, Optional<URL::URL> document_url_if_started_by_window_fixme)
 {
     // 3. Let unsafeWorkerCreationTime be the unsafe shared current time.
     auto unsafe_worker_creation_time = Web::HighResolutionTime::unsafe_shared_current_time();
@@ -57,6 +57,15 @@ void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder mes
     // NOTE: This is the DedicatedWorkerGlobalScope or SharedWorkerGlobalScope object created in the previous step.
     GC::Ref<Web::HTML::WorkerGlobalScope> worker_global_scope = as<Web::HTML::WorkerGlobalScope>(realm_execution_context->realm->global_object());
 
+    // AD-HOC: The spec assumes when setting up the worker environment settings object that the URL is already set on
+    //         the worker global scope. This is not the case. This URL is only known after performing the fetch, and in
+    //         particular after redirects. See spec issue: https://github.com/whatwg/html/issues/11340. The main part
+    //         which will need some rework to fix in a nice way is setting up a temporary environment for use in
+    //         performing the initial fetch.
+    //
+    //         As a workaround for now, set the URL here before setting up the environment settings object.
+    worker_global_scope->set_url(m_url);
+
     // 7. Set up a worker environment settings object with realm execution context, outside settings, and
     //    unsafeWorkerCreationTime, and let inside settings be the result.
     auto inside_settings = Web::HTML::WorkerEnvironmentSettingsObject::setup(page, move(realm_execution_context), outside_settings_snapshot, unsafe_worker_creation_time);
@@ -75,6 +84,14 @@ void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder mes
 
     // IMPLEMENTATION DEFINED: We need an object to represent the fetch response's client
     auto outside_settings = inside_settings->realm().create<Web::HTML::EnvironmentSettingsSnapshot>(inside_settings->realm(), inside_settings->realm_execution_context().copy(), outside_settings_snapshot);
+
+    // HACK: The environment settings object used for the worker script fetch should have a Window as its global scope,
+    //       but the EnvironmentSettingsSnapshot used here has a WorkerGlobalScope (we don't have access to a Window).
+    //       This causes the Referrer-Policy spec's "determine request's referrer" algorithm to read the ESO's creation
+    //       URL, whereas it would normally read the document's URL. To hack around this, we overwrite the creation URL
+    //       (which is only used in the initial worker script fetch).
+    if (document_url_if_started_by_window_fixme.has_value())
+        outside_settings->creation_url = document_url_if_started_by_window_fixme.release_value();
 
     // 10. If is shared is true, then:
     if (is_shared) {
@@ -126,33 +143,36 @@ void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder mes
             // 1. Set worker global scope's url to response's url.
             worker_global_scope->set_url(response->url().value_or({}));
 
-            // 2. Initialize worker global scope's policy container given worker global scope, response, and inside
+            // 2. Set inside settings's creation URL to response's url.
+            inside_settings->creation_url = worker_global_scope->url();
+
+            // 3. Initialize worker global scope's policy container given worker global scope, response, and inside
             //    settings.
             worker_global_scope->initialize_policy_container(response, inside_settings);
 
-            // 3. If the Run CSP initialization for a global object algorithm returns "Blocked" when executed upon
+            // 4. If the Run CSP initialization for a global object algorithm returns "Blocked" when executed upon
             //    worker global scope, set response to a network error. [CSP]
             if (worker_global_scope->run_csp_initialization() == Web::ContentSecurityPolicy::Directives::Directive::Result::Blocked) {
                 response = Web::Fetch::Infrastructure::Response::network_error(vm, "Blocked by Content Security Policy"_string);
             }
 
             // FIXME: Use worker global scope's policy container's embedder policy
-            // FIXME: 4. If worker global scope's embedder policy's value is compatible with cross-origin isolation and is shared is true,
+            // FIXME: 5. If worker global scope's embedder policy's value is compatible with cross-origin isolation and is shared is true,
             //    then set agent's agent cluster's cross-origin isolation mode to "logical" or "concrete".
             //    The one chosen is implementation-defined.
-            // FIXME: 5. If the result of checking a global object's embedder policy with worker global scope, outside settings,
+            // FIXME: 6. If the result of checking a global object's embedder policy with worker global scope, outside settings,
             //    and response is false, then set response to a network error.
-            // FIXME: 6. Set worker global scope's cross-origin isolated capability to true if agent's agent cluster's cross-origin
+            // FIXME: 7. Set worker global scope's cross-origin isolated capability to true if agent's agent cluster's cross-origin
             //    isolation mode is "concrete".
 
             if (!is_shared) {
-                // FIXME: 7. If is shared is false and owner's cross-origin isolated capability is false, then set worker
+                // FIXME: 8. If is shared is false and owner's cross-origin isolated capability is false, then set worker
                 //     global scope's cross-origin isolated capability to false.
-                // FIXME: 8. If is shared is false and response's url's scheme is "data", then set worker global scope's
+                // FIXME: 9. If is shared is false and response's url's scheme is "data", then set worker global scope's
                 //     cross-origin isolated capability to false.
             }
 
-            // 9. Run processCustomFetchResponse with response and bodyBytes.
+            // 10. Run processCustomFetchResponse with response and bodyBytes.
             process_custom_fetch_response_function->function()(response, body_bytes);
         };
         Web::Fetch::Fetching::fetch(realm, request, Web::Fetch::Infrastructure::FetchAlgorithms::create(vm, move(fetch_algorithms_input)));
@@ -257,11 +277,6 @@ void WorkerHost::run(GC::Ref<Web::Page> page, Web::HTML::TransferDataEncoder mes
         // FIXME: 18. Empty worker global scope's owner set.
     };
     auto on_complete = Web::HTML::create_on_fetch_script_complete(inside_settings->vm().heap(), move(on_complete_function));
-
-    // AD-HOC: Fetching a script performs actions such as for blobs checking that they are on the same partition
-    //         based on origin. However, this is performed before the consume body algorithm is run, where
-    //         this URL for that worker is set. As a workaround, set the URL upfront.
-    worker_global_scope->set_url(m_url);
 
     // 12. Obtain script by switching on the value of options's type member:
     if (m_type == Web::Bindings::WorkerType::Classic) {

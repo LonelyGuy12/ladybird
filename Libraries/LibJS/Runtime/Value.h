@@ -154,6 +154,24 @@ public:
         return !is_nan() && !is_infinity();
     }
 
+    template<typename T>
+    ALWAYS_INLINE T* as_if()
+    {
+        static_assert(IsBaseOf<Object, T>);
+        if (!is_object())
+            return nullptr;
+        return ::as_if<T>(as_object());
+    }
+
+    template<typename T>
+    ALWAYS_INLINE T const* as_if() const
+    {
+        static_assert(IsBaseOf<Object, T>);
+        if (!is_object())
+            return nullptr;
+        return ::as_if<T>(as_object());
+    }
+
     constexpr Value()
         : Value(UNDEFINED_TAG << GC::TAG_SHIFT, (u64)0)
     {
@@ -547,6 +565,7 @@ enum class NumberToStringMode {
     WithExponent,
     WithoutExponent,
 };
+JS_API void number_to_string(StringBuilder&, double, NumberToStringMode = NumberToStringMode::WithExponent);
 [[nodiscard]] JS_API String number_to_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
 [[nodiscard]] JS_API Utf16String number_to_utf16_string(double, NumberToStringMode = NumberToStringMode::WithExponent);
 [[nodiscard]] ByteString number_to_byte_string(double, NumberToStringMode = NumberToStringMode::WithExponent);

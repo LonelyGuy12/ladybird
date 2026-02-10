@@ -30,6 +30,11 @@ void TestWebView::clear_content_filters()
     client().async_set_content_filters(m_client_state.page_index, {});
 }
 
+pid_t TestWebView::web_content_pid() const
+{
+    return client().pid();
+}
+
 NonnullRefPtr<Core::Promise<RefPtr<Gfx::Bitmap const>>> TestWebView::take_screenshot()
 {
     VERIFY(!m_pending_screenshot);
@@ -50,9 +55,6 @@ void TestWebView::did_receive_screenshot(Badge<WebView::WebContentClient>, Gfx::
 
 void TestWebView::on_test_complete(TestCompletion completion)
 {
-    completion.test.actual_screenshot.clear();
-    completion.test.expectation_screenshot.clear();
-
     m_pending_screenshot.clear();
     m_pending_dialog = Web::Page::PendingDialog::None;
     m_pending_prompt_text.clear();

@@ -16,19 +16,14 @@
 
 namespace Web::WebGL {
 
-class WebGLRenderingContext final : public Bindings::PlatformObject
-    , public WebGLRenderingContextOverloads {
-    WEB_PLATFORM_OBJECT(WebGLRenderingContext, Bindings::PlatformObject);
+class WebGLRenderingContext final : public WebGLRenderingContextOverloads {
+    WEB_PLATFORM_OBJECT(WebGLRenderingContext, WebGLRenderingContextOverloads);
     GC_DECLARE_ALLOCATOR(WebGLRenderingContext);
 
 public:
     static JS::ThrowCompletionOr<GC::Ptr<WebGLRenderingContext>> create(JS::Realm&, HTML::HTMLCanvasElement& canvas_element, JS::Value options);
 
     virtual ~WebGLRenderingContext() override;
-
-    // FIXME: This is a hack required to visit context from WebGLObject.
-    //        It should be gone once WebGLRenderingContextBase inherits from PlatformObject.
-    GC::Cell const* gc_cell() const override { return this; }
 
     void present() override;
     void needs_to_present() override;
@@ -50,18 +45,18 @@ public:
     WebIDL::Long drawing_buffer_width() const;
     WebIDL::Long drawing_buffer_height() const;
 
-    virtual bool ext_texture_filter_anisotropic_extension_enabled() const override;
-    virtual bool angle_instanced_arrays_extension_enabled() const override;
-    virtual bool oes_standard_derivatives_extension_enabled() const override;
-    virtual bool webgl_draw_buffers_extension_enabled() const override;
-    virtual ReadonlySpan<WebIDL::UnsignedLong> enabled_compressed_texture_formats() const override;
-
 private:
     virtual void initialize(JS::Realm&) override;
 
     WebGLRenderingContext(JS::Realm&, HTML::HTMLCanvasElement&, NonnullOwnPtr<OpenGLContext> context, WebGLContextAttributes context_creation_parameters, WebGLContextAttributes actual_context_parameters);
 
     virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual bool ext_texture_filter_anisotropic_extension_enabled() const override;
+    virtual bool angle_instanced_arrays_extension_enabled() const override;
+    virtual bool oes_standard_derivatives_extension_enabled() const override;
+    virtual bool webgl_draw_buffers_extension_enabled() const override;
+    virtual ReadonlySpan<WebIDL::UnsignedLong> enabled_compressed_texture_formats() const override;
 
     GC::Ref<HTML::HTMLCanvasElement> m_canvas_element;
 
@@ -90,6 +85,7 @@ private:
     GC::Ptr<Extensions::ANGLEInstancedArrays> m_angle_instanced_arrays_extension;
     GC::Ptr<Extensions::EXTBlendMinMax> m_ext_blend_min_max_extension;
     GC::Ptr<Extensions::EXTTextureFilterAnisotropic> m_ext_texture_filter_anisotropic;
+    GC::Ptr<Extensions::OESElementIndexUint> m_oes_element_index_uint_object_extension;
     GC::Ptr<Extensions::OESStandardDerivatives> m_oes_standard_derivatives_object_extension;
     GC::Ptr<Extensions::OESVertexArrayObject> m_oes_vertex_array_object_extension;
     GC::Ptr<Extensions::WebGLCompressedTextureS3tc> m_webgl_compressed_texture_s3tc_extension;

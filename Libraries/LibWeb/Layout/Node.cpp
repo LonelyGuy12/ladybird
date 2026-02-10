@@ -20,6 +20,7 @@
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
+#include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
@@ -27,6 +28,7 @@
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/FormattingContext.h>
+#include <LibWeb/Layout/InlineNode.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TableWrapper.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -55,6 +57,7 @@ void Node::visit_edges(Cell::Visitor& visitor)
         visitor.visit(GC::Ptr { &paintable });
     }
     visitor.visit(m_containing_block);
+    visitor.visit(m_inline_containing_block_if_applicable);
     visitor.visit(m_pseudo_element_generator);
     TreeNode::visit_edges(visitor);
 }
@@ -75,17 +78,15 @@ bool Node::is_out_of_flow(FormattingContext const& formatting_context) const
     return false;
 }
 
-bool Node::can_contain_boxes_with_position_absolute() const
+// https://drafts.csswg.org/css-position-3/#absolute-positioning-containing-block
+// Checks if the computed values of this node would establish an absolute positioning
+// containing block. This is separate from establishes_an_absolute_positioning_containing_block()
+// because that function also checks is<Box>, but we need these checks for inline elements too.
+bool Node::computed_values_establish_absolute_positioning_containing_block() const
 {
-    if (!is<Box>(*this))
-        return false;
-
     auto const& computed_values = this->computed_values();
 
     if (computed_values.position() != CSS::Positioning::Static)
-        return true;
-
-    if (is<Viewport>(*this))
         return true;
 
     // https://drafts.csswg.org/css-will-change/#will-change
@@ -96,7 +97,7 @@ bool Node::can_contain_boxes_with_position_absolute() const
         return computed_values.will_change().has_property(property_id);
     };
 
-    // https://w3c.github.io/csswg-drafts/css-transforms-1/#propdef-transform
+    // https://drafts.csswg.org/css-transforms-1/#propdef-transform
     // Any computed value other than none for the transform affects containing block and stacking context
     if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
         return true;
@@ -113,6 +114,20 @@ bool Node::can_contain_boxes_with_position_absolute() const
     if (computed_values.perspective().has_value() || will_change_property(CSS::PropertyID::Perspective))
         return true;
 
+    // https://drafts.csswg.org/filter-effects-1/#FilterProperty
+    // A value other than none for the filter property results in the creation of a containing block for absolute and
+    // fixed positioned descendants, unless the element it applies to is a document root element in the current
+    // browsing context.
+    if ((computed_values.filter().has_filters() || will_change_property(CSS::PropertyID::Filter)) && !is_root_element())
+        return true;
+
+    // https://drafts.csswg.org/filter-effects-2/#BackdropFilterProperty
+    // A computed value of other than none results in the creation of both a stacking context and a containing block
+    // for absolute and fixed position descendants, unless the element it applies to is a document root element in the
+    // current browsing context.
+    if ((computed_values.backdrop_filter().has_filters() || will_change_property(CSS::PropertyID::BackdropFilter)) && !is_root_element())
+        return true;
+
     // https://drafts.csswg.org/css-contain-2/#containment-types
     // 4. The layout containment box establishes an absolute positioning containing block and a fixed positioning
     //    containing block.
@@ -120,6 +135,98 @@ bool Node::can_contain_boxes_with_position_absolute() const
     //    containing block.
     if (has_layout_containment() || has_paint_containment() || will_change_property(CSS::PropertyID::Contain))
         return true;
+
+    // https://drafts.csswg.org/css-transforms-2/#transform-style-property
+    // A computed value of 'preserve-3d' for 'transform-style' on a transformable element establishes both a
+    // stacking context and a containing block for all descendants.
+    // FIXME: Check that the element is a transformable element.
+    if (computed_values.transform_style() == CSS::TransformStyle::Preserve3d || will_change_property(CSS::PropertyID::TransformStyle))
+        return true;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#snapshot-containing-block-concept
+    // FIXME: The snapshot containing block is considered to be an absolute positioning containing block and a fixed
+    //        positioning containing block for ::view-transition and its descendants.
+
+    return false;
+}
+
+// https://drafts.csswg.org/css-position-3/#absolute-positioning-containing-block
+bool Node::establishes_an_absolute_positioning_containing_block() const
+{
+    if (!is<Box>(*this))
+        return false;
+
+    if (is<Viewport>(*this))
+        return true;
+
+    return computed_values_establish_absolute_positioning_containing_block();
+}
+
+// https://drafts.csswg.org/css-position-3/#fixed-positioning-containing-block
+bool Node::establishes_a_fixed_positioning_containing_block() const
+{
+    if (!is<Box>(*this))
+        return false;
+
+    auto const& computed_values = this->computed_values();
+
+    // https://drafts.csswg.org/css-will-change/#will-change
+    // If any non-initial value of a property would cause the element to generate a containing block for fixed
+    // positioned elements, specifying that property in will-change must cause the element to generate a containing
+    // block for fixed positioned elements.
+    auto will_change_property = [&](CSS::PropertyID property_id) {
+        return computed_values.will_change().has_property(property_id);
+    };
+
+    // https://drafts.csswg.org/css-transforms-1/#propdef-transform
+    // Any computed value other than none for the transform affects containing block and stacking context
+    if (!computed_values.transformations().is_empty() || will_change_property(CSS::PropertyID::Transform))
+        return true;
+    if (computed_values.translate() || will_change_property(CSS::PropertyID::Translate))
+        return true;
+    if (computed_values.rotate() || will_change_property(CSS::PropertyID::Rotate))
+        return true;
+    if (computed_values.scale() || will_change_property(CSS::PropertyID::Scale))
+        return true;
+
+    // https://drafts.csswg.org/css-transforms-2/#propdef-perspective
+    // The use of this property with any value other than 'none' establishes a stacking context. It also establishes
+    // a containing block for all descendants, just like the 'transform' property does.
+    if (computed_values.perspective().has_value() || will_change_property(CSS::PropertyID::Perspective))
+        return true;
+
+    // https://drafts.csswg.org/filter-effects-1/#FilterProperty
+    // A value other than none for the filter property results in the creation of a containing block for absolute and
+    // fixed positioned descendants, unless the element it applies to is a document root element in the current
+    // browsing context.
+    if ((computed_values.filter().has_filters() || will_change_property(CSS::PropertyID::Filter)) && !is_root_element())
+        return true;
+
+    // https://drafts.csswg.org/filter-effects-2/#BackdropFilterProperty
+    // A computed value of other than none results in the creation of both a stacking context and a containing block
+    // for absolute and fixed position descendants, unless the element it applies to is a document root element in the
+    // current browsing context.
+    if ((computed_values.backdrop_filter().has_filters() || will_change_property(CSS::PropertyID::BackdropFilter)) && !is_root_element())
+        return true;
+
+    // https://drafts.csswg.org/css-contain-2/#containment-types
+    // 4. The layout containment box establishes an absolute positioning containing block and a fixed positioning
+    //    containing block.
+    // 4. The paint containment box establishes an absolute positioning containing block and a fixed positioning
+    //    containing block.
+    if (has_layout_containment() || has_paint_containment() || will_change_property(CSS::PropertyID::Contain))
+        return true;
+
+    // https://drafts.csswg.org/css-transforms-2/#transform-style-property
+    // A computed value of 'preserve-3d' for 'transform-style' on a transformable element establishes both a
+    // stacking context and a containing block for all descendants.
+    // FIXME: Check that the element is a transformable element.
+    if (computed_values.transform_style() == CSS::TransformStyle::Preserve3d || will_change_property(CSS::PropertyID::TransformStyle))
+        return true;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#snapshot-containing-block-concept
+    // FIXME: The snapshot containing block is considered to be an absolute positioning containing block and a fixed
+    //        positioning containing block for ::view-transition and its descendants.
 
     return false;
 }
@@ -139,6 +246,9 @@ static GC::Ptr<Box> nearest_ancestor_capable_of_forming_a_containing_block(Node&
 
 void Node::recompute_containing_block(Badge<DOM::Document>)
 {
+    // Reset the inline containing block - we'll set it below if applicable.
+    m_inline_containing_block_if_applicable = nullptr;
+
     if (is<TextNode>(*this)) {
         m_containing_block = nearest_ancestor_capable_of_forming_a_containing_block(*this);
         return;
@@ -149,14 +259,83 @@ void Node::recompute_containing_block(Badge<DOM::Document>)
     // https://drafts.csswg.org/css-position-3/#absolute-cb
     if (position == CSS::Positioning::Absolute) {
         auto* ancestor = parent();
-        while (ancestor && !ancestor->can_contain_boxes_with_position_absolute())
+        while (ancestor && !ancestor->establishes_an_absolute_positioning_containing_block())
             ancestor = ancestor->parent();
         m_containing_block = static_cast<Box*>(ancestor);
+
+        // FIXME: Containing block handling for absolutely positioned elements needs architectural improvements.
+        //
+        //        The CSS specification defines the containing block as a *rectangle*, not a box. For most cases,
+        //        this rectangle is derived from the padding box of the nearest positioned ancestor Box. However,
+        //        when the positioned ancestor is an *inline* element (e.g., a <span> with position: relative),
+        //        the containing block rectangle should be the bounding box of that inline's fragments.
+        //
+        //        Currently, m_containing_block is typed as Box*, which cannot represent inline elements.
+        //        The proper fix would be to:
+        //        1. Separate the concept of "the node that establishes the containing block" from "the containing
+        //           block rectangle".
+        //        2. Store a reference to the establishing node (which could be InlineNode or Box).
+        //        3. Compute the containing block rectangle on demand based on the establishing node's type.
+        //
+        //        For now, we use a workaround: check if there's an inline element with position:relative (or
+        //        other containing-block-establishing properties) between this node and its containing_block()
+        //        in the DOM tree. If found, store it in m_inline_containing_block_if_applicable.
+        //
+        //        We check the DOM tree here (rather than the layout tree) because when a block element is inside
+        //        an inline element, the layout tree restructures so the block becomes a sibling of the inline.
+        //        But the CSS containing block relationship is based on the DOM structure.
+        if (m_containing_block) {
+            auto const* containing_block_dom_node = m_containing_block->dom_node();
+
+            // For pseudo-elements, we need to start from the generating element itself, since it may
+            // be the inline containing block. For regular elements, start from parent_element().
+            GC::Ptr<DOM::Element const> first_ancestor_to_check;
+            if (is_generated_for_pseudo_element()) {
+                first_ancestor_to_check = m_pseudo_element_generator.ptr();
+            } else if (auto const* this_dom_node = dom_node()) {
+                first_ancestor_to_check = this_dom_node->parent_element();
+            }
+
+            for (auto dom_ancestor = first_ancestor_to_check; dom_ancestor; dom_ancestor = dom_ancestor->parent_element()) {
+                // Stop if we reach the DOM node of the containing block.
+                if (dom_ancestor.ptr() == containing_block_dom_node)
+                    break;
+
+                // Check if this DOM element has an InlineNode in the layout tree.
+                auto layout_node = dom_ancestor->layout_node();
+                if (!layout_node || !is<InlineNode>(*layout_node))
+                    continue;
+
+                // Check if this inline establishes an absolute positioning containing block.
+                if (layout_node->computed_values_establish_absolute_positioning_containing_block()) {
+                    m_inline_containing_block_if_applicable = const_cast<InlineNode*>(static_cast<InlineNode const*>(layout_node.ptr()));
+                    break;
+                }
+            }
+        }
+
         return;
     }
 
+    // https://drafts.csswg.org/css-position-3/#fixed-cb
     if (position == CSS::Positioning::Fixed) {
-        m_containing_block = &root();
+        // The containing block is established by the nearest ancestor box that establishes an fixed positioning
+        // containing block, with the bounds of the containing block determined identically to the absolute positioning
+        // containing block.
+        auto* ancestor = parent();
+        while (ancestor && !ancestor->establishes_a_fixed_positioning_containing_block())
+            ancestor = ancestor->parent();
+        // If no ancestor establishes one, the box’s fixed positioning containing block is the initial fixed containing
+        // block:
+        if (!ancestor) {
+            //  - in continuous media, the layout viewport (whose size matches the dynamic viewport size); as a result,
+            //    fixed boxes do not move when the document is scrolled.
+            ancestor = &root();
+            // FIXME: - in paged media, the page area of each page; fixed positioned boxes are thus replicated on every
+            //   page. (They are fixed with respect to the page box only, and are not affected by being seen through a
+            //   viewport; as in the case of print preview, for example.)
+        }
+        m_containing_block = static_cast<Box*>(ancestor);
         return;
     }
 
@@ -388,12 +567,13 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, NonnullOw
 void NodeWithStyle::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    for (auto& layer : computed_values().background_layers()) {
-        if (layer.background_image && layer.background_image->is_image())
-            layer.background_image->as_image().visit_edges(visitor);
-    }
+    for (auto const& layer : computed_values().background_layers())
+        layer.background_image->visit_edges(visitor);
+
     if (m_list_style_image && m_list_style_image->is_image())
         m_list_style_image->as_image().visit_edges(visitor);
+
+    m_computed_values->visit_edges(visitor);
 }
 
 void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
@@ -401,7 +581,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     auto& computed_values = mutable_computed_values();
 
     // NOTE: color-scheme must be set first to ensure system colors can be resolved correctly.
-    computed_values.set_color_scheme(computed_style.color_scheme(document().page().preferred_color_scheme(), document().supported_color_schemes()));
+    auto color_scheme = computed_style.color_scheme(document().page().preferred_color_scheme(), document().supported_color_schemes());
+    computed_values.set_color_scheme(color_scheme);
 
     // NOTE: We have to be careful that font-related properties get set in the right order.
     //       m_font is used by Length::to_px() when resolving sizes against this layout node.
@@ -414,7 +595,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     // NOTE: color must be set after color-scheme to ensure currentColor can be resolved in other properties (e.g. background-color).
     // NOTE: color must be set after font_size as `CalculatedStyleValue`s can rely on it being set for resolving lengths.
     computed_values.set_color(computed_style.color_or_fallback(CSS::PropertyID::Color, CSS::ColorResolutionContext::for_layout_node_with_style(*this), CSS::InitialValues::color()));
-
+    // NOTE: Currently there are still discussions about `accentColor` and `currentColor` interactions, so the line below might need changing in the future
+    computed_values.set_accent_color(computed_style.color_or_fallback(CSS::PropertyID::AccentColor, CSS::ColorResolutionContext::for_layout_node_with_style(*this), CSS::SystemColor::accent_color(color_scheme)));
     // NOTE: This color resolution context must be created after we set color above so that currentColor resolves correctly
     // FIXME: We should resolve colors to their absolute forms at compute time (i.e. by implementing the relevant absolutized methods)
     auto color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*this);
@@ -423,50 +605,31 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     auto background_layers = computed_style.background_layers();
 
-    for (auto const& layer : background_layers) {
-        if (layer.background_image)
-            const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
-    }
+    for (auto const& layer : background_layers)
+        const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
 
     computed_values.set_background_layers(move(background_layers));
 
     computed_values.set_background_color(computed_style.color_or_fallback(CSS::PropertyID::BackgroundColor, color_resolution_context, CSS::InitialValues::background_color()));
+    computed_values.set_background_color_clip(computed_style.background_color_clip());
 
     computed_values.set_box_sizing(computed_style.box_sizing());
 
     if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
         computed_values.set_font_language_override(maybe_font_language_override.release_value());
-    computed_values.set_font_features(computed_style.font_features());
     computed_values.set_font_variation_settings(computed_style.font_variation_settings());
 
-    auto const& border_bottom_left_radius = computed_style.property(CSS::PropertyID::BorderBottomLeftRadius);
-    if (border_bottom_left_radius.is_border_radius()) {
-        computed_values.set_border_bottom_left_radius(
-            CSS::BorderRadiusData {
-                CSS::LengthPercentage::from_style_value(border_bottom_left_radius.as_border_radius().horizontal_radius()),
-                CSS::LengthPercentage::from_style_value(border_bottom_left_radius.as_border_radius().vertical_radius()) });
-    }
-    auto const& border_bottom_right_radius = computed_style.property(CSS::PropertyID::BorderBottomRightRadius);
-    if (border_bottom_right_radius.is_border_radius()) {
-        computed_values.set_border_bottom_right_radius(
-            CSS::BorderRadiusData {
-                CSS::LengthPercentage::from_style_value(border_bottom_right_radius.as_border_radius().horizontal_radius()),
-                CSS::LengthPercentage::from_style_value(border_bottom_right_radius.as_border_radius().vertical_radius()) });
-    }
-    auto const& border_top_left_radius = computed_style.property(CSS::PropertyID::BorderTopLeftRadius);
-    if (border_top_left_radius.is_border_radius()) {
-        computed_values.set_border_top_left_radius(
-            CSS::BorderRadiusData {
-                CSS::LengthPercentage::from_style_value(border_top_left_radius.as_border_radius().horizontal_radius()),
-                CSS::LengthPercentage::from_style_value(border_top_left_radius.as_border_radius().vertical_radius()) });
-    }
-    auto const& border_top_right_radius = computed_style.property(CSS::PropertyID::BorderTopRightRadius);
-    if (border_top_right_radius.is_border_radius()) {
-        computed_values.set_border_top_right_radius(
-            CSS::BorderRadiusData {
-                CSS::LengthPercentage::from_style_value(border_top_right_radius.as_border_radius().horizontal_radius()),
-                CSS::LengthPercentage::from_style_value(border_top_right_radius.as_border_radius().vertical_radius()) });
-    }
+    auto border_radius_data_from_style_value = [](CSS::StyleValue const& value) -> CSS::BorderRadiusData {
+        return CSS::BorderRadiusData {
+            CSS::LengthPercentage::from_style_value(value.as_border_radius().horizontal_radius()),
+            CSS::LengthPercentage::from_style_value(value.as_border_radius().vertical_radius())
+        };
+    };
+
+    computed_values.set_border_bottom_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomLeftRadius)));
+    computed_values.set_border_bottom_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomRightRadius)));
+    computed_values.set_border_top_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopLeftRadius)));
+    computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopRightRadius)));
     computed_values.set_display(computed_style.display());
     computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
 
@@ -478,10 +641,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_order(computed_style.order());
     computed_values.set_clip(computed_style.clip());
 
-    if (computed_style.backdrop_filter().has_filters())
-        computed_values.set_backdrop_filter(computed_style.backdrop_filter());
-    if (computed_style.filter().has_filters())
-        computed_values.set_filter(computed_style.filter());
+    computed_values.set_backdrop_filter(computed_style.backdrop_filter());
+    computed_values.set_filter(computed_style.filter());
 
     computed_values.set_flood_color(computed_style.color_or_fallback(CSS::PropertyID::FloodColor, color_resolution_context, CSS::InitialValues::flood_color()));
     computed_values.set_flood_opacity(computed_style.flood_opacity());
@@ -566,9 +727,9 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_min_height(computed_style.size_value(CSS::PropertyID::MinHeight));
     computed_values.set_max_height(computed_style.size_value(CSS::PropertyID::MaxHeight));
 
-    computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, *this, CSS::ComputedProperties::ClampNegativeLengths::No, CSS::LengthPercentageOrAuto::make_auto()));
-    computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, *this, CSS::ComputedProperties::ClampNegativeLengths::No, CSS::Length::make_px(0)));
-    computed_values.set_padding(computed_style.length_box(CSS::PropertyID::PaddingLeft, CSS::PropertyID::PaddingTop, CSS::PropertyID::PaddingRight, CSS::PropertyID::PaddingBottom, *this, CSS::ComputedProperties::ClampNegativeLengths::Yes, CSS::Length::make_px(0)));
+    computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
+    computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
+    computed_values.set_padding(computed_style.length_box(CSS::PropertyID::PaddingLeft, CSS::PropertyID::PaddingTop, CSS::PropertyID::PaddingRight, CSS::PropertyID::PaddingBottom, CSS::Length::make_px(0)));
 
     computed_values.set_box_shadow(computed_style.box_shadow(*this));
 
@@ -639,20 +800,13 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_grid_template_areas(computed_style.grid_template_areas());
     computed_values.set_grid_auto_flow(computed_style.grid_auto_flow());
 
-    if (auto cx_value = computed_style.length_percentage(CSS::PropertyID::Cx, *this, CSS::ComputedProperties::ClampNegativeLengths::No); cx_value.has_value())
-        computed_values.set_cx(*cx_value);
-    if (auto cy_value = computed_style.length_percentage(CSS::PropertyID::Cy, *this, CSS::ComputedProperties::ClampNegativeLengths::No); cy_value.has_value())
-        computed_values.set_cy(*cy_value);
-    if (auto r_value = computed_style.length_percentage(CSS::PropertyID::R, *this, CSS::ComputedProperties::ClampNegativeLengths::No); r_value.has_value())
-        computed_values.set_r(*r_value);
-    if (auto rx_value = computed_style.length_percentage(CSS::PropertyID::Rx, *this, CSS::ComputedProperties::ClampNegativeLengths::No); rx_value.has_value())
-        computed_values.set_rx(*rx_value);
-    if (auto ry_value = computed_style.length_percentage(CSS::PropertyID::Ry, *this, CSS::ComputedProperties::ClampNegativeLengths::No); ry_value.has_value())
-        computed_values.set_ry(*ry_value);
-    if (auto x_value = computed_style.length_percentage(CSS::PropertyID::X, *this, CSS::ComputedProperties::ClampNegativeLengths::No); x_value.has_value())
-        computed_values.set_x(*x_value);
-    if (auto y_value = computed_style.length_percentage(CSS::PropertyID::Y, *this, CSS::ComputedProperties::ClampNegativeLengths::No); y_value.has_value())
-        computed_values.set_y(*y_value);
+    computed_values.set_cx(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cx)));
+    computed_values.set_cy(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cy)));
+    computed_values.set_r(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::R)));
+    computed_values.set_rx(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Rx)));
+    computed_values.set_ry(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Ry)));
+    computed_values.set_x(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::X)));
+    computed_values.set_y(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Y)));
 
     auto const& fill = computed_style.property(CSS::PropertyID::Fill);
     if (fill.has_color())
@@ -815,6 +969,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_caret_color(computed_style.caret_color(*this));
     computed_values.set_color_interpolation(computed_style.color_interpolation());
+    computed_values.set_resize(computed_style.resize());
 
     propagate_style_to_anonymous_wrappers();
 
@@ -1307,11 +1462,15 @@ void Node::set_needs_layout_update(DOM::SetNeedsLayoutReason reason)
 
     m_needs_layout_update = true;
 
+    if (auto* box = as_if<Box>(this))
+        box->reset_cached_intrinsic_sizes();
+
     // Mark any anonymous children generated by this node for layout update.
     // NOTE: if this node generated an anonymous parent, all ancestors are indiscriminately marked below.
     for_each_child_of_type<Box>([&](Box& child) {
         if (child.is_anonymous() && !is<TableWrapper>(child)) {
             child.m_needs_layout_update = true;
+            child.reset_cached_intrinsic_sizes();
         }
         return IterationDecision::Continue;
     });
@@ -1320,6 +1479,20 @@ void Node::set_needs_layout_update(DOM::SetNeedsLayoutReason reason)
         if (ancestor->m_needs_layout_update)
             break;
         ancestor->m_needs_layout_update = true;
+    }
+
+    // Reset intrinsic size caches for ancestors up to abspos or SVG root boundary.
+    // Absolutely positioned elements don't contribute to ancestor intrinsic sizes,
+    // so changes inside an abspos box don't require resetting ancestor caches.
+    // SVG root elements have intrinsic sizes determined solely by their own attributes
+    // (width, height, viewBox), not by their children, so the same logic applies.
+    for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
+        auto* box = as_if<Box>(ancestor);
+        if (!box)
+            continue;
+        box->reset_cached_intrinsic_sizes();
+        if (box->is_absolutely_positioned() || box->is_svg_svg_box())
+            break;
     }
 }
 

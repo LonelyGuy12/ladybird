@@ -38,6 +38,7 @@
 #include <LibWeb/HTML/DocumentState.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/External.h>
 #include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/HTMLEmbedElement.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
@@ -67,6 +68,7 @@
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/RequestIdleCallback/IdleDeadline.h>
 #include <LibWeb/Selection/Selection.h>
+#include <LibWeb/Speech/SpeechSynthesis.h>
 #include <LibWeb/StorageAPI/StorageBottle.h>
 #include <LibWeb/StorageAPI/StorageEndpoint.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
@@ -132,12 +134,16 @@ void Window::visit_edges(JS::Cell::Visitor& visitor)
     visitor.visit(m_pdf_viewer_mime_type_objects);
     visitor.visit(m_close_watcher_manager);
     visitor.visit(m_cookie_store);
+    visitor.visit(m_speech_synthesis);
     visitor.visit(m_locationbar);
     visitor.visit(m_menubar);
     visitor.visit(m_personalbar);
     visitor.visit(m_scrollbars);
     visitor.visit(m_statusbar);
     visitor.visit(m_toolbar);
+    visitor.visit(m_external);
+    for (auto& descriptor : m_cross_origin_property_descriptor_map)
+        descriptor.value.visit_edges(visitor);
 }
 
 void Window::finalize()
@@ -731,6 +737,18 @@ Vector<GC::Ref<MimeType>> Window::pdf_viewer_mime_type_objects()
     return m_pdf_viewer_mime_type_objects;
 }
 
+static bool s_test_mode = false;
+
+bool Window::in_test_mode()
+{
+    return s_test_mode;
+}
+
+void Window::set_enable_test_mode(bool exposed)
+{
+    s_test_mode = exposed;
+}
+
 static bool s_internals_object_exposed = false;
 
 void Window::set_internals_object_exposed(bool exposed)
@@ -1135,6 +1153,14 @@ GC::Ref<CookieStore::CookieStore> Window::cookie_store()
     return *m_cookie_store;
 }
 
+// https://wicg.github.io/speech-api/#tts-section
+GC::Ref<Speech::SpeechSynthesis> Window::speech_synthesis()
+{
+    if (!m_speech_synthesis)
+        m_speech_synthesis = Speech::SpeechSynthesis::create(realm());
+    return *m_speech_synthesis;
+}
+
 // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#dom-alert
 void Window::alert(String const& message)
 {
@@ -1472,30 +1498,37 @@ double Window::scroll_y() const
     return 0;
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view/#dom-window-scroll
-void Window::scroll(ScrollToOptions const& options)
+// https://drafts.csswg.org/cssom-view/#dom-window-scroll
+GC::Ref<WebIDL::Promise> Window::scroll(ScrollToOptions const& options)
 {
-    // 4. If there is no viewport, abort these steps.
+    // 4. If there is no viewport, return a resolved Promise and abort the remaining steps.
+    // AD-HOC: Done here as step 1 requires the viewport.
     auto navigable = associated_document().navigable();
     if (!navigable)
-        return;
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
 
     // 1. If invoked with one argument, follow these substeps:
+    // NB: This Window::scroll() overload always has one argument.
 
-    // 1. Let options be the argument.
+    //    1. Let options be the argument.
     auto viewport_rect = navigable->viewport_rect().to_type<float>();
 
-    // 2. Let x be the value of the left dictionary member of options, if present, or the viewport’s current scroll
+    //    2. Let x be the value of the left dictionary member of options, if present, or the viewport’s current scroll
     //    position on the x axis otherwise.
     auto x = options.left.value_or(viewport_rect.x());
 
-    // 3. Let y be the value of the top dictionary member of options, if present, or the viewport’s current scroll
-    //    position on the y axis otherwise.
+    //    3. Let y be the value of the top dictionary member of options, if present, or the viewport’s current scroll
+    //       position on the y axis otherwise.
     auto y = options.top.value_or(viewport_rect.y());
+
+    // 2. If invoked with two arguments, follow these substeps:
+    // NB: Implemented by other Window::scroll() overload.
 
     // 3. Normalize non-finite values for x and y.
     x = HTML::normalize_non_finite_values(x);
     y = HTML::normalize_non_finite_values(y);
+
+    // AD-HOC: Step 4 is done at the start.
 
     // 5. Let viewport width be the width of the viewport excluding the width of the scroll bar, if any.
     auto viewport_width = viewport_rect.width();
@@ -1506,25 +1539,29 @@ void Window::scroll(ScrollToOptions const& options)
     auto const document = navigable->active_document();
     VERIFY(document);
 
-    // Make sure layout is up-to-date before looking at scrollable overflow metrics.
-    document->update_layout(DOM::UpdateLayoutReason::WindowScroll);
+    // OPTIMIZATION: If we're scrolling to (0, 0), we don't need to do any of the overflow calculations.
+    //               This also means we don't need to update layout in that case.
+    if (x != 0 || y != 0) {
+        // NB: Make sure layout is up-to-date before looking at scrollable overflow metrics.
+        document->update_layout(DOM::UpdateLayoutReason::WindowScroll);
 
-    VERIFY(document->paintable_box());
-    auto scrolling_area = document->paintable_box()->scrollable_overflow_rect()->to_type<float>();
+        VERIFY(document->paintable_box());
+        auto scrolling_area = document->paintable_box()->scrollable_overflow_rect()->to_type<float>();
 
-    // 7. FIXME: For now we always assume overflow direction is rightward
-    // -> If the viewport has rightward overflow direction
-    //    Let x be max(0, min(x, viewport scrolling area width - viewport width)).
-    x = max(0.0f, min(x, scrolling_area.width() - viewport_width));
-    // -> If the viewport has leftward overflow direction
-    //    Let x be min(0, max(x, viewport width - viewport scrolling area width)).
+        // 7. FIXME: For now we always assume overflow direction is rightward
+        // -> If the viewport has rightward overflow direction
+        //    Let x be max(0, min(x, viewport scrolling area width - viewport width)).
+        x = max(0.0f, min(x, scrolling_area.width() - viewport_width));
+        // -> If the viewport has leftward overflow direction
+        //    Let x be min(0, max(x, viewport width - viewport scrolling area width)).
 
-    // 8. FIXME: For now we always assume overflow direction is downward
-    // -> If the viewport has downward overflow direction
-    //    Let y be max(0, min(y, viewport scrolling area height - viewport height)).
-    y = max(0.0f, min(y, scrolling_area.height() - viewport_height));
-    // -> If the viewport has upward overflow direction
-    //    Let y be min(0, max(y, viewport height - viewport scrolling area height)).
+        // 8. FIXME: For now we always assume overflow direction is downward
+        // -> If the viewport has downward overflow direction
+        //    Let y be max(0, min(y, viewport scrolling area height - viewport height)).
+        y = max(0.0f, min(y, scrolling_area.height() - viewport_height));
+        // -> If the viewport has upward overflow direction
+        //    Let y be min(0, max(y, viewport height - viewport scrolling area height)).
+    }
 
     // FIXME: 9. Let position be the scroll position the viewport would have by aligning the x-coordinate x of the viewport
     //           scrolling area with the left of the viewport and aligning the y-coordinate y of the viewport scrolling area
@@ -1532,37 +1569,47 @@ void Window::scroll(ScrollToOptions const& options)
     auto position = Gfx::FloatPoint { x, y };
 
     // 10. If position is the same as the viewport’s current scroll position, and the viewport does not have an ongoing
-    //     smooth scroll, abort these steps.
-    if (position == viewport_rect.location())
-        return;
+    //     smooth scroll, return a resolved Promise and abort the remaining steps.
+    if (position == viewport_rect.location()) {
+        TemporaryExecutionContext temporary_execution_context { realm() };
+        return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
+    }
 
     // 11. Let document be the viewport’s associated Document.
-    //     NOTE: document is already defined above.
+    // NB: document is already defined above.
 
     // 12. Perform a scroll of the viewport to position, document’s root element as the associated element, if there is
     //     one, or null otherwise, and the scroll behavior being the value of the behavior dictionary member of options.
-    navigable->perform_scroll_of_viewport({ x, y });
+    //     Let scrollPromise be the Promise returned from this step.
+    auto scroll_promise = navigable->perform_a_scroll_of_the_viewport({ x, y });
+
+    // 13. Return scrollPromise.
+    return scroll_promise;
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view/#dom-window-scroll
-void Window::scroll(double x, double y)
+// https://drafts.csswg.org/cssom-view/#dom-window-scroll
+GC::Ref<WebIDL::Promise> Window::scroll(double x, double y)
 {
+    // NB: This just implements step 2, and then forwards to the other Window::scroll() overload.
+
     // 2. If invoked with two arguments, follow these substeps:
 
-    // 1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
+    //    1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
     auto options = ScrollToOptions {};
 
-    // 2. Let x and y be the arguments, respectively.
-
+    //    2. Let x and y be the arguments, respectively.
     options.left = x;
     options.top = y;
 
-    scroll(options);
+    return scroll(options);
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view/#dom-window-scrollby
-void Window::scroll_by(ScrollToOptions options)
+// https://drafts.csswg.org/cssom-view/#dom-window-scrollby
+GC::Ref<WebIDL::Promise> Window::scroll_by(ScrollToOptions options)
 {
+    // 1. If invoked with two arguments, follow these substeps:
+    // NB: Implemented by the other overload, which then calls this.
+
     // 2. Normalize non-finite values for the left and top dictionary members of options.
     auto left = HTML::normalize_non_finite_values(options.left);
     auto top = HTML::normalize_non_finite_values(options.top);
@@ -1573,27 +1620,28 @@ void Window::scroll_by(ScrollToOptions options)
     // 4. Add the value of scrollY to the top dictionary member.
     options.top = top + scroll_y();
 
-    // 5. Act as if the scroll() method was invoked with options as the only argument.
-    scroll(options);
+    // 5. Return the Promise returned from scroll() after the method is invoked with options as the only argument.
+    return scroll(options);
 }
 
-// https://w3c.github.io/csswg-drafts/cssom-view/#dom-window-scrollby
-void Window::scroll_by(double x, double y)
+// https://drafts.csswg.org/cssom-view/#dom-window-scrollby
+GC::Ref<WebIDL::Promise> Window::scroll_by(double x, double y)
 {
     // 1. If invoked with two arguments, follow these substeps:
 
-    // 1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
+    //    1. Let options be null converted to a ScrollToOptions dictionary. [WEBIDL]
     auto options = ScrollToOptions {};
 
-    // 2. Let x and y be the arguments, respectively.
+    //    2. Let x and y be the arguments, respectively.
 
-    // 3. Let the left dictionary member of options have the value x.
+    //    3. Let the left dictionary member of options have the value x.
     options.left = x;
 
-    // 4. Let the top dictionary member of options have the value y.
+    //    4. Let the top dictionary member of options have the value y.
     options.top = y;
 
-    scroll_by(options);
+    // NB: Complete the algorithm using the other overload.
+    return scroll_by(options);
 }
 
 // https://w3c.github.io/csswg-drafts/cssom-view/#dom-window-screenx
@@ -1736,6 +1784,15 @@ void Window::capture_events()
 void Window::release_events()
 {
     // Do nothing.
+}
+
+// https://html.spec.whatwg.org/multipage/obsolete.html#dom-external
+GC::Ref<External> Window::external()
+{
+    // The external attribute of the Window interface must return an instance of the External interface
+    if (!m_external)
+        m_external = realm().create<External>(realm());
+    return *m_external;
 }
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigation

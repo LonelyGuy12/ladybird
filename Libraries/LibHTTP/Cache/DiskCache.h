@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, Tim Flynn <trflynn89@ladybird.org>
+ * Copyright (c) 2025-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -16,6 +16,7 @@
 #include <LibDatabase/Database.h>
 #include <LibHTTP/Cache/CacheEntry.h>
 #include <LibHTTP/Cache/CacheIndex.h>
+#include <LibHTTP/Cache/CacheMode.h>
 #include <LibURL/Forward.h>
 
 namespace HTTP {
@@ -24,6 +25,10 @@ class DiskCache {
 public:
     enum class Mode {
         Normal,
+
+        // In partitioned mode, the cache is enabled as normal, but each RequestServer process operates with a unique
+        // disk cache database.
+        Partitioned,
 
         // In test mode, we only enable caching of responses on a per-request basis, signified by a request header. The
         // response headers will include some status on how the request was handled.
@@ -45,12 +50,12 @@ public:
         Read,
         Revalidate,
     };
-    Variant<Optional<CacheEntryReader&>, CacheHasOpenEntry> open_entry(CacheRequest&, URL::URL const&, StringView method, HeaderList const& request_headers, OpenMode);
+    Variant<Optional<CacheEntryReader&>, CacheHasOpenEntry> open_entry(CacheRequest&, URL::URL const&, StringView method, HeaderList const& request_headers, CacheMode, OpenMode);
 
     Requests::CacheSizes estimate_cache_size_accessed_since(UnixDateTime since);
     void remove_entries_accessed_since(UnixDateTime since);
 
-    LexicalPath const& cache_directory() { return m_cache_directory; }
+    LexicalPath const& cache_directory() const { return m_cache_directory; }
 
     void cache_entry_closed(Badge<CacheEntry>, CacheEntry const&);
 

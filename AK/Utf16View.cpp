@@ -266,6 +266,58 @@ Optional<size_t> Utf16View::find_code_unit_offset(char16_t needle, size_t start_
     return result - start + start_offset;
 }
 
+Optional<size_t> Utf16View::find_last_code_point_offset(u32 needle, size_t end_offset) const
+{
+    if (end_offset == 0)
+        return {};
+
+    auto const limit = min(end_offset, length_in_code_units());
+
+    if (has_ascii_storage()) {
+        if (!AK::is_ascii(needle))
+            return {};
+        auto ascii_view = StringView { m_string.ascii, limit };
+        return ascii_view.find_last(static_cast<char>(needle));
+    }
+
+    if (needle <= 0xFFFF) {
+        auto const* start = m_string.utf16;
+        auto const* end = m_string.utf16 + limit;
+        auto const char16_needle = static_cast<char16_t>(needle);
+
+        Optional<size_t> last_found;
+        auto const* search_start = start;
+        while (true) {
+            auto const* result = simdutf::find(search_start, end, char16_needle);
+            if (result == end)
+                break;
+            last_found = result - start;
+            search_start = result + 1;
+        }
+        return last_found;
+    }
+
+    // Search for high surrogate and verify low surrogate.
+    auto const adjusted = needle - 0x10000;
+    auto const high = static_cast<char16_t>(0xD800 | (adjusted >> 10));
+    auto const low = static_cast<char16_t>(0xDC00 | (adjusted & 0x3FF));
+
+    auto const* start = m_string.utf16;
+    auto const* end = m_string.utf16 + limit;
+
+    Optional<size_t> last_found;
+    auto const* search_start = start;
+    while (true) {
+        auto const* result = simdutf::find(search_start, end, high);
+        if (result == end || result + 1 >= m_string.utf16 + length_in_code_units())
+            break;
+        if (result[1] == low)
+            last_found = result - start;
+        search_start = result + 1;
+    }
+    return last_found;
+}
+
 Vector<Utf16View> Utf16View::split_view(char16_t separator, SplitBehavior split_behavior) const
 {
     Utf16View separator_view { &separator, 1 };

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
- * Copyright (c) 2024, Jelle Raaijmakers <jelle@ladybird.org>
+ * Copyright (c) 2024-2026, Jelle Raaijmakers <jelle@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -197,8 +197,9 @@ class WEB_API FormAssociatedTextControlElement
     , public InputEventsTarget {
 public:
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
-    virtual Utf16String relevant_value() = 0;
+    virtual Utf16String relevant_value() const = 0;
     virtual WebIDL::ExceptionOr<void> set_relevant_value(Utf16String const&) = 0;
+    virtual Optional<Utf16String> selected_text_for_stringifier() const;
 
     virtual void set_dirty_value_flag(bool flag) = 0;
 
@@ -236,14 +237,13 @@ public:
     bool has_scheduled_selectionchange_event() const { return m_has_scheduled_selectionchange_event; }
     void set_scheduled_selectionchange_event(bool value) { m_has_scheduled_selectionchange_event = value; }
 
-    virtual void did_edit_text_node() = 0;
+    virtual void did_edit_text_node(FlyString const& input_type, Optional<Utf16String> const& data) = 0;
 
     virtual GC::Ptr<DOM::Text> form_associated_element_to_text_node() = 0;
     virtual GC::Ptr<DOM::Text const> form_associated_element_to_text_node() const { return const_cast<FormAssociatedTextControlElement&>(*this).form_associated_element_to_text_node(); }
 
-    virtual void handle_insert(Utf16String const&) override;
-    virtual void handle_delete(DeleteDirection) override;
-    virtual EventResult handle_return_key(FlyString const& ui_input_type) override;
+    virtual void handle_insert(FlyString const& input_type, Utf16String const&) override;
+    virtual void handle_delete(FlyString const& input_type) override;
     virtual void select_all() override;
     virtual void set_selection_anchor(GC::Ref<DOM::Node>, size_t offset) override;
     virtual void set_selection_focus(GC::Ref<DOM::Node>, size_t offset) override;

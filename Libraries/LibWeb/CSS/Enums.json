@@ -208,6 +208,13 @@
     "upper-latin",
     "upper-roman"
   ],
+  "counter-style-system": [
+    "cyclic",
+    "numeric",
+    "alphabetic",
+    "symbolic",
+    "additive"
+  ],
   "cross-origin-modifier-value": [
     "anonymous",
     "use-credentials"
@@ -337,7 +344,11 @@
     "normal",
     "none"
   ],
-  "font-style": [
+  "font-optical-sizing": [
+    "auto",
+    "none"
+  ],
+  "font-style-keyword": [
     "normal",
     "italic",
     "left",
@@ -710,6 +721,14 @@
     "repeat",
     "round",
     "space"
+  ],
+  "resize": [
+    "none",
+    "both",
+    "horizontal",
+    "vertical",
+    "inline",
+    "block"
   ],
   "rounding-strategy": [
     "down",

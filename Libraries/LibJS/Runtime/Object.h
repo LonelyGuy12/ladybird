@@ -37,6 +37,11 @@ struct PrivateElement {
     PrivateName key;
     Kind kind { Kind::Field };
     Value value;
+
+    void visit_edges(Cell::Visitor& visitor)
+    {
+        visitor.visit(value);
+    }
 };
 
 // Non-standard: This is information optionally returned by object property access functions.
@@ -74,7 +79,7 @@ public:
     static GC::Ref<Object> create_with_premade_shape(Shape&);
 
     virtual void initialize(Realm&) override;
-    virtual ~Object();
+    GC_ALLOW_CELL_DESTRUCTOR virtual ~Object();
 
     enum class PropertyKind {
         Key,

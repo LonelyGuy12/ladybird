@@ -28,12 +28,16 @@ public:
     virtual bool is_connection_open() const override;
     virtual Gfx::Palette palette() const override;
     virtual Web::DevicePixelRect screen_rect() const override;
+    virtual double zoom_level() const override;
+    virtual double device_pixel_ratio() const override;
     virtual double device_pixels_per_css_pixel() const override;
     virtual Web::CSS::PreferredColorScheme preferred_color_scheme() const override;
     virtual Web::CSS::PreferredContrast preferred_contrast() const override;
     virtual Web::CSS::PreferredMotion preferred_motion() const override;
-    virtual String page_did_request_cookie(URL::URL const&, Web::Cookie::Source) override;
+    virtual size_t screen_count() const override { return 1; }
+    virtual Web::Cookie::VersionedCookie page_did_request_cookie(URL::URL const&, Web::Cookie::Source) override;
     virtual void request_file(Web::FileRequest) override;
+    virtual IPC::File request_worker_agent(Web::Bindings::AgentType) override;
     virtual Web::DisplayListPlayerType display_list_player_type() const override { VERIFY_NOT_REACHED(); }
     virtual bool is_headless() const override { VERIFY_NOT_REACHED(); }
     virtual Queue<Web::QueuedInputEvent>& input_event_queue() override { VERIFY_NOT_REACHED(); }
