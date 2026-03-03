@@ -14,7 +14,9 @@
 #include <LibTextCodec/Decoder.h>
 #include <LibURL/URL.h>
 #include <LibWeb/Bindings/HTMLLinkElementPrototype.h>
+#include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/DOMTokenList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
@@ -26,6 +28,7 @@
 #include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
+#include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/PotentialCORSRequest.h>
@@ -128,6 +131,11 @@ String HTMLLinkElement::media() const
 GC::Ptr<CSS::CSSStyleSheet> HTMLLinkElement::sheet() const
 {
     return m_loaded_style_sheet;
+}
+
+void HTMLLinkElement::finished_loading_critical_style_subresources(AnyFailed)
+{
+    m_document_load_event_delayer.clear();
 }
 
 bool HTMLLinkElement::has_loaded_icon() const
@@ -876,7 +884,14 @@ void HTMLLinkElement::process_stylesheet_resource(bool success, Fetch::Infrastru
     // 7. Unblock rendering on el.
     unblock_rendering();
 
-    m_document_load_event_delayer.clear();
+    if (m_loaded_style_sheet) {
+        auto style_sheet_loading_state = m_loaded_style_sheet->loading_state();
+        if (style_sheet_loading_state == CSS::CSSStyleSheet::LoadingState::Loaded || style_sheet_loading_state == CSS::CSSStyleSheet::LoadingState::Error) {
+            finished_loading_critical_style_subresources(style_sheet_loading_state == CSS::CSSStyleSheet::LoadingState::Error ? AnyFailed::Yes : AnyFailed::No);
+        }
+    } else {
+        m_document_load_event_delayer.clear();
+    }
 }
 
 static NonnullRefPtr<Core::Promise<bool>> decode_favicon(ReadonlyBytes favicon_data, URL::URL const& favicon_url, GC::Ref<DOM::Document> document)
@@ -962,8 +977,14 @@ void HTMLLinkElement::load_fallback_favicon_if_needed(GC::Ref<DOM::Document> doc
     //    the Document object's URL, client is the Document object's relevant settings object, destination is "image",
     //    synchronous flag is set, credentials mode is "include", and whose use-URL-credentials flag is set.
     // NOTE: Fetch requests no longer have a synchronous flag, see https://github.com/whatwg/fetch/pull/1165
+    auto favicon_url = document->encoding_parse_url("/favicon.ico"sv);
+
+    // It is possible for the URL parser to fail if the document's base URL is invalid.
+    if (!favicon_url.has_value())
+        return;
+
     auto request = Fetch::Infrastructure::Request::create(vm);
-    request->set_url(*document->encoding_parse_url("/favicon.ico"sv));
+    request->set_url(favicon_url.release_value());
     request->set_client(&document->relevant_settings_object());
     request->set_destination(Fetch::Infrastructure::Request::Destination::Image);
     request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::Include);

@@ -8,6 +8,7 @@
 
 #include <LibGC/Root.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/Display.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
@@ -62,14 +63,14 @@ public:
 
     void detach_from_layout_node();
 
-    [[nodiscard]] bool is_visible() const;
+    [[nodiscard]] bool is_visible() const { return m_visible; }
     [[nodiscard]] bool is_positioned() const { return m_positioned; }
     [[nodiscard]] bool is_fixed_position() const { return m_fixed_position; }
     [[nodiscard]] bool is_sticky_position() const { return m_sticky_position; }
     [[nodiscard]] bool is_absolutely_positioned() const { return m_absolutely_positioned; }
     [[nodiscard]] bool is_floating() const { return m_floating; }
     [[nodiscard]] bool is_inline() const { return m_inline; }
-    [[nodiscard]] CSS::Display display() const;
+    [[nodiscard]] CSS::Display display() const { return m_display; }
 
     bool has_stacking_context() const;
     StackingContext* enclosing_stacking_context();
@@ -134,6 +135,8 @@ public:
 
     CSSPixelPoint box_type_agnostic_position() const;
 
+    void scroll_ancestor_to_offset_into_view(size_t offset);
+
     enum class SelectionState : u8 {
         None,        // No selection
         Start,       // Selection starts in this Node
@@ -193,7 +196,10 @@ private:
     bool m_absolutely_positioned : 1 { false };
     bool m_floating : 1 { false };
     bool m_inline : 1 { false };
+    bool m_visible : 1 { true };
     bool m_visible_for_hit_testing : 1 { true };
+
+    CSS::Display m_display;
 
 protected:
     bool m_needs_paint_only_properties_update : 1 { true };

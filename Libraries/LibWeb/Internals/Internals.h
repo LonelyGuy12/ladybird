@@ -71,7 +71,6 @@ public:
     void simulate_drag_move(double x, double y);
     void simulate_drop(double x, double y);
 
-    void enable_cookies_on_file_domains();
     void expire_cookies_with_time_offset(WebIDL::LongLong seconds);
 
     bool set_http_memory_cache_enabled(bool enabled);
@@ -89,6 +88,8 @@ public:
     bool headless();
 
     String dump_display_list();
+    String dump_layout_tree(GC::Ref<DOM::Node>);
+    String dump_paintable_tree(GC::Ref<DOM::Node>);
     String dump_stacking_context_tree();
     String dump_gc_graph();
 
@@ -102,6 +103,9 @@ public:
     void perform_per_test_cleanup();
 
     void set_highlighted_node(GC::Ptr<DOM::Node> node);
+
+    void clear_element(HTML::HTMLElement&);
+    void set_environments_top_level_url(StringView url);
 
 private:
     explicit Internals(JS::Realm&);

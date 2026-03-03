@@ -14,7 +14,6 @@ namespace GC {
 class Cell;
 class CellAllocator;
 class DeferGC;
-class ForeignCell;
 class RootImpl;
 class Heap;
 class HeapBlock;
@@ -33,6 +32,9 @@ class Root;
 
 template<class T, size_t inline_capacity = 0>
 class ConservativeVector;
+
+template<class T>
+class HeapVector;
 
 template<class T, size_t inline_capacity = 0>
 class RootVector;

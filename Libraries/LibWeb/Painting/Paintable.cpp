@@ -38,6 +38,7 @@ Paintable::Paintable(Layout::Node const& layout_node)
     m_absolutely_positioned = computed_values.position() == CSS::Positioning::Absolute;
     m_floating = layout_node.is_floating();
     m_inline = layout_node.is_inline();
+    m_display = layout_node.display();
 }
 
 Paintable::~Paintable() = default;
@@ -65,6 +66,9 @@ String Paintable::debug_description() const
 
 void Paintable::resolve_paint_properties()
 {
+    auto const& cv = computed_values();
+    m_visible = cv.visibility() == CSS::Visibility::Visible && cv.opacity() != 0;
+
     m_visible_for_hit_testing = true;
     if (auto dom_node = this->dom_node(); dom_node && dom_node->is_inert()) {
         // https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees
@@ -72,12 +76,6 @@ void Paintable::resolve_paint_properties()
         // - Hit-testing must act as if the 'pointer-events' CSS property were set to 'none'.
         m_visible_for_hit_testing = false;
     }
-}
-
-bool Paintable::is_visible() const
-{
-    auto const& computed_values = this->computed_values();
-    return computed_values.visibility() == CSS::Visibility::Visible && computed_values.opacity() != 0;
 }
 
 DOM::Document const& Paintable::document() const
@@ -88,11 +86,6 @@ DOM::Document const& Paintable::document() const
 DOM::Document& Paintable::document()
 {
     return layout_node().document();
-}
-
-CSS::Display Paintable::display() const
-{
-    return layout_node().display();
 }
 
 PaintableBox* Paintable::containing_block() const
@@ -386,6 +379,38 @@ Paintable::SelectionStyle Paintable::selection_style() const
     }
 
     return default_style;
+}
+
+void Paintable::scroll_ancestor_to_offset_into_view(size_t offset)
+{
+    // Walk up to find the containing PaintableWithLines.
+    GC::Ptr<PaintableWithLines const> paintable_with_lines;
+    for (auto* ancestor = this; ancestor; ancestor = ancestor->parent()) {
+        paintable_with_lines = as_if<PaintableWithLines>(*ancestor);
+        if (paintable_with_lines)
+            break;
+    }
+    if (!paintable_with_lines)
+        return;
+
+    // Find the fragment containing the offset and compute a cursor rect.
+    for (auto const& fragment : paintable_with_lines->fragments()) {
+        if (&fragment.paintable() != this)
+            continue;
+        if (offset < fragment.start_offset() || offset > fragment.start_offset() + fragment.length_in_code_units())
+            continue;
+
+        auto cursor_rect = fragment.range_rect(SelectionState::StartAndEnd, offset, offset);
+
+        // Walk up the containing block chain to find the nearest scrollable ancestor.
+        for (auto* ancestor = containing_block(); ancestor; ancestor = ancestor->containing_block()) {
+            if (ancestor->has_scrollable_overflow()) {
+                ancestor->scroll_into_view(cursor_rect);
+                break;
+            }
+        }
+        return;
+    }
 }
 
 }

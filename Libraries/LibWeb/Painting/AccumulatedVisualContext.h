@@ -9,19 +9,18 @@
 #include <AK/AtomicRefCounted.h>
 #include <AK/Variant.h>
 #include <LibGfx/CompositingAndBlendingOperator.h>
+#include <LibGfx/Filter.h>
 #include <LibGfx/Matrix4x4.h>
 #include <LibGfx/Path.h>
+#include <LibGfx/Point.h>
+#include <LibGfx/Rect.h>
 #include <LibGfx/WindingRule.h>
 #include <LibWeb/Painting/BorderRadiiData.h>
-#include <LibWeb/Painting/ResolvedCSSFilter.h>
-#include <LibWeb/Painting/ScrollState.h>
+#include <LibWeb/PixelUnits.h>
 
 namespace Web::Painting {
 
-struct ClipRect {
-    CSSPixelRect rect;
-    BorderRadiiData corner_radii;
-};
+class ScrollStateSnapshot;
 
 struct ScrollData {
     size_t scroll_frame_id;
@@ -29,27 +28,21 @@ struct ScrollData {
 };
 
 struct ClipData {
-    CSSPixelRect rect;
-    BorderRadiiData corner_radii;
+    DevicePixelRect rect;
+    CornerRadii corner_radii;
 
-    explicit ClipData(ClipRect const& clip_rect)
-        : rect(clip_rect.rect)
-        , corner_radii(clip_rect.corner_radii)
-    {
-    }
-
-    ClipData(CSSPixelRect r, BorderRadiiData radii)
+    ClipData(DevicePixelRect r, CornerRadii radii)
         : rect(r)
         , corner_radii(radii)
     {
     }
 
-    bool contains(CSSPixelPoint point) const;
+    bool contains(DevicePixelPoint point) const;
 };
 
 struct TransformData {
     Gfx::FloatMatrix4x4 matrix;
-    CSSPixelPoint origin;
+    Gfx::FloatPoint origin;
 };
 
 struct PerspectiveData {
@@ -58,22 +51,20 @@ struct PerspectiveData {
 
 struct ClipPathData {
     Gfx::Path path;
-    CSSPixelRect bounding_rect;
+    DevicePixelRect bounding_rect;
     Gfx::WindingRule fill_rule;
 };
 
 struct EffectsData {
     float opacity { 1.0f };
     Gfx::CompositingAndBlendingOperator blend_mode { Gfx::CompositingAndBlendingOperator::Normal };
-    ResolvedCSSFilter filter;
-    bool isolate { false };
+    Optional<Gfx::Filter> gfx_filter;
 
     bool needs_layer() const
     {
         return opacity < 1.0f
             || blend_mode != Gfx::CompositingAndBlendingOperator::Normal
-            || filter.has_filters()
-            || isolate;
+            || gfx_filter.has_value();
     }
 };
 
@@ -87,15 +78,16 @@ public:
     RefPtr<AccumulatedVisualContext const> parent() const { return m_parent; }
 
     bool is_effect() const { return m_data.has<EffectsData>(); }
+    bool has_empty_effective_clip() const { return m_has_empty_effective_clip; }
 
     size_t depth() const { return m_depth; }
     size_t id() const { return m_id; }
 
     void dump(StringBuilder&) const;
 
-    Optional<CSSPixelPoint> transform_point_for_hit_test(CSSPixelPoint screen_point, ScrollStateSnapshot const& scroll_state) const;
-    CSSPixelPoint inverse_transform_point(CSSPixelPoint point) const;
-    CSSPixelRect transform_rect_to_viewport(CSSPixelRect const&, ScrollStateSnapshot const&) const;
+    Optional<Gfx::FloatPoint> transform_point_for_hit_test(Gfx::FloatPoint, ScrollStateSnapshot const&) const;
+    Gfx::FloatPoint inverse_transform_point(Gfx::FloatPoint) const;
+    Gfx::FloatRect transform_rect_to_viewport(Gfx::FloatRect const&, ScrollStateSnapshot const&) const;
 
 private:
     AccumulatedVisualContext(size_t id, VisualContextData data, RefPtr<AccumulatedVisualContext const> parent)
@@ -104,12 +96,20 @@ private:
         , m_depth(m_parent ? m_parent->depth() + 1 : 1)
         , m_id(id)
     {
+        if (m_parent && m_parent->has_empty_effective_clip()) {
+            m_has_empty_effective_clip = true;
+        } else if (m_data.has<ClipData>()) {
+            m_has_empty_effective_clip = m_data.get<ClipData>().rect.is_empty();
+        } else if (m_data.has<ClipPathData>()) {
+            m_has_empty_effective_clip = m_data.get<ClipPathData>().path.bounding_box().is_empty();
+        }
     }
 
     VisualContextData m_data;
     RefPtr<AccumulatedVisualContext const> m_parent;
     size_t m_depth;
     size_t m_id;
+    bool m_has_empty_effective_clip { false };
 };
 
 }

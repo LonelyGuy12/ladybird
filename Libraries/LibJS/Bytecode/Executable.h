@@ -8,10 +8,12 @@
 
 #include <AK/NonnullOwnPtr.h>
 #include <AK/OwnPtr.h>
+#include <AK/String.h>
 #include <AK/Utf16FlyString.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGC/Weak.h>
 #include <LibGC/WeakInlines.h>
+#include <LibJS/Bytecode/ClassBlueprint.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Label.h>
 #include <LibJS/Bytecode/Operand.h>
@@ -130,6 +132,9 @@ public:
     NonnullOwnPtr<RegexTable> regex_table;
     Vector<Value> constants;
 
+    Vector<GC::Ptr<SharedFunctionInstanceData>> shared_function_data;
+    Vector<ClassBlueprint> class_blueprints;
+
     NonnullRefPtr<SourceCode const> source_code;
     u32 number_of_registers { 0 };
     bool is_strict_mode { false };
@@ -140,8 +145,7 @@ public:
     struct ExceptionHandlers {
         size_t start_offset;
         size_t end_offset;
-        Optional<size_t> handler_offset;
-        Optional<size_t> finalizer_offset;
+        size_t handler_offset;
     };
 
     Vector<ExceptionHandlers> exception_handlers;
@@ -171,6 +175,7 @@ public:
     [[nodiscard]] UnrealizedSourceRange source_range_at(size_t offset) const;
 
     void dump() const;
+    [[nodiscard]] String dump_to_string() const;
 
     [[nodiscard]] Operand original_operand_from_raw(u32) const;
 

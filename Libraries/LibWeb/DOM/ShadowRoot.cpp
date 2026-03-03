@@ -5,15 +5,19 @@
  */
 
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
+#include <LibWeb/CSS/CSSStyleSheet.h>
+#include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentOrShadowRoot.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/SlotRegistry.h>
+#include <LibWeb/DOM/Utils.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
@@ -35,6 +39,28 @@ void ShadowRoot::finalize()
 {
     Base::finalize();
     document().unregister_shadow_root({}, *this);
+}
+
+// https://fullscreen.spec.whatwg.org/#dom-document-fullscreenelement
+GC::Ptr<Element> ShadowRoot::fullscreen_element_for_bindings() const
+{
+    // 1. If this is a shadow root and its host is not connected, then return null.
+    if (!host() || !host()->is_connected())
+        return nullptr;
+
+    // 2. Let candidate be the result of retargeting fullscreen element against this.
+    // NB: ShadowRoot does not have it's own top layer. But the algorithm says to get the fullscreen element from the
+    //     top layer, so it's grabbed from this' document.
+    auto* candidate = retarget(document().fullscreen_element(), const_cast<ShadowRoot*>(this));
+    if (!candidate)
+        return nullptr;
+
+    // 3. If candidate and this are in the same tree, then return candidate.
+    if (auto* retargeted_element = as<Element>(candidate); &retargeted_element->root() == &root())
+        return retargeted_element;
+
+    // 4. Return null.
+    return nullptr;
 }
 
 void ShadowRoot::initialize(JS::Realm& realm)
@@ -204,7 +230,7 @@ void ShadowRoot::for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& 
     }
 }
 
-void ShadowRoot::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const
+void ShadowRoot::for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)> const& callback) const
 {
     for (auto& style_sheet : style_sheets().sheets()) {
         if (!style_sheet->disabled())

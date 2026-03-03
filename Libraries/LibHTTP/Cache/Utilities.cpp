@@ -24,14 +24,33 @@ static Optional<UnixDateTime> parse_http_date(Optional<ByteString const&> date)
     return {};
 }
 
+u64 compute_maximum_disk_cache_size(u64 free_bytes, u64 limit_maximum_disk_cache_size)
+{
+    auto cache_size = [&]() {
+        if (free_bytes <= 100 * MiB)
+            return free_bytes * 8 / 10; // Up to 80 MiB
+        if (free_bytes <= 800 * MiB)
+            return free_bytes * 6 / 10; // Up to 480 MiB
+        if (free_bytes <= 2 * GiB)
+            return free_bytes * 4 / 10; // Up to 820 MiB
+        if (free_bytes <= 10 * GiB)
+            return free_bytes * 2 / 10; // Up to 2 GiB
+        return limit_maximum_disk_cache_size;
+    }();
+
+    return min(cache_size, limit_maximum_disk_cache_size);
+}
+
+u64 compute_maximum_disk_cache_entry_size(u64 maximum_disk_cache_size)
+{
+    static constexpr u64 MAXIMUM_DISK_CACHE_ENTRY_SIZE = 256 * MiB;
+
+    return min(maximum_disk_cache_size / 8, MAXIMUM_DISK_CACHE_ENTRY_SIZE);
+}
+
 String serialize_url_for_cache_storage(URL::URL const& url)
 {
-    if (!url.fragment().has_value())
-        return url.serialize();
-
-    auto sanitized = url;
-    sanitized.set_fragment({});
-    return sanitized.serialize();
+    return url.serialize(URL::ExcludeFragment::Yes);
 }
 
 static u64 serialize_hash(Crypto::Hash::SHA1& hasher)
@@ -52,11 +71,14 @@ static u64 serialize_hash(Crypto::Hash::SHA1& hasher)
     return result;
 }
 
-u64 create_cache_key(StringView url, StringView method)
+u64 create_cache_key(StringView url, StringView method, Optional<String const&> extra_cache_key)
 {
     auto hasher = Crypto::Hash::SHA1::create();
     hasher->update(url);
     hasher->update(method);
+
+    if (extra_cache_key.has_value())
+        hasher->update(*extra_cache_key);
 
     return serialize_hash(*hasher);
 }
@@ -171,12 +193,25 @@ bool is_cacheable(u32 status_code, HeaderList const& headers)
     // * if the response status code is 206 or 304, or the must-understand cache directive (see Section 5.2.2.3) is
     //   present: the cache understands the response status code;
     //
-    // This cache implements the semantics of 206 and 304, so no check is needed here.
-    // FIXME: must-understand is not implemented.
+    // NB: This cache implements the semantics of 304 for revalidation. 206 is excluded above.
+    bool has_must_understand = cache_control.has_value() && contains_cache_control_directive(*cache_control, "must-understand"sv);
 
-    // * the no-store cache directive is not present in the response (see Section 5.2.2.5);
-    if (cache_control.has_value() && contains_cache_control_directive(*cache_control, "no-store"sv))
-        return false;
+    if (has_must_understand) {
+        if (!is_heuristically_cacheable_status(status_code) && status_code != 304)
+            return false;
+
+        // https://httpwg.org/specs/rfc9111.html#cache-response-directive.must-understand
+        // The must-understand response directive limits caching of the response to a cache that understands and conforms
+        // to the requirements for that response's status code.
+        //
+        // A response that contains the must-understand directive SHOULD also contain the no-store directive. When a cache
+        // that implements the must-understand directive receives a response that includes it, the cache SHOULD ignore the
+        // no-store directive if it understands and implements the status code's caching requirements.
+    } else {
+        // * the no-store cache directive is not present in the response (see Section 5.2.2.5);
+        if (cache_control.has_value() && contains_cache_control_directive(*cache_control, "no-store"sv))
+            return false;
+    }
 
     // * if the cache is shared: the private response directive is either not present or allows a shared cache to store
     //   a modified response; see Section 5.2.2.7);
@@ -470,8 +505,8 @@ CacheLifetimeStatus cache_lifetime_status(HeaderList const& request_headers, Hea
 RevalidationAttributes RevalidationAttributes::create(HeaderList const& headers)
 {
     RevalidationAttributes attributes;
-    attributes.etag = headers.get("ETag"sv).map([](auto const& etag) { return etag; });
-    attributes.last_modified = parse_http_date(headers.get("Last-Modified"sv));
+    attributes.etag = headers.get("ETag"sv);
+    attributes.last_modified = headers.get("Last-Modified"sv);
 
     return attributes;
 }
@@ -608,7 +643,7 @@ ByteString normalize_request_vary_header_values(StringView header, HeaderList co
             }
 
             value.view().for_each_split_view(","sv, SplitBehavior::Nothing, [&](StringView field) {
-                values.append(field.trim_whitespace());
+                values.append(normalize_header_value(field));
             });
             return IterationDecision::Continue;
         });

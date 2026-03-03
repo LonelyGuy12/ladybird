@@ -72,13 +72,9 @@ ThrowCompletionOr<GC::Ref<PlainDate>> to_temporal_date(VM& vm, Value item, Value
     // 1. If options is not present, set options to undefined.
 
     // 2. If item is an Object, then
-    if (item.is_object()) {
-        auto const& object = item.as_object();
-
+    if (auto object = item.as_if<Object>()) {
         // a. If item has an [[InitializedTemporalDate]] internal slot, then
-        if (is<PlainDate>(object)) {
-            auto const& plain_date = static_cast<PlainDate const&>(object);
-
+        if (auto const* plain_date = as_if<PlainDate>(*object)) {
             // i. Let resolvedOptions be ? GetOptionsObject(options).
             auto resolved_options = TRY(get_options_object(vm, options));
 
@@ -86,15 +82,13 @@ ThrowCompletionOr<GC::Ref<PlainDate>> to_temporal_date(VM& vm, Value item, Value
             TRY(get_temporal_overflow_option(vm, resolved_options));
 
             // iii. Return ! CreateTemporalDate(item.[[ISODate]], item.[[Calendar]]).
-            return MUST(create_temporal_date(vm, plain_date.iso_date(), plain_date.calendar()));
+            return MUST(create_temporal_date(vm, plain_date->iso_date(), plain_date->calendar()));
         }
 
         // b. If item has an [[InitializedTemporalZonedDateTime]] internal slot, then
-        if (is<ZonedDateTime>(object)) {
-            auto const& zoned_date_time = static_cast<ZonedDateTime const&>(object);
-
+        if (auto const* zoned_date_time = as_if<ZonedDateTime>(*object)) {
             // i. Let isoDateTime be GetISODateTimeFor(item.[[TimeZone]], item.[[EpochNanoseconds]]).
-            auto iso_date_time = get_iso_date_time_for(zoned_date_time.time_zone(), zoned_date_time.epoch_nanoseconds()->big_integer());
+            auto iso_date_time = get_iso_date_time_for(zoned_date_time->time_zone(), zoned_date_time->epoch_nanoseconds()->big_integer());
 
             // ii. Let resolvedOptions be ? GetOptionsObject(options).
             auto resolved_options = TRY(get_options_object(vm, options));
@@ -103,13 +97,11 @@ ThrowCompletionOr<GC::Ref<PlainDate>> to_temporal_date(VM& vm, Value item, Value
             TRY(get_temporal_overflow_option(vm, resolved_options));
 
             // iv. Return ! CreateTemporalDate(isoDateTime.[[ISODate]], item.[[Calendar]]).
-            return MUST(create_temporal_date(vm, iso_date_time.iso_date, zoned_date_time.calendar()));
+            return MUST(create_temporal_date(vm, iso_date_time.iso_date, zoned_date_time->calendar()));
         }
 
         // c. If item has an [[InitializedTemporalDateTime]] internal slot, then
-        if (is<PlainDateTime>(object)) {
-            auto const& plain_date_time = static_cast<PlainDateTime const&>(object);
-
+        if (auto const* plain_date_time = as_if<PlainDateTime>(*object)) {
             // i. Let resolvedOptions be ? GetOptionsObject(options).
             auto resolved_options = TRY(get_options_object(vm, options));
 
@@ -117,14 +109,14 @@ ThrowCompletionOr<GC::Ref<PlainDate>> to_temporal_date(VM& vm, Value item, Value
             TRY(get_temporal_overflow_option(vm, resolved_options));
 
             // iii. Return ! CreateTemporalDate(item.[[ISODateTime]].[[ISODate]], item.[[Calendar]]).
-            return MUST(create_temporal_date(vm, plain_date_time.iso_date_time().iso_date, plain_date_time.calendar()));
+            return MUST(create_temporal_date(vm, plain_date_time->iso_date_time().iso_date, plain_date_time->calendar()));
         }
 
         // d. Let calendar be ? GetTemporalCalendarIdentifierWithISODefault(item).
-        auto calendar = TRY(get_temporal_calendar_identifier_with_iso_default(vm, object));
+        auto calendar = TRY(get_temporal_calendar_identifier_with_iso_default(vm, *object));
 
         // e. Let fields be ? PrepareCalendarFields(calendar, item, « YEAR, MONTH, MONTH-CODE, DAY », «», «»).
-        auto fields = TRY(prepare_calendar_fields(vm, calendar, object, { { CalendarField::Year, CalendarField::Month, CalendarField::MonthCode, CalendarField::Day } }, {}, CalendarFieldList {}));
+        auto fields = TRY(prepare_calendar_fields(vm, calendar, *object, { { CalendarField::Year, CalendarField::Month, CalendarField::MonthCode, CalendarField::Day } }, {}, CalendarFieldList {}));
 
         // f. Let resolvedOptions be ? GetOptionsObject(options).
         auto resolved_options = TRY(get_options_object(vm, options));
@@ -297,23 +289,15 @@ bool is_valid_iso_date(double year, double month, double day)
     if (!AK::is_within_range<i32>(year) || !AK::is_within_range<u8>(month) || !AK::is_within_range<u8>(day))
         return false;
 
-    // 1. If month < 1 or month > 12, then
-    if (month < 1 || month > 12) {
-        // a. Return false.
+    // 1. If month < 1 or month > 12, return false.
+    if (month < 1 || month > 12)
         return false;
-    }
 
     // 2. Let daysInMonth be ISODaysInMonth(year, month).
     auto days_in_month = iso_days_in_month(year, month);
 
-    // 3. If day < 1 or day > daysInMonth, then
-    if (day < 1 || day > days_in_month) {
-        // a. Return false.
-        return false;
-    }
-
-    // 4. Return true.
-    return true;
+    // 3. If day < 1 or day > daysInMonth, return false; else return true.
+    return day >= 1 && day <= days_in_month;
 }
 
 // 3.5.8 AddDaysToISODate ( isoDate, days ), https://tc39.es/proposal-temporal/#sec-temporal-adddaystoisodate
@@ -332,13 +316,11 @@ ISODate add_days_to_iso_date(ISODate iso_date, double days)
 // 3.5.9 PadISOYear ( y ), https://tc39.es/proposal-temporal/#sec-temporal-padisoyear
 String pad_iso_year(i32 year)
 {
-    // 1. If y ≥ 0 and y ≤ 9999, then
-    if (year >= 0 && year <= 9999) {
-        // a. Return ToZeroPaddedDecimalString(y, 4).
+    // 1. If y ≥ 0 and y ≤ 9999, return ToZeroPaddedDecimalString(y, 4).
+    if (year >= 0 && year <= 9999)
         return MUST(String::formatted("{:04}", year));
-    }
 
-    // 2. If y > 0, let yearSign be "+"; otherwise, let yearSign be "-".
+    // 2. If y > 0, let yearSign be "+"; else, let yearSign be "-".
     auto year_sign = year > 0 ? '+' : '-';
 
     // 3. Let year be ToZeroPaddedDecimalString(abs(y), 6).

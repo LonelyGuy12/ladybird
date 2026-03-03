@@ -8,6 +8,7 @@
 
 #include <LibWeb/Bindings/BaseAudioContextPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
@@ -165,7 +166,8 @@ WebIDL::ExceptionOr<GC::Ref<PeriodicWave>> BaseAudioContext::create_periodic_wav
 
 // https://webaudio.github.io/web-audio-api/#dom-baseaudiocontext-createscriptprocessor
 WebIDL::ExceptionOr<GC::Ref<ScriptProcessorNode>> BaseAudioContext::create_script_processor(
-    WebIDL::UnsignedLong buffer_size, WebIDL::UnsignedLong number_of_input_channels,
+    WebIDL::UnsignedLong buffer_size,
+    WebIDL::UnsignedLong number_of_input_channels,
     WebIDL::UnsignedLong number_of_output_channels)
 {
     // The bufferSize parameter determines the buffer size in units of sample-frames. If it’s not passed in, or if the

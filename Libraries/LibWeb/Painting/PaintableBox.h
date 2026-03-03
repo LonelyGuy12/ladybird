@@ -70,8 +70,9 @@ public:
     };
 
     CSSPixelPoint scroll_offset() const;
-    [[nodiscard]] ScrollHandled set_scroll_offset(CSSPixelPoint);
-    [[nodiscard]] ScrollHandled scroll_by(int delta_x, int delta_y);
+    ScrollHandled set_scroll_offset(CSSPixelPoint);
+    ScrollHandled scroll_by(int delta_x, int delta_y);
+    void scroll_into_view(CSSPixelRect);
 
     void set_offset(CSSPixelPoint);
     void set_offset(float x, float y) { set_offset({ x, y }); }
@@ -128,6 +129,9 @@ public:
             || computed_values.translate()
             || computed_values.scale();
     }
+
+    [[nodiscard]] bool has_non_invertible_css_transform() const { return m_has_non_invertible_css_transform; }
+    void set_has_non_invertible_css_transform(bool value) { m_has_non_invertible_css_transform = value; }
 
     [[nodiscard]] bool overflow_property_applies() const;
 
@@ -212,8 +216,6 @@ public:
 
     virtual bool wants_mouse_events() const override;
 
-    CSS::TransformStyle transform_style_used_value() const;
-
     CSSPixelRect transform_reference_box() const;
     virtual void resolve_paint_properties() override;
 
@@ -243,7 +245,6 @@ public:
 
     [[nodiscard]] RefPtr<ScrollFrame const> enclosing_scroll_frame() const { return m_enclosing_scroll_frame; }
     [[nodiscard]] Optional<int> scroll_frame_id() const;
-    [[nodiscard]] CSSPixelPoint cumulative_offset_of_enclosing_scroll_frame() const;
 
     [[nodiscard]] RefPtr<ScrollFrame const> own_scroll_frame() const { return m_own_scroll_frame; }
     [[nodiscard]] Optional<int> own_scroll_frame_id() const;
@@ -307,6 +308,8 @@ private:
     CSSPixelSize m_content_size;
 
     Optional<CSSPixelRect> mutable m_absolute_rect;
+    Optional<CSSPixelRect> mutable m_absolute_padding_box_rect;
+    Optional<CSSPixelRect> mutable m_absolute_border_box_rect;
 
     RefPtr<ScrollFrame const> m_enclosing_scroll_frame;
     RefPtr<ScrollFrame const> m_own_scroll_frame;
@@ -328,6 +331,7 @@ private:
     Optional<ScrollDirection> m_scroll_thumb_dragging_direction;
     mutable bool m_draw_enlarged_horizontal_scrollbar { false };
     mutable bool m_draw_enlarged_vertical_scrollbar { false };
+    bool m_has_non_invertible_css_transform { false };
 
     ResolvedBackground m_resolved_background;
 

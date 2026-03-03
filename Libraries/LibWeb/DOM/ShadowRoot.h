@@ -49,6 +49,9 @@ public:
     [[nodiscard]] bool is_user_agent_internal() const { return m_user_agent_internal; }
     void set_user_agent_internal(bool user_agent_internal) { m_user_agent_internal = user_agent_internal; }
 
+    [[nodiscard]] bool uses_document_style_sheets() const { return m_uses_document_style_sheets; }
+    void set_uses_document_style_sheets(bool value) { m_uses_document_style_sheets = value; }
+
     // ^EventTarget
     virtual EventTarget* get_parent(Event const&) override;
 
@@ -70,7 +73,7 @@ public:
     WebIDL::ExceptionOr<void> set_adopted_style_sheets(JS::Value);
 
     void for_each_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
-    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
+    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)> const& callback) const;
 
     WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> get_animations();
 
@@ -96,6 +99,8 @@ public:
 
     virtual void finalize() override;
 
+    GC::Ptr<Element> fullscreen_element_for_bindings() const;
+
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -115,6 +120,7 @@ private:
     bool m_delegates_focus { false };
     bool m_available_to_element_internals { false };
     bool m_user_agent_internal { false };
+    bool m_uses_document_style_sheets { false };
 
     // https://dom.spec.whatwg.org/#shadowroot-declarative
     bool m_declarative { false };

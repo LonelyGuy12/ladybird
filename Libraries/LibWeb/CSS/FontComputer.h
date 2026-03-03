@@ -24,17 +24,25 @@ namespace Web::CSS {
 
 struct FontFaceKey;
 
+struct FontWeightRange {
+    int min { 0 };
+    int max { 0 };
+    [[nodiscard]] u32 hash() const { return pair_int_hash(min, max); }
+    [[nodiscard]] bool operator==(FontWeightRange const&) const = default;
+    [[nodiscard]] bool contains_inclusive(int weight) const { return min <= weight && weight <= max; }
+};
+
 struct OwnFontFaceKey {
     explicit OwnFontFaceKey(FontFaceKey const& other);
 
     operator FontFaceKey() const;
 
-    [[nodiscard]] u32 hash() const { return pair_int_hash(family_name.hash(), pair_int_hash(weight, slope)); }
+    [[nodiscard]] u32 hash() const { return pair_int_hash(family_name.hash(), pair_int_hash(weight.hash(), slope)); }
     [[nodiscard]] bool operator==(OwnFontFaceKey const& other) const = default;
     [[nodiscard]] bool operator==(FontFaceKey const& other) const;
 
     FlyString family_name;
-    int weight { 0 };
+    FontWeightRange weight;
     int slope { 0 };
 };
 
@@ -66,6 +74,8 @@ public:
     void start_loading_next_url();
 
     bool is_loading() const;
+
+    FlyString family_name() const { return m_family_name; }
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -109,8 +119,6 @@ public:
     void unload_fonts_from_sheet(CSSStyleSheet&);
 
     NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
-
-    size_t number_of_css_font_faces_with_loading_in_progress() const;
 
 private:
     virtual void visit_edges(Visitor&) override;

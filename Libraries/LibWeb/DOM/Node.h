@@ -9,16 +9,16 @@
 #include <AK/DistinctNumeric.h>
 #include <AK/FlyString.h>
 #include <AK/GenericShorthands.h>
-#include <AK/JsonObjectSerializer.h>
 #include <AK/TypeCasts.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/InvalidationSet.h>
-#include <LibWeb/DOM/AccessibilityTreeNode.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/DOM/FragmentSerializationMode.h>
 #include <LibWeb/DOM/NodeType.h>
 #include <LibWeb/DOM/Slottable.h>
+#include <LibWeb/DOM/StyleInvalidationReason.h>
 #include <LibWeb/Export.h>
-#include <LibWeb/HTML/XMLSerializer.h>
+#include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/TraversalDecision.h>
 #include <LibWeb/TreeNode.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
@@ -34,11 +34,6 @@ struct GetRootNodeOptions {
     bool composed { false };
 };
 
-enum class FragmentSerializationMode {
-    Inner,
-    Outer,
-};
-
 enum class IsDescendant {
     No,
     Yes,
@@ -47,55 +42,6 @@ enum class IsDescendant {
 enum class ShouldComputeRole {
     No,
     Yes,
-};
-
-#define ENUMERATE_STYLE_INVALIDATION_REASONS(X)     \
-    X(AdoptedStyleSheetsList)                       \
-    X(BaseURLChanged)                               \
-    X(CSSFontLoaded)                                \
-    X(CSSImportRule)                                \
-    X(CSSStylePropertiesRemoveProperty)             \
-    X(CSSStylePropertiesSetProperty)                \
-    X(CSSStylePropertiesSetPropertyStyleValue)      \
-    X(CSSStylePropertiesTextChange)                 \
-    X(CustomElementStateChange)                     \
-    X(CustomStateSetChange)                         \
-    X(DidLoseFocus)                                 \
-    X(DidReceiveFocus)                              \
-    X(EditingInsertion)                             \
-    X(EditingDeletion)                              \
-    X(ElementAttributeChange)                       \
-    X(ElementSetShadowRoot)                         \
-    X(HTMLDialogElementSetIsModal)                  \
-    X(HTMLDetailsOrDialogOpenAttributeChange)       \
-    X(HTMLHyperlinkElementHrefChange)               \
-    X(HTMLIFrameElementGeometryChange)              \
-    X(HTMLInputElementSetChecked)                   \
-    X(HTMLInputElementSetIsOpen)                    \
-    X(HTMLInputElementSetType)                      \
-    X(HTMLObjectElementUpdateLayoutAndChildObjects) \
-    X(HTMLOptionElementSelectedChange)              \
-    X(HTMLSelectElementSetIsOpen)                   \
-    X(MediaListSetMediaText)                        \
-    X(MediaListAppendMedium)                        \
-    X(MediaListDeleteMedium)                        \
-    X(MediaQueryChangedMatchState)                  \
-    X(NavigableSetViewportSize)                     \
-    X(NodeInsertBefore)                             \
-    X(NodeRemove)                                   \
-    X(NodeSetTextContent)                           \
-    X(Other)                                        \
-    X(SetSelectorText)                              \
-    X(SettingsChange)                               \
-    X(StyleSheetDeleteRule)                         \
-    X(StyleSheetInsertRule)                         \
-    X(StyleSheetListAddSheet)                       \
-    X(StyleSheetListRemoveSheet)
-
-enum class StyleInvalidationReason {
-#define __ENUMERATE_STYLE_INVALIDATION_REASON(reason) reason,
-    ENUMERATE_STYLE_INVALIDATION_REASONS(__ENUMERATE_STYLE_INVALIDATION_REASON)
-#undef __ENUMERATE_STYLE_INVALIDATION_REASON
 };
 
 #define ENUMERATE_SET_NEEDS_LAYOUT_REASONS(X)         \
@@ -112,6 +58,7 @@ enum class StyleInvalidationReason {
     X(SVGGraphicsElementTransformChange)              \
     X(SVGImageElementFetchTheDocument)                \
     X(SVGImageFilterFetch)                            \
+    X(SVGViewBoxChange)                               \
     X(StyleChange)
 
 enum class SetNeedsLayoutReason {
@@ -124,6 +71,7 @@ enum class SetNeedsLayoutReason {
 
 #define ENUMERATE_SET_NEEDS_LAYOUT_TREE_UPDATE_REASONS(X) \
     X(ElementSetInnerHTML)                                \
+    X(ElementSetShadowRoot)                               \
     X(DetailsElementOpenedOrClosed)                       \
     X(HTMLInputElementSrcAttribute)                       \
     X(HTMLOListElementOrdinalValues)                      \
@@ -134,7 +82,6 @@ enum class SetNeedsLayoutReason {
     X(NodeRemove)                                         \
     X(NodeSetTextContent)                                 \
     X(None)                                               \
-    X(SVGViewBoxChange)                                   \
     X(StyleChange)
 
 enum class SetNeedsLayoutTreeUpdateReason {
@@ -203,6 +150,9 @@ public:
     bool is_editing_host() const;
     bool is_editable_or_editing_host() const { return is_editable() || is_editing_host(); }
     GC::Ptr<Node> editing_host();
+
+    bool in_editable_subtree() const { return m_in_editable_subtree; }
+    void recompute_editable_subtree_flag();
 
     virtual bool is_dom_node() const final { return true; }
     virtual bool is_html_element() const { return false; }
@@ -336,7 +286,7 @@ public:
     MUST_UPCALL virtual void inserted();
     virtual void post_connection();
     MUST_UPCALL virtual void removed_from(Node* old_parent, Node& old_root);
-    virtual void moved_from(GC::Ptr<Node> old_parent);
+    MUST_UPCALL virtual void moved_from(GC::Ptr<Node> old_parent);
 
     struct ChildrenChangedMetadata {
         enum class Type {
@@ -353,16 +303,28 @@ public:
     virtual void adopted_from(Document&) { }
     virtual WebIDL::ExceptionOr<void> cloned(Node&, bool) const { return {}; }
 
-    Layout::Node const* layout_node() const { return m_layout_node; }
-    Layout::Node* layout_node() { return m_layout_node; }
+    Layout::Node const* layout_node() const;
+    Layout::Node* layout_node();
+
+    Layout::Node const* unsafe_layout_node() const { return m_layout_node; }
+    Layout::Node* unsafe_layout_node() { return m_layout_node; }
 
     Painting::PaintableBox const* paintable_box() const;
     Painting::PaintableBox* paintable_box();
     Painting::Paintable const* paintable() const;
     Painting::Paintable* paintable();
 
+    Painting::PaintableBox const* unsafe_paintable_box() const;
+    Painting::PaintableBox* unsafe_paintable_box();
+    Painting::Paintable const* unsafe_paintable() const { return m_paintable; }
+    Painting::Paintable* unsafe_paintable() { return m_paintable; }
+
     void set_paintable(GC::Ptr<Painting::Paintable>);
     void clear_paintable();
+
+    void set_needs_display(InvalidateDisplayList = InvalidateDisplayList::Yes);
+    void set_needs_paint_only_properties_update();
+    void set_needs_layout_update(SetNeedsLayoutReason);
 
     void set_layout_node(Badge<Layout::Node>, GC::Ref<Layout::Node>);
     void detach_layout_node(Badge<Layout::TreeBuilder>);
@@ -386,9 +348,6 @@ public:
     void set_entire_subtree_needs_style_update(bool b) { m_entire_subtree_needs_style_update = b; }
 
     void invalidate_style(StyleInvalidationReason);
-    struct StyleInvalidationOptions {
-        bool invalidate_self { false };
-    };
     void invalidate_style(StyleInvalidationReason, Vector<CSS::InvalidationSet::Property> const&, StyleInvalidationOptions);
 
     void set_document(Badge<Document>, Document&);
@@ -522,6 +481,7 @@ protected:
     bool m_needs_style_update { false };
     bool m_child_needs_style_update { false };
     bool m_entire_subtree_needs_style_update { false };
+    bool m_in_editable_subtree { false };
 
     UniqueNodeID m_unique_id;
 

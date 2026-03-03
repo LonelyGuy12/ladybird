@@ -8,11 +8,10 @@
 
 #include <AK/Badge.h>
 #include <AK/Function.h>
-#include <AK/IntrusiveList.h>
 #include <AK/Noncopyable.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/StackInfo.h>
-#include <AK/Swift.h>
+#include <AK/String.h>
 #include <AK/Types.h>
 #include <AK/Vector.h>
 #include <LibCore/Forward.h>
@@ -21,7 +20,6 @@
 #include <LibGC/ConservativeVector.h>
 #include <LibGC/Forward.h>
 #include <LibGC/HeapRoot.h>
-#include <LibGC/Internals.h>
 #include <LibGC/Root.h>
 #include <LibGC/RootHashMap.h>
 #include <LibGC/RootVector.h>
@@ -29,6 +27,11 @@
 #include <LibGC/WeakContainer.h>
 
 namespace GC {
+
+struct StackFrameInfo {
+    String label;
+    size_t size_bytes { 0 };
+};
 
 class GC_API Heap {
     AK_MAKE_NONCOPYABLE(Heap);
@@ -90,7 +93,6 @@ private:
     friend class MarkingVisitor;
     friend class GraphConstructorVisitor;
     friend class DeferGC;
-    friend class ForeignCell;
 
     void defer_gc();
     void undefer_gc();
@@ -122,8 +124,8 @@ private:
     void will_allocate(size_t);
 
     void find_min_and_max_block_addresses(FlatPtr& min_address, FlatPtr& max_address);
-    void gather_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*>& all_live_heap_blocks);
-    void gather_conservative_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*> const& all_live_heap_blocks);
+    void gather_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*>& all_live_heap_blocks, Vector<StackFrameInfo>* out_stack_frames = nullptr);
+    void gather_conservative_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*> const& all_live_heap_blocks, Vector<StackFrameInfo>* out_stack_frames = nullptr);
     void gather_asan_fake_stack_roots(HashMap<FlatPtr, HeapRoot>&, FlatPtr, FlatPtr min_block_address, FlatPtr max_block_address);
     void mark_live_cells(HashMap<Cell*, HeapRoot> const& live_cells, HashTable<HeapBlock*> const& all_live_heap_blocks);
     void finalize_unmarked_cells();
@@ -179,7 +181,7 @@ private:
 
     WeakBlock::List m_usable_weak_blocks;
     WeakBlock::List m_full_weak_blocks;
-} SWIFT_IMMORTAL_REFERENCE;
+};
 
 inline void Heap::did_create_root(Badge<RootImpl>, RootImpl& impl)
 {

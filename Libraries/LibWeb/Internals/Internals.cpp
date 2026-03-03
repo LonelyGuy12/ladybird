@@ -9,6 +9,7 @@
 #include <LibGfx/Cursor.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/VM.h>
+#include <LibURL/Parser.h>
 #include <LibUnicode/TimeZone.h>
 #include <LibWeb/ARIA/AriaData.h>
 #include <LibWeb/ARIA/StateAndProperties.h>
@@ -20,7 +21,10 @@
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/DOM/NodeList.h>
 #include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Dump.h>
 #include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Window.h>
@@ -396,11 +400,6 @@ void Internals::simulate_drop(double x, double y)
     page.handle_drag_and_drop_event(DragEvent::Type::Drop, position, position, UIEvents::MouseButton::Primary, 0, 0, {});
 }
 
-void Internals::enable_cookies_on_file_domains()
-{
-    window().associated_document().enable_cookies_on_file_domains({});
-}
-
 void Internals::expire_cookies_with_time_offset(WebIDL::LongLong seconds)
 {
     page().client().page_did_expire_cookies_with_time_offset(AK::Duration::from_seconds(seconds));
@@ -463,6 +462,32 @@ String Internals::dump_display_list()
     return window().associated_document().dump_display_list();
 }
 
+String Internals::dump_layout_tree(GC::Ref<DOM::Node> node)
+{
+    node->document().update_layout(DOM::UpdateLayoutReason::Debugging);
+
+    auto* layout_node = node->layout_node();
+    if (!layout_node)
+        return "(no layout node)"_string;
+
+    StringBuilder builder;
+    Web::dump_tree(builder, *layout_node);
+    return builder.to_string_without_validation();
+}
+
+String Internals::dump_paintable_tree(GC::Ref<DOM::Node> node)
+{
+    node->document().update_layout(DOM::UpdateLayoutReason::Debugging);
+
+    auto* paintable = node->paintable();
+    if (!paintable)
+        return "(no paintable)"_string;
+
+    StringBuilder builder;
+    Web::dump_tree(builder, *paintable);
+    return builder.to_string_without_validation();
+}
+
 String Internals::dump_stacking_context_tree()
 {
     return window().associated_document().dump_stacking_context_tree();
@@ -508,6 +533,18 @@ void Internals::perform_per_test_cleanup()
 void Internals::set_highlighted_node(GC::Ptr<DOM::Node> node)
 {
     window().associated_document().set_highlighted_node(node, {});
+}
+
+void Internals::clear_element(HTML::HTMLElement& element)
+{
+    auto& form_associated_element = as<HTML::FormAssociatedElement>(element);
+    form_associated_element.clear_algorithm();
+}
+
+void Internals::set_environments_top_level_url(StringView url)
+{
+    auto& realm = *vm().current_realm();
+    HTML::principal_realm_settings_object(realm).top_level_creation_url = URL::Parser::basic_parse(url);
 }
 
 }

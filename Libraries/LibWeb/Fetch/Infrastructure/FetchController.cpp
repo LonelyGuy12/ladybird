@@ -34,9 +34,9 @@ void FetchController::visit_edges(JS::Cell::Visitor& visitor)
     visitor.visit(m_fetch_params);
 }
 
-void FetchController::set_pending_request(RefPtr<Requests::Request> request)
+void FetchController::set_pending_request(RefPtr<Requests::Request> const& request)
 {
-    m_pending_request = move(request);
+    m_pending_request = request;
 }
 
 void FetchController::set_report_timing_steps(Function<void(JS::Object&)> report_timing_steps)
@@ -134,6 +134,9 @@ void FetchController::terminate()
 
 void FetchController::stop_fetch()
 {
+    if (m_state == State::Aborted || m_state == State::Terminated)
+        return;
+
     m_state = State::Stopped;
 
     auto& vm = this->vm();

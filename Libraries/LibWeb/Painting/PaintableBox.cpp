@@ -10,10 +10,12 @@
 #include <AK/GenericShorthands.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/ImmutableBitmap.h>
+#include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/Layout/InlineNode.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BackgroundPainting.h>
 #include <LibWeb/Painting/ChromeMetrics.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
@@ -95,6 +97,8 @@ void PaintableBox::reset_for_relayout()
     m_sticky_insets = nullptr;
 
     m_absolute_rect.clear();
+    m_absolute_padding_box_rect.clear();
+    m_absolute_border_box_rect.clear();
 
     m_enclosing_scroll_frame = nullptr;
     m_own_scroll_frame = nullptr;
@@ -136,8 +140,6 @@ PaintableBox::ScrollHandled PaintableBox::set_scroll_offset(CSSPixelPoint offset
     if (!scrollable_overflow_rect.has_value())
         return ScrollHandled::No;
 
-    document().set_needs_to_refresh_scroll_state(true);
-
     auto padding_rect = absolute_padding_box_rect();
     auto max_x_offset = max(scrollable_overflow_rect->width() - padding_rect.width(), 0);
     auto max_y_offset = max(scrollable_overflow_rect->height() - padding_rect.height(), 0);
@@ -148,6 +150,15 @@ PaintableBox::ScrollHandled PaintableBox::set_scroll_offset(CSSPixelPoint offset
     // FIXME: If there is horizontal and vertical scroll ignore only part of the new offset
     if (offset.y() < 0 || scroll_offset() == offset)
         return ScrollHandled::No;
+
+    if (is_viewport_paintable()) {
+        auto navigable = document().navigable();
+        VERIFY(navigable);
+        navigable->perform_scroll_of_viewport_scrolling_box(offset);
+        return ScrollHandled::Yes;
+    }
+
+    document().set_needs_to_refresh_scroll_state(true);
 
     auto& node = layout_node();
     if (auto pseudo_element = node.generated_for_pseudo_element(); pseudo_element.has_value()) {
@@ -194,6 +205,28 @@ PaintableBox::ScrollHandled PaintableBox::scroll_by(int delta_x, int delta_y)
     return set_scroll_offset(scroll_offset().translated(delta_x, delta_y));
 }
 
+void PaintableBox::scroll_into_view(CSSPixelRect rect)
+{
+    auto scrollport = absolute_padding_box_rect();
+    auto current_offset = scroll_offset();
+
+    // Both rect and scrollport are in layout coordinate space (not scroll-adjusted).
+    auto content_rect = rect.translated(-scrollport.x(), -scrollport.y());
+    auto new_offset = current_offset;
+
+    if (content_rect.right() > current_offset.x() + scrollport.width())
+        new_offset.set_x(content_rect.right() - scrollport.width());
+    else if (content_rect.left() < current_offset.x())
+        new_offset.set_x(content_rect.left());
+
+    if (content_rect.bottom() > current_offset.y() + scrollport.height())
+        new_offset.set_y(content_rect.bottom() - scrollport.height());
+    else if (content_rect.top() < current_offset.y())
+        new_offset.set_y(content_rect.top());
+
+    set_scroll_offset(new_offset);
+}
+
 void PaintableBox::set_offset(CSSPixelPoint offset)
 {
     m_offset = offset;
@@ -228,13 +261,16 @@ CSSPixelRect PaintableBox::absolute_rect() const
 
 CSSPixelRect PaintableBox::absolute_padding_box_rect() const
 {
-    auto absolute_rect = this->absolute_rect();
-    CSSPixelRect rect;
-    rect.set_x(absolute_rect.x() - box_model().padding.left);
-    rect.set_width(content_width() + box_model().padding.left + box_model().padding.right);
-    rect.set_y(absolute_rect.y() - box_model().padding.top);
-    rect.set_height(content_height() + box_model().padding.top + box_model().padding.bottom);
-    return rect;
+    if (!m_absolute_padding_box_rect.has_value()) {
+        auto absolute_rect = this->absolute_rect();
+        CSSPixelRect rect;
+        rect.set_x(absolute_rect.x() - box_model().padding.left);
+        rect.set_width(content_width() + box_model().padding.left + box_model().padding.right);
+        rect.set_y(absolute_rect.y() - box_model().padding.top);
+        rect.set_height(content_height() + box_model().padding.top + box_model().padding.bottom);
+        m_absolute_padding_box_rect = rect;
+    }
+    return *m_absolute_padding_box_rect;
 }
 
 Optional<CSSPixelRect> PaintableBox::absolute_resizer_rect(ChromeMetrics const& metrics) const
@@ -249,26 +285,47 @@ Optional<CSSPixelRect> PaintableBox::absolute_resizer_rect(ChromeMetrics const& 
 
 CSSPixelRect PaintableBox::absolute_border_box_rect() const
 {
-    auto padded_rect = this->absolute_padding_box_rect();
-    CSSPixelRect rect;
-    auto use_collapsing_borders_model = override_borders_data().has_value();
-    // Implement the collapsing border model https://www.w3.org/TR/CSS22/tables.html#collapsing-borders.
-    auto border_top = use_collapsing_borders_model ? round(box_model().border.top / 2) : box_model().border.top;
-    auto border_bottom = use_collapsing_borders_model ? round(box_model().border.bottom / 2) : box_model().border.bottom;
-    auto border_left = use_collapsing_borders_model ? round(box_model().border.left / 2) : box_model().border.left;
-    auto border_right = use_collapsing_borders_model ? round(box_model().border.right / 2) : box_model().border.right;
-    rect.set_x(padded_rect.x() - border_left);
-    rect.set_width(padded_rect.width() + border_left + border_right);
-    rect.set_y(padded_rect.y() - border_top);
-    rect.set_height(padded_rect.height() + border_top + border_bottom);
-    return rect;
+    if (!m_absolute_border_box_rect.has_value()) {
+        auto padded_rect = this->absolute_padding_box_rect();
+        CSSPixelRect rect;
+        auto use_collapsing_borders_model = override_borders_data().has_value();
+        // Implement the collapsing border model https://www.w3.org/TR/CSS22/tables.html#collapsing-borders.
+        auto border_top = use_collapsing_borders_model ? round(box_model().border.top / 2) : box_model().border.top;
+        auto border_bottom = use_collapsing_borders_model ? round(box_model().border.bottom / 2) : box_model().border.bottom;
+        auto border_left = use_collapsing_borders_model ? round(box_model().border.left / 2) : box_model().border.left;
+        auto border_right = use_collapsing_borders_model ? round(box_model().border.right / 2) : box_model().border.right;
+        rect.set_x(padded_rect.x() - border_left);
+        rect.set_width(padded_rect.width() + border_left + border_right);
+        rect.set_y(padded_rect.y() - border_top);
+        rect.set_height(padded_rect.height() + border_top + border_bottom);
+        m_absolute_border_box_rect = rect;
+    }
+    return *m_absolute_border_box_rect;
 }
 
 // https://drafts.csswg.org/css-overflow-4/#overflow-clip-edge
 CSSPixelRect PaintableBox::overflow_clip_edge_rect() const
 {
-    // FIXME: Apply overflow-clip-margin-* properties
-    return absolute_padding_box_rect();
+    // https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin
+    // Values are defined as follows:
+    // '<visual-box>'
+    //     Specifies the box edge to use as the overflow clip edge origin, i.e. when the specified offset is zero.
+    //     If omitted, defaults to 'padding-box' on non-replaced elements, or 'content-box' on replaced elements.
+    // FIXME: We can't parse this yet so it's always omitted for now.
+    auto overflow_clip_edge = absolute_padding_box_rect();
+    if (layout_node().is_replaced_box()) {
+        overflow_clip_edge = absolute_rect();
+    }
+
+    // '<length [0,∞]>'
+    //     The specified offset dictates how much the overflow clip edge is expanded from the specified box edge
+    //     Negative values are invalid. Defaults to zero if omitted.
+    overflow_clip_edge.inflate(
+        computed_values().overflow_clip_margin().top().length().absolute_length_to_px(),
+        computed_values().overflow_clip_margin().right().length().absolute_length_to_px(),
+        computed_values().overflow_clip_margin().bottom().length().absolute_length_to_px(),
+        computed_values().overflow_clip_margin().left().length().absolute_length_to_px());
+    return overflow_clip_edge;
 }
 
 template<typename Callable>
@@ -362,6 +419,8 @@ bool PaintableBox::overflow_property_applies() const
     // Overflow properties apply to block containers, flex containers and grid containers.
     // FIXME: Ideally we would check whether overflow applies positively rather than listing exceptions. However,
     //        not all elements that should support overflow are currently identifiable that way.
+    if (is<SVGPaintable>(*this))
+        return false;
     auto const& display = computed_values().display();
     if (layout_node().is_inline_node())
         return false;
@@ -392,6 +451,9 @@ CSSPixels PaintableBox::available_scrollbar_length(ScrollDirection direction, Ch
 Optional<CSSPixelRect> PaintableBox::absolute_scrollbar_rect(ScrollDirection direction, bool with_gutter, ChromeMetrics const& metrics) const
 {
     if (!could_be_scrolled_by_wheel_event(direction))
+        return {};
+
+    if (computed_values().scrollbar_width() == CSS::ScrollbarWidth::None)
         return {};
 
     bool is_horizontal = direction == ScrollDirection::Horizontal;
@@ -471,10 +533,10 @@ Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(Scrol
         scrollbar_data.thumb_travel_to_scroll_ratio = (usable_scrollbar_length - thumb_length) / (scrollable_overflow_length - scrollport_size);
 
     if (scroll_state_snapshot) {
-        auto own_offset = scroll_state_snapshot->own_offset_for_frame_with_id(own_scroll_frame_id().value());
-        CSSPixels scroll_offset = is_horizontal ? -own_offset.x() : -own_offset.y();
-        CSSPixels thumb_offset = scroll_offset * scrollbar_data.thumb_travel_to_scroll_ratio;
-
+        auto own_offset = scroll_state_snapshot->device_offset_for_frame_with_id(own_scroll_frame_id().value());
+        auto device_scroll_offset = is_horizontal ? -own_offset.x() : -own_offset.y();
+        auto device_pixels_per_css_pixel = static_cast<float>(document().page().client().device_pixels_per_css_pixel());
+        CSSPixels thumb_offset = CSSPixels::nearest_value_for(device_scroll_offset / device_pixels_per_css_pixel) * scrollbar_data.thumb_travel_to_scroll_ratio;
         scrollbar_data.thumb_rect.translate_primary_offset_for_orientation(orientation, thumb_offset);
     }
 
@@ -547,7 +609,7 @@ void PaintableBox::paint(DisplayListRecordingContext& context, PaintPhase phase)
                     own_scroll_frame_id().value(),
                     context.rounded_device_rect(scrollbar_data->gutter_rect).to_type<int>(),
                     context.rounded_device_rect(scrollbar_data->thumb_rect).to_type<int>(),
-                    scrollbar_data->thumb_travel_to_scroll_ratio,
+                    scrollbar_data->thumb_travel_to_scroll_ratio.to_double(),
                     scrollbar_colors.thumb_color,
                     scrollbar_colors.track_color,
                     direction == ScrollDirection::Vertical);
@@ -659,7 +721,7 @@ void PaintableBox::paint_backdrop_filter(DisplayListRecordingContext& context) c
     auto border_radii_data = normalized_border_radii_data();
     ScopedCornerRadiusClip corner_clipper { context, backdrop_region, border_radii_data };
     if (auto resolved_backdrop_filter = to_gfx_filter(m_backdrop_filter, context.device_pixels_per_css_pixel()); resolved_backdrop_filter.has_value())
-        context.display_list_recorder().apply_backdrop_filter(backdrop_region.to_type<int>(), border_radii_data, *resolved_backdrop_filter);
+        context.display_list_recorder().apply_backdrop_filter(backdrop_region.to_type<int>(), border_radii_data.as_corners(context.device_pixel_converter()), *resolved_backdrop_filter);
 }
 
 void PaintableBox::paint_background(DisplayListRecordingContext& context) const
@@ -716,22 +778,17 @@ Optional<int> PaintableBox::scroll_frame_id() const
     return {};
 }
 
-CSSPixelPoint PaintableBox::cumulative_offset_of_enclosing_scroll_frame() const
-{
-    if (m_enclosing_scroll_frame)
-        return m_enclosing_scroll_frame->cumulative_offset();
-    return {};
-}
-
 CSSPixelPoint PaintableBox::transform_to_local_coordinates(CSSPixelPoint screen_position) const
 {
     if (!accumulated_visual_context())
         return screen_position;
 
-    auto const& viewport_paintable = *document().paintable();
-    auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
-    auto local_pos = accumulated_visual_context()->transform_point_for_hit_test(screen_position, scroll_state);
-    return local_pos.value_or(screen_position);
+    auto pixel_ratio = static_cast<float>(document().page().client().device_pixels_per_css_pixel());
+    auto const& scroll_state = document().paintable()->scroll_state_snapshot();
+    auto result = accumulated_visual_context()->transform_point_for_hit_test(screen_position.to_type<float>() * pixel_ratio, scroll_state);
+    if (!result.has_value())
+        return screen_position;
+    return (*result / pixel_ratio).to_type<CSSPixels>();
 }
 
 bool PaintableBox::has_resizer() const
@@ -888,13 +945,9 @@ void PaintableBox::scroll_to_mouse_position(CSSPixelPoint position, ChromeMetric
     auto scroll_position_in_pixels = CSSPixels::nearest_value_for(scroll_position * (scrollable_overflow_size - padding_size));
 
     // Set the new scroll offset.
-    auto new_scroll_offset = is_viewport_paintable() ? document().navigable()->viewport_scroll_offset() : scroll_offset();
+    auto new_scroll_offset = scroll_offset();
     new_scroll_offset.set_primary_offset_for_orientation(orientation, scroll_position_in_pixels);
-
-    if (is_viewport_paintable())
-        document().navigable()->perform_scroll_of_viewport_scrolling_box(new_scroll_offset);
-    else
-        (void)set_scroll_offset(new_scroll_offset);
+    set_scroll_offset(new_scroll_offset);
 }
 
 bool PaintableBox::handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigned, unsigned, int wheel_delta_x, int wheel_delta_y)
@@ -988,13 +1041,16 @@ TraversalDecision PaintableBox::hit_test(CSSPixelPoint position, HitTestType typ
     if (!is_visible || !visible_for_hit_testing())
         return TraversalDecision::Continue;
 
-    auto const& viewport_paintable = *document().paintable();
-    auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+    auto pixel_ratio = static_cast<float>(document().page().client().device_pixels_per_css_pixel());
+    auto const& scroll_state = document().paintable()->scroll_state_snapshot();
     Optional<CSSPixelPoint> local_position;
-    if (auto state = accumulated_visual_context())
-        local_position = state->transform_point_for_hit_test(position, scroll_state);
-    else
+    if (auto state = accumulated_visual_context()) {
+        auto result = state->transform_point_for_hit_test(position.to_type<float>() * pixel_ratio, scroll_state);
+        if (result.has_value())
+            local_position = (*result / pixel_ratio).to_type<CSSPixels>();
+    } else {
         local_position = position;
+    }
 
     if (!local_position.has_value())
         return TraversalDecision::Continue;
@@ -1220,17 +1276,14 @@ void PaintableBox::resolve_paint_properties()
         for (auto const& filter_operation : computed_filter.filters()) {
             filter_operation.visit(
                 [&](CSS::FilterOperation::Blur const& blur) {
-                    auto resolved_radius = blur.resolved_radius(layout_node_with_style_and_box_metrics());
+                    auto resolved_radius = blur.resolved_radius();
                     result.operations.empend(ResolvedCSSFilter::Blur {
                         .radius = CSSPixels::nearest_value_for(resolved_radius),
                     });
                 },
                 [&](CSS::FilterOperation::DropShadow const& drop_shadow) {
-                    CSS::CalculationResolutionContext resolution_context {
-                        .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(layout_node_with_style_and_box_metrics()),
-                    };
-                    auto to_css_px = [&](CSS::LengthOrCalculated const& length) {
-                        return CSSPixels::nearest_value_for(length.resolved(resolution_context).map([&](auto&& it) { return it.to_px(layout_node_with_style_and_box_metrics()).to_double(); }).value_or(0.0));
+                    auto to_css_px = [&](NonnullRefPtr<CSS::StyleValue const> const& length) {
+                        return CSS::Length::from_style_value(length, {}).absolute_length_to_px();
                     };
                     auto color_context = CSS::ColorResolutionContext::for_layout_node_with_style(layout_node_with_style_and_box_metrics());
                     auto resolved_color = drop_shadow.color
@@ -1240,7 +1293,7 @@ void PaintableBox::resolve_paint_properties()
                     result.operations.empend(ResolvedCSSFilter::DropShadow {
                         .offset_x = to_css_px(drop_shadow.offset_x),
                         .offset_y = to_css_px(drop_shadow.offset_y),
-                        .radius = drop_shadow.radius.has_value() ? to_css_px(*drop_shadow.radius) : CSSPixels(0),
+                        .radius = drop_shadow.radius ? to_css_px(*drop_shadow.radius) : CSSPixels(0),
                         .color = resolved_color,
                     });
                 },
@@ -1252,7 +1305,7 @@ void PaintableBox::resolve_paint_properties()
                 },
                 [&](CSS::FilterOperation::HueRotate const& hue_rotate) {
                     result.operations.empend(ResolvedCSSFilter::HueRotate {
-                        .angle_degrees = hue_rotate.angle_degrees(layout_node_with_style_and_box_metrics()),
+                        .angle_degrees = hue_rotate.angle_degrees(),
                     });
                 },
                 [&](CSS::URL const& css_url) {
@@ -1353,57 +1406,6 @@ static PhysicalResizeAxes compute_physical_resize_axes(CSS::ComputedValues const
                 || (computed.resize() == CSS::Resize::Inline && !horizontal_writing_mode)
                 || (computed.resize() == CSS::Resize::Block && horizontal_writing_mode))
     };
-}
-
-CSS::TransformStyle PaintableBox::transform_style_used_value() const
-{
-    // https://drafts.csswg.org/css-transforms-2/#transform-style-property
-    // Used value: flat if a grouping property is present, specified keyword otherwise
-    auto const& computed_values = this->computed_values();
-
-    // https://drafts.csswg.org/css-transforms-2/#grouping-property-values
-    // 'overflow': any value other than 'visible' or 'clip'.
-    if (!first_is_one_of(computed_values.overflow_x(), CSS::Overflow::Visible, CSS::Overflow::Clip) || !first_is_one_of(computed_values.overflow_y(), CSS::Overflow::Visible, CSS::Overflow::Clip))
-        return CSS::TransformStyle::Flat;
-
-    // 'opacity': any value less than 1.
-    if (computed_values.opacity() < 1)
-        return CSS::TransformStyle::Flat;
-
-    // 'filter': any value other than 'none'.
-    if (computed_values.filter().has_filters())
-        return CSS::TransformStyle::Flat;
-
-    // 'clip': any value other than 'auto'.
-    if (!computed_values.clip().is_auto())
-        return CSS::TransformStyle::Flat;
-
-    // 'clip-path': any value other than 'none'.
-    if (computed_values.clip_path().has_value())
-        return CSS::TransformStyle::Flat;
-
-    // 'isolation': used value of 'isolate'.
-    if (computed_values.isolation() == CSS::Isolation::Isolate)
-        return CSS::TransformStyle::Flat;
-
-    // 'mask-image': any value other than 'none'.
-    if (computed_values.mask_image())
-        return CSS::TransformStyle::Flat;
-
-    // 'mask-border-source': any value other than 'none'.
-    // FIXME: Implement this once we have 'mask-border-source'
-
-    // 'mix-blend-mode': any value other than 'normal'.
-    if (computed_values.mix_blend_mode() != CSS::MixBlendMode::Normal)
-        return CSS::TransformStyle::Flat;
-
-    // 'contain': 'paint' and any other property/value combination that causes paint containment. Note:
-    // this includes any property that affect the used value of the 'contain' property, such as 'content-
-    // visibility: hidden'.
-    if (layout_node().has_paint_containment())
-        return CSS::TransformStyle::Flat;
-
-    return computed_values.transform_style();
 }
 
 }

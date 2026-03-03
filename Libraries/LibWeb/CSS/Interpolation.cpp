@@ -21,6 +21,7 @@
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FontStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
@@ -151,39 +152,24 @@ static Optional<FilterValue> interpolate_filter_function(DOM::Element& element, 
 
             CalculationContext blur_calculation_context = calculation_context;
             blur_calculation_context.accepted_type_ranges.set(ValueType::Length, { 0, NumericLimits<float>::max() });
-            if (auto interpolated_style_value = interpolate_value(element, blur_calculation_context, from_value.radius.as_style_value(), to_value.radius.as_style_value(), delta, allow_discrete)) {
-                LengthOrCalculated interpolated_radius = interpolated_style_value->is_length() ? LengthOrCalculated { interpolated_style_value->as_length().length() } : LengthOrCalculated { interpolated_style_value->as_calculated() };
+            if (auto interpolated_style_value = interpolate_value(element, blur_calculation_context, from_value.radius, to_value.radius, delta, allow_discrete)) {
                 return FilterOperation::Blur {
-                    .radius = interpolated_radius
+                    .radius = interpolated_style_value.release_nonnull()
                 };
             }
             return {};
         },
         [&](FilterOperation::HueRotate const& from_value) -> Optional<FilterValue> {
             auto const& to_value = to.get<FilterOperation::HueRotate>();
-            auto const& from_style_value = from_value.angle.has<FilterOperation::HueRotate::Zero>() ? AngleStyleValue::create(Angle::make_degrees(0)) : from_value.angle.get<AngleOrCalculated>().as_style_value();
-            auto const& to_style_value = to_value.angle.has<FilterOperation::HueRotate::Zero>() ? AngleStyleValue::create(Angle::make_degrees(0)) : to_value.angle.get<AngleOrCalculated>().as_style_value();
-            if (auto interpolated_style_value = interpolate_value(element, calculation_context, from_style_value, to_style_value, delta, allow_discrete)) {
-                AngleOrCalculated interpolated_angle = interpolated_style_value->is_angle() ? AngleOrCalculated { interpolated_style_value->as_angle().angle() } : AngleOrCalculated { interpolated_style_value->as_calculated() };
+            if (auto interpolated_style_value = interpolate_value(element, calculation_context, from_value.angle, to_value.angle, delta, allow_discrete)) {
                 return FilterOperation::HueRotate {
-                    .angle = interpolated_angle,
+                    .angle = interpolated_style_value.release_nonnull(),
                 };
             }
             return {};
         },
         [&](FilterOperation::Color const& from_value) -> Optional<FilterValue> {
-            auto resolve_number_percentage = [](NumberPercentage const& amount) -> ValueComparingNonnullRefPtr<StyleValue const> {
-                if (amount.is_number())
-                    return NumberStyleValue::create(amount.number().value());
-                if (amount.is_percentage())
-                    return NumberStyleValue::create(amount.percentage().as_fraction());
-                if (amount.is_calculated())
-                    return amount.calculated();
-                VERIFY_NOT_REACHED();
-            };
             auto const& to_value = to.get<FilterOperation::Color>();
-            auto from_style_value = resolve_number_percentage(from_value.amount);
-            auto to_style_value = resolve_number_percentage(to_value.amount);
             auto operation = delta >= 0.5f ? to_value.operation : from_value.operation;
 
             CalculationContext filter_function_calculation_context = calculation_context;
@@ -201,23 +187,10 @@ static Optional<FilterValue> interpolate_filter_function(DOM::Element& element, 
                 break;
             }
 
-            if (auto interpolated_style_value = interpolate_value(element, filter_function_calculation_context, from_style_value, to_style_value, delta, allow_discrete)) {
-                auto to_number_percentage = [&](StyleValue const& style_value) -> NumberPercentage {
-                    if (style_value.is_number()) {
-                        return Number {
-                            Number::Type::Number,
-                            style_value.as_number().number(),
-                        };
-                    }
-                    if (style_value.is_percentage())
-                        return Percentage { style_value.as_percentage().percentage() };
-                    if (style_value.is_calculated())
-                        return NumberPercentage { style_value.as_calculated() };
-                    VERIFY_NOT_REACHED();
-                };
+            if (auto interpolated_style_value = interpolate_value(element, filter_function_calculation_context, from_value.amount, to_value.amount, delta, allow_discrete)) {
                 return FilterOperation::Color {
                     .operation = operation,
-                    .amount = to_number_percentage(*interpolated_style_value)
+                    .amount = *interpolated_style_value
                 };
             }
             return {};
@@ -229,9 +202,9 @@ static Optional<FilterValue> interpolate_filter_function(DOM::Element& element, 
                 return ShadowStyleValue::create(
                     ShadowStyleValue::ShadowType::Normal,
                     drop_shadow.color,
-                    drop_shadow.offset_x.as_style_value(),
-                    drop_shadow.offset_y.as_style_value(),
-                    drop_shadow.radius.has_value() ? drop_shadow.radius->as_style_value() : LengthStyleValue::create(Length::make_px(0)),
+                    drop_shadow.offset_x,
+                    drop_shadow.offset_y,
+                    drop_shadow.radius,
                     LengthStyleValue::create(Length::make_px(0)),
                     ShadowPlacement::Outer);
             };
@@ -247,21 +220,16 @@ static Optional<FilterValue> interpolate_filter_function(DOM::Element& element, 
 
             auto const& result_shadow = result->as_value_list().value_at(0, false)->as_shadow();
 
-            auto to_length_or_calculated = [](StyleValue const& style_value) -> LengthOrCalculated {
-                if (style_value.is_length())
-                    return LengthOrCalculated { style_value.as_length().length() };
-                return LengthOrCalculated { style_value.as_calculated() };
-            };
-
-            Optional<LengthOrCalculated> result_radius;
-            auto radius_has_value = delta >= 0.5f ? to_value.radius.has_value() : from_value.radius.has_value();
+            RefPtr<StyleValue const> result_radius;
+            auto radius_has_value = delta >= 0.5f ? to_value.radius : from_value.radius;
             if (radius_has_value)
-                result_radius = to_length_or_calculated(result_shadow.blur_radius());
+                result_radius = result_shadow.blur_radius();
 
             return FilterOperation::DropShadow {
-                .offset_x = to_length_or_calculated(result_shadow.offset_x()),
-                .offset_y = to_length_or_calculated(result_shadow.offset_y()),
+                .offset_x = result_shadow.offset_x(),
+                .offset_y = result_shadow.offset_y(),
                 .radius = result_radius,
+                // FIXME: We shouldn't apply the default color here
                 .color = result_shadow.color()
             };
         },
@@ -284,17 +252,17 @@ static RefPtr<StyleValue const> interpolate_filter_value_list(DOM::Element& elem
     };
 
     auto initial_value_for = [&](FilterValue value) {
-        return value.visit([&](FilterOperation::Blur const&) -> FilterValue { return FilterOperation::Blur {}; },
+        return value.visit([&](FilterOperation::Blur const&) -> FilterValue { return FilterOperation::Blur { LengthStyleValue::create(Length::make_px(0)) }; },
             [&](FilterOperation::DropShadow const&) -> FilterValue {
                 return FilterOperation::DropShadow {
-                    .offset_x = Length::make_px(0),
-                    .offset_y = Length::make_px(0),
-                    .radius = Length::make_px(0),
+                    .offset_x = LengthStyleValue::create(Length::make_px(0)),
+                    .offset_y = LengthStyleValue::create(Length::make_px(0)),
+                    .radius = LengthStyleValue::create(Length::make_px(0)),
                     .color = ColorStyleValue::create_from_color(Color::Transparent, ColorSyntax::Legacy)
                 };
             },
             [&](FilterOperation::HueRotate const&) -> FilterValue {
-                return FilterOperation::HueRotate {};
+                return FilterOperation::HueRotate { AngleStyleValue::create(Angle::make_degrees(0)) };
             },
             [&](FilterOperation::Color const& color) -> FilterValue {
                 auto default_value_for_interpolation = [&]() {
@@ -311,7 +279,7 @@ static RefPtr<StyleValue const> interpolate_filter_value_list(DOM::Element& elem
                     }
                     VERIFY_NOT_REACHED();
                 }();
-                return FilterOperation::Color { .operation = color.operation, .amount = NumberPercentage { Number { Number::Type::Integer, default_value_for_interpolation } } };
+                return FilterOperation::Color { .operation = color.operation, .amount = NumberStyleValue::create(default_value_for_interpolation) };
             },
             [&](auto&) -> FilterValue {
                 VERIFY_NOT_REACHED();
@@ -1232,8 +1200,9 @@ RefPtr<StyleValue const> interpolate_transform(DOM::Element& element, Calculatio
             break;
         default:
             generic_function = TransformFunction::Matrix3d;
+            // NB: Called during animation interpolation.
             auto paintable_box = [&] -> Optional<Painting::PaintableBox const&> {
-                if (auto* box = element.paintable_box())
+                if (auto* box = element.unsafe_paintable_box())
                     return *box;
                 return {};
             }();
@@ -1334,8 +1303,9 @@ RefPtr<StyleValue const> interpolate_transform(DOM::Element& element, Calculatio
     //     transform functions in each of Va and Vb respectively to produce two 4x4 matrices. Interpolate these two
     //     matrices as described in § 11 Interpolation of Matrices, append the result to Vresult, and cease
     //     iterating over Va and Vb.
+    // NB: Called during animation interpolation.
     Optional<Painting::PaintableBox const&> paintable_box;
-    if (auto* paintable = as_if<Painting::PaintableBox>(element.paintable()))
+    if (auto* paintable = as_if<Painting::PaintableBox>(element.unsafe_paintable()))
         paintable_box = *paintable;
 
     auto post_multiply_remaining_transformations = [&paintable_box](size_t start_index, Vector<NonnullRefPtr<TransformationStyleValue const>> const& transformations) {
@@ -1377,33 +1347,39 @@ Color interpolate_color(Color from, Color to, float delta, ColorSyntax syntax)
     // rgb(), hsl() or hwb() and the equivalent alpha-including forms) in gamma-encoded sRGB space.  This provides
     // Web compatibility; legacy sRGB content interpolates in the sRGB space by default.
 
-    Color result;
+    auto from_alpha = from.alpha() / 255.0f;
+    auto to_alpha = to.alpha() / 255.0f;
+    auto interpolated_alpha = interpolate_raw(from_alpha, to_alpha, delta);
+
+    auto clamped_alpha = clamp(interpolated_alpha, 0.0f, 1.0f);
+    if (clamped_alpha == 0)
+        return Color::Transparent;
+
+    // 5. changing the color components to premultiplied form
+    // 6. linearly interpolating each component of the computed value of the color separately
+    // 7. undoing premultiplication
     if (syntax == ColorSyntax::Modern) {
-        // 5. changing the color components to premultiplied form
         auto from_oklab = from.to_premultiplied_oklab();
         auto to_oklab = to.to_premultiplied_oklab();
-
-        // 6. linearly interpolating each component of the computed value of the color separately
-        // 7. undoing premultiplication
-        auto from_alpha = from.alpha() / 255.0f;
-        auto to_alpha = to.alpha() / 255.0f;
-        auto interpolated_alpha = interpolate_raw(from_alpha, to_alpha, delta);
-
-        result = Color::from_oklab(
-            interpolate_raw(from_oklab.L, to_oklab.L, delta) / interpolated_alpha,
-            interpolate_raw(from_oklab.a, to_oklab.a, delta) / interpolated_alpha,
-            interpolate_raw(from_oklab.b, to_oklab.b, delta) / interpolated_alpha,
-            interpolated_alpha);
-    } else {
-        result = Color {
-            interpolate_raw(from.red(), to.red(), delta),
-            interpolate_raw(from.green(), to.green(), delta),
-            interpolate_raw(from.blue(), to.blue(), delta),
-            interpolate_raw(from.alpha(), to.alpha(), delta)
-        };
+        return Color::from_oklab(
+            interpolate_raw(from_oklab.L, to_oklab.L, delta) / clamped_alpha,
+            interpolate_raw(from_oklab.a, to_oklab.a, delta) / clamped_alpha,
+            interpolate_raw(from_oklab.b, to_oklab.b, delta) / clamped_alpha,
+            clamped_alpha);
     }
 
-    return result;
+    auto premultiply_interpolate_unpremultiply = [&](u8 from_channel, u8 to_channel) -> u8 {
+        auto pre_from = from_channel * from_alpha;
+        auto pre_to = to_channel * to_alpha;
+        auto interpolated = interpolate_raw(pre_from, pre_to, delta);
+        return clamp(lroundf(interpolated / clamped_alpha), 0L, 255L);
+    };
+    return Color {
+        premultiply_interpolate_unpremultiply(from.red(), to.red()),
+        premultiply_interpolate_unpremultiply(from.green(), to.green()),
+        premultiply_interpolate_unpremultiply(from.blue(), to.blue()),
+        static_cast<u8>(lroundf(clamped_alpha * 255.0f)),
+    };
 }
 
 RefPtr<StyleValue const> interpolate_box_shadow(DOM::Element& element, CalculationContext const& calculation_context, StyleValue const& from, StyleValue const& to, float delta, AllowDiscrete allow_discrete)
@@ -1444,9 +1420,10 @@ RefPtr<StyleValue const> interpolate_box_shadow(DOM::Element& element, Calculati
     StyleValueVector result_shadows;
     result_shadows.ensure_capacity(from_shadows.size());
 
+    // NB: Called during style interpolation.
     ColorResolutionContext color_resolution_context {};
-    if (auto node = element.layout_node()) {
-        color_resolution_context = ColorResolutionContext::for_layout_node_with_style(*element.layout_node());
+    if (auto node = element.unsafe_layout_node()) {
+        color_resolution_context = ColorResolutionContext::for_layout_node_with_style(*element.unsafe_layout_node());
     }
 
     for (size_t i = 0; i < from_shadows.size(); i++) {
@@ -1489,52 +1466,53 @@ RefPtr<StyleValue const> interpolate_box_shadow(DOM::Element& element, Calculati
     return StyleValueList::create(move(result_shadows), StyleValueList::Separator::Comma);
 }
 
+static Optional<ValueType> get_value_type_of_numeric_style_value(StyleValue const& value, CalculationContext const& calculation_context)
+{
+    switch (value.type()) {
+    case StyleValue::Type::Angle:
+        return ValueType::Angle;
+    case StyleValue::Type::Frequency:
+        return ValueType::Frequency;
+    case StyleValue::Type::Integer:
+        return ValueType::Integer;
+    case StyleValue::Type::Length:
+        return ValueType::Length;
+    case StyleValue::Type::Number:
+        return ValueType::Number;
+    case StyleValue::Type::Percentage:
+        return calculation_context.percentages_resolve_as.value_or(ValueType::Percentage);
+    case StyleValue::Type::Resolution:
+        return ValueType::Resolution;
+    case StyleValue::Type::Time:
+        return ValueType::Time;
+    case StyleValue::Type::Calculated: {
+        auto const& calculated = value.as_calculated();
+        if (calculated.resolves_to_angle_percentage())
+            return ValueType::Angle;
+        if (calculated.resolves_to_frequency_percentage())
+            return ValueType::Frequency;
+        if (calculated.resolves_to_length_percentage())
+            return ValueType::Length;
+        if (calculated.resolves_to_resolution())
+            return ValueType::Resolution;
+        if (calculated.resolves_to_number())
+            return calculation_context.resolve_numbers_as_integers ? ValueType::Integer : ValueType::Number;
+        if (calculated.resolves_to_percentage())
+            return calculation_context.percentages_resolve_as.value_or(ValueType::Percentage);
+        if (calculated.resolves_to_time_percentage())
+            return ValueType::Time;
+
+        return {};
+    }
+    default:
+        return {};
+    }
+}
+
 static RefPtr<StyleValue const> interpolate_mixed_value(CalculationContext const& calculation_context, StyleValue const& from, StyleValue const& to, float delta)
 {
-    auto get_value_type_of_numeric_style_value = [&calculation_context](StyleValue const& value) -> Optional<ValueType> {
-        switch (value.type()) {
-        case StyleValue::Type::Angle:
-            return ValueType::Angle;
-        case StyleValue::Type::Frequency:
-            return ValueType::Frequency;
-        case StyleValue::Type::Integer:
-            return ValueType::Integer;
-        case StyleValue::Type::Length:
-            return ValueType::Length;
-        case StyleValue::Type::Number:
-            return ValueType::Number;
-        case StyleValue::Type::Percentage:
-            return calculation_context.percentages_resolve_as.value_or(ValueType::Percentage);
-        case StyleValue::Type::Resolution:
-            return ValueType::Resolution;
-        case StyleValue::Type::Time:
-            return ValueType::Time;
-        case StyleValue::Type::Calculated: {
-            auto const& calculated = value.as_calculated();
-            if (calculated.resolves_to_angle_percentage())
-                return ValueType::Angle;
-            if (calculated.resolves_to_frequency_percentage())
-                return ValueType::Frequency;
-            if (calculated.resolves_to_length_percentage())
-                return ValueType::Length;
-            if (calculated.resolves_to_resolution())
-                return ValueType::Resolution;
-            if (calculated.resolves_to_number())
-                return calculation_context.resolve_numbers_as_integers ? ValueType::Integer : ValueType::Number;
-            if (calculated.resolves_to_percentage())
-                return calculation_context.percentages_resolve_as.value_or(ValueType::Percentage);
-            if (calculated.resolves_to_time_percentage())
-                return ValueType::Time;
-
-            return {};
-        }
-        default:
-            return {};
-        }
-    };
-
-    auto from_value_type = get_value_type_of_numeric_style_value(from);
-    auto to_value_type = get_value_type_of_numeric_style_value(to);
+    auto from_value_type = get_value_type_of_numeric_style_value(from, calculation_context);
+    auto to_value_type = get_value_type_of_numeric_style_value(to, calculation_context);
 
     if (from_value_type.has_value() && from_value_type == to_value_type) {
         // https://drafts.csswg.org/css-values-4/#combine-mixed
@@ -1799,9 +1777,10 @@ static RefPtr<StyleValue const> interpolate_value_impl(DOM::Element& element, Ca
         return BorderRadiusRectStyleValue::create(interpolated_top_left.release_nonnull(), interpolated_top_right.release_nonnull(), interpolated_bottom_right.release_nonnull(), interpolated_bottom_left.release_nonnull());
     }
     case StyleValue::Type::Color: {
+        // NB: Called during style interpolation.
         ColorResolutionContext color_resolution_context {};
-        if (auto node = element.layout_node()) {
-            color_resolution_context = ColorResolutionContext::for_layout_node_with_style(*element.layout_node());
+        if (auto node = element.unsafe_layout_node()) {
+            color_resolution_context = ColorResolutionContext::for_layout_node_with_style(*element.unsafe_layout_node());
         }
 
         auto color_syntax = ColorSyntax::Legacy;
@@ -2155,17 +2134,17 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
 
     auto initial_value_for = [](FilterValue const& value) {
         return value.visit(
-            [&](FilterOperation::Blur const&) -> FilterValue { return FilterOperation::Blur {}; },
+            [&](FilterOperation::Blur const&) -> FilterValue { return FilterOperation::Blur { LengthStyleValue::create(Length::make_px(0)) }; },
             [&](FilterOperation::DropShadow const&) -> FilterValue {
                 return FilterOperation::DropShadow {
-                    .offset_x = Length::make_px(0),
-                    .offset_y = Length::make_px(0),
-                    .radius = Length::make_px(0),
+                    .offset_x = LengthStyleValue::create(Length::make_px(0)),
+                    .offset_y = LengthStyleValue::create(Length::make_px(0)),
+                    .radius = LengthStyleValue::create(Length::make_px(0)),
                     .color = nullptr
                 };
             },
             [&](FilterOperation::HueRotate const&) -> FilterValue {
-                return FilterOperation::HueRotate {};
+                return FilterOperation::HueRotate { AngleStyleValue::create(Angle::make_degrees(0)) };
             },
             [&](FilterOperation::Color const& color) -> FilterValue {
                 auto default_value_for_accumulation = [&]() {
@@ -2182,7 +2161,7 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
                     }
                     VERIFY_NOT_REACHED();
                 }();
-                return FilterOperation::Color { .operation = color.operation, .amount = NumberPercentage { Number { Number::Type::Integer, default_value_for_accumulation } } };
+                return FilterOperation::Color { .operation = color.operation, .amount = NumberStyleValue::create(default_value_for_accumulation) };
             },
             [&](auto&) -> FilterValue {
                 VERIFY_NOT_REACHED();
@@ -2195,33 +2174,15 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
                 if (!animated.has<FilterOperation::Blur>())
                     return {};
                 auto const& animated_blur = animated.get<FilterOperation::Blur>();
-                if (underlying_blur.radius.is_calculated() || animated_blur.radius.is_calculated())
-                    return {};
-                auto underlying_px = underlying_blur.radius.value().raw_value();
-                auto animated_px = animated_blur.radius.value().raw_value();
-                return FilterOperation::Blur { .radius = Length::make_px(underlying_px + animated_px) };
+
+                return FilterOperation::Blur { .radius = LengthStyleValue::create(Length::make_px(underlying_blur.resolved_radius() + animated_blur.resolved_radius())) };
             },
             [&](FilterOperation::HueRotate const& underlying_rotate) -> Optional<FilterValue> {
                 if (!animated.has<FilterOperation::HueRotate>())
                     return {};
                 auto const& animated_rotate = animated.get<FilterOperation::HueRotate>();
 
-                auto get_angle = [](FilterOperation::HueRotate::AngleOrZero const& angle_or_zero) -> Optional<double> {
-                    return angle_or_zero.visit(
-                        [](AngleOrCalculated const& angle) -> Optional<double> {
-                            if (angle.is_calculated())
-                                return {};
-                            return angle.value().raw_value();
-                        },
-                        [](FilterOperation::HueRotate::Zero) -> Optional<double> { return 0.0; });
-                };
-
-                auto underlying_angle = get_angle(underlying_rotate.angle);
-                auto animated_angle = get_angle(animated_rotate.angle);
-                if (!underlying_angle.has_value() || !animated_angle.has_value())
-                    return {};
-
-                return FilterOperation::HueRotate { .angle = AngleOrCalculated { Angle::make_degrees(*underlying_angle + *animated_angle) } };
+                return FilterOperation::HueRotate { .angle = AngleStyleValue::create(Angle::make_degrees(underlying_rotate.angle_degrees() + animated_rotate.angle_degrees())) };
             },
             [&](FilterOperation::Color const& underlying_color) -> Optional<FilterValue> {
                 if (!animated.has<FilterOperation::Color>())
@@ -2252,7 +2213,7 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
 
                 return FilterOperation::Color {
                     .operation = underlying_color.operation,
-                    .amount = NumberPercentage { Number { Number::Type::Number, accumulated } }
+                    .amount = NumberStyleValue::create(accumulated)
                 };
             },
             [&](FilterOperation::DropShadow const& underlying_shadow) -> Optional<FilterValue> {
@@ -2260,25 +2221,20 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
                     return {};
                 auto const& animated_shadow = animated.get<FilterOperation::DropShadow>();
 
-                auto add_lengths = [](LengthOrCalculated const& a, LengthOrCalculated const& b) -> Optional<LengthOrCalculated> {
-                    if (a.is_calculated() || b.is_calculated())
-                        return {};
-                    return LengthOrCalculated { Length::make_px(a.value().raw_value() + b.value().raw_value()) };
+                auto add_lengths = [](NonnullRefPtr<StyleValue const> const& a, NonnullRefPtr<StyleValue const> const& b) -> NonnullRefPtr<StyleValue const> {
+                    auto a_value = Length::from_style_value(a, {}).absolute_length_to_px_without_rounding();
+                    auto b_value = Length::from_style_value(b, {}).absolute_length_to_px_without_rounding();
+
+                    return LengthStyleValue::create(Length::make_px(a_value + b_value));
                 };
 
                 auto offset_x = add_lengths(underlying_shadow.offset_x, animated_shadow.offset_x);
                 auto offset_y = add_lengths(underlying_shadow.offset_y, animated_shadow.offset_y);
-                if (!offset_x.has_value() || !offset_y.has_value())
-                    return {};
-
-                Optional<LengthOrCalculated> accumulated_radius;
-                if (underlying_shadow.radius.has_value() || animated_shadow.radius.has_value()) {
-                    auto underlying_radius = underlying_shadow.radius.value_or(LengthOrCalculated { Length::make_px(0) });
-                    auto animated_radius = animated_shadow.radius.value_or(LengthOrCalculated { Length::make_px(0) });
-                    auto sum = add_lengths(underlying_radius, animated_radius);
-                    if (!sum.has_value())
-                        return {};
-                    accumulated_radius = sum.release_value();
+                RefPtr<StyleValue const> accumulated_radius;
+                if (underlying_shadow.radius || animated_shadow.radius) {
+                    auto underlying_radius = underlying_shadow.radius ? Length::from_style_value(*underlying_shadow.radius, {}).absolute_length_to_px_without_rounding() : 0;
+                    auto animated_radius = animated_shadow.radius ? Length::from_style_value(*animated_shadow.radius, {}).absolute_length_to_px_without_rounding() : 0;
+                    accumulated_radius = LengthStyleValue::create(Length::make_px(underlying_radius + animated_radius));
                 }
 
                 RefPtr<StyleValue const> accumulated_color = animated_shadow.color;
@@ -2297,8 +2253,8 @@ Vector<FilterValue> accumulate_filter_function(FilterValueListStyleValue const& 
                 }
 
                 return FilterOperation::DropShadow {
-                    .offset_x = offset_x.release_value(),
-                    .offset_y = offset_y.release_value(),
+                    .offset_x = offset_x,
+                    .offset_y = offset_y,
                     .radius = accumulated_radius,
                     .color = accumulated_color
                 };
@@ -2472,6 +2428,42 @@ static Optional<GridTrackSizeList> composite_grid_track_size_list(CalculationCon
     return result;
 }
 
+static RefPtr<StyleValue const> composite_mixed_value(StyleValue const& underlying_value, StyleValue const& animated_value, CalculationContext const& calculation_context)
+{
+    // https://drafts.csswg.org/css-values-4/#combine-mixed
+    // Addition of <percentage> is defined the same as interpolation except by adding each component rather than interpolating it.
+    auto underlying_value_type = get_value_type_of_numeric_style_value(underlying_value, calculation_context);
+    auto animated_value_type = get_value_type_of_numeric_style_value(animated_value, calculation_context);
+
+    if (underlying_value_type.has_value() && underlying_value_type == animated_value_type) {
+        // The computed value of a percentage-dimension mix is defined as
+        // FIXME: a computed dimension if the percentage component is zero or is defined specifically to compute to a dimension value
+        // a computed percentage if the dimension component is zero
+        // a computed calc() expression otherwise
+        if (auto const* from_dimension_value = as_if<DimensionStyleValue>(underlying_value); from_dimension_value && animated_value.type() == StyleValue::Type::Percentage) {
+            auto dimension_component = from_dimension_value->raw_value();
+            auto percentage_component = animated_value.as_percentage().raw_value();
+            if (dimension_component == 0.f)
+                return PercentageStyleValue::create(Percentage { percentage_component });
+        } else if (auto const* to_dimension_value = as_if<DimensionStyleValue>(animated_value); to_dimension_value && underlying_value.type() == StyleValue::Type::Percentage) {
+            auto dimension_component = to_dimension_value->raw_value();
+            auto percentage_component = underlying_value.as_percentage().raw_value();
+            if (dimension_component == 0)
+                return PercentageStyleValue::create(Percentage { percentage_component });
+        }
+
+        auto underlying_node = CalculationNode::from_style_value(underlying_value, calculation_context);
+        auto animated_node = CalculationNode::from_style_value(animated_value, calculation_context);
+
+        return CalculatedStyleValue::create(
+            simplify_a_calculation_tree(SumCalculationNode::create({ underlying_node, animated_node }), calculation_context, {}),
+            *underlying_node->numeric_type()->added_to(*animated_node->numeric_type()),
+            calculation_context);
+    }
+
+    return {};
+}
+
 RefPtr<StyleValue const> composite_value(PropertyID property_id, StyleValue const& underlying_value, StyleValue const& animated_value, Bindings::CompositeOperation composite_operation)
 {
     auto calculation_context = CalculationContext::for_property(PropertyNameAndID::from_id(property_id));
@@ -2485,9 +2477,8 @@ RefPtr<StyleValue const> composite_value(PropertyID property_id, StyleValue cons
     if (composite_operation == Bindings::CompositeOperation::Replace)
         return {};
 
-    // FIXME: Composite mixed values where possible
-    if (underlying_value.type() != animated_value.type())
-        return {};
+    if (underlying_value.type() != animated_value.type() || underlying_value.is_calculated() || animated_value.is_calculated())
+        return composite_mixed_value(underlying_value, animated_value, calculation_context);
 
     switch (underlying_value.type()) {
     case StyleValue::Type::Angle: {

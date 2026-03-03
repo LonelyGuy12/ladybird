@@ -21,6 +21,7 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/WindowExposedInterfaces.h>
 #include <LibWeb/Bindings/WindowPrototype.h>
+#include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/MediaQueryList.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Screen.h>
@@ -71,6 +72,7 @@
 #include <LibWeb/Speech/SpeechSynthesis.h>
 #include <LibWeb/StorageAPI/StorageBottle.h>
 #include <LibWeb/StorageAPI/StorageEndpoint.h>
+#include <LibWeb/ViewTransition/ViewTransition.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 
 namespace Web::HTML {
@@ -754,6 +756,11 @@ static bool s_internals_object_exposed = false;
 void Window::set_internals_object_exposed(bool exposed)
 {
     s_internals_object_exposed = exposed;
+}
+
+bool Window::is_internals_object_exposed()
+{
+    return s_internals_object_exposed;
 }
 
 WebIDL::ExceptionOr<void> Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
@@ -1967,8 +1974,8 @@ Window::NamedObjects Window::named_objects(StringView name)
         if (auto element_name = element->name(); element_name.has_value() && *element_name == name)
             objects.elements.append(*element);
     }
-    associated_document().element_by_id().for_each_element_with_id(name, [&](auto element) {
-        objects.elements.append(*element);
+    associated_document().element_by_id().for_each_element_with_id(name, associated_document(), [&](auto& element) {
+        objects.elements.append(element);
     });
 
     return objects;

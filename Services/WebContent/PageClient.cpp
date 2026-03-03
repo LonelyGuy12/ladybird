@@ -12,15 +12,18 @@
 #include <LibCore/Timer.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ShareableBitmap.h>
+#include <LibHTTP/Cookie/ParsedCookie.h>
 #include <LibJS/Console.h>
 #include <LibJS/Runtime/ConsoleObject.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/CSSImportRule.h>
-#include <LibWeb/Cookie/ParsedCookie.h>
+#include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/DOM/CharacterData.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/MutationType.h>
 #include <LibWeb/DOM/NodeList.h>
+#include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
@@ -203,26 +206,22 @@ void PageClient::report_finished_handling_input_event(u64 page_id, Web::EventRes
     client().async_did_finish_handling_input_event(page_id, event_was_handled);
 }
 
-void PageClient::set_viewport_size(Web::DevicePixelSize const& size)
+void PageClient::set_viewport(Web::DevicePixelSize const& size, double device_pixel_ratio)
 {
-    page().top_level_traversable()->set_viewport_size(page().device_to_css_size(size));
-}
+    auto invalidate = m_device_pixel_ratio != device_pixel_ratio
+        ? Web::InvalidateDisplayList::Yes
+        : Web::InvalidateDisplayList::No;
 
-void PageClient::set_device_pixel_ratio(double device_pixel_ratio)
-{
-    if (m_device_pixel_ratio == device_pixel_ratio)
-        return;
-
+    m_viewport_size = size;
     m_device_pixel_ratio = device_pixel_ratio;
 
-    auto traversable = page().top_level_traversable();
-    traversable->backing_store_manager()
-        .resize_backing_stores_if_needed(Web::Painting::BackingStoreManager::WindowResizingInProgress::No);
+    page().top_level_traversable()->set_viewport_size(page().device_to_css_size(size), invalidate);
+}
 
-    if (auto document = traversable->active_document()) {
-        document->set_needs_media_query_evaluation();
-        document->set_needs_display(Web::InvalidateDisplayList::Yes);
-    }
+void PageClient::set_zoom_level(double zoom_level)
+{
+    m_zoom_level = zoom_level;
+    page().top_level_traversable()->set_viewport_size(page().device_to_css_size(m_viewport_size), Web::InvalidateDisplayList::Yes);
 }
 
 void PageClient::set_maximum_frames_per_second(u64 maximum_frames_per_second)
@@ -286,6 +285,11 @@ void PageClient::page_did_request_minimize_window()
 void PageClient::page_did_request_fullscreen_window()
 {
     client().async_did_request_fullscreen_window(m_id);
+}
+
+void PageClient::page_did_request_exit_fullscreen()
+{
+    client().async_did_request_exit_fullscreen(m_id);
 }
 
 void PageClient::page_did_request_tooltip_override(Web::CSSPixelPoint position, ByteString const& title)
@@ -392,7 +396,7 @@ void PageClient::page_did_set_browser_zoom(double factor)
 
 void PageClient::page_did_set_device_pixel_ratio_for_testing(double ratio)
 {
-    set_device_pixel_ratio(ratio);
+    set_viewport(m_viewport_size, ratio);
 }
 
 void PageClient::page_did_request_context_menu(Web::CSSPixelPoint content_position)
@@ -535,22 +539,22 @@ void PageClient::page_did_receive_document_cookie_version_index(Web::UniqueNodeI
         document->set_cookie_version_index(document_index);
 }
 
-Vector<Web::Cookie::Cookie> PageClient::page_did_request_all_cookies_webdriver(URL::URL const& url)
+Vector<HTTP::Cookie::Cookie> PageClient::page_did_request_all_cookies_webdriver(URL::URL const& url)
 {
     return client().did_request_all_cookies_webdriver(url);
 }
 
-Vector<Web::Cookie::Cookie> PageClient::page_did_request_all_cookies_cookiestore(URL::URL const& url)
+Vector<HTTP::Cookie::Cookie> PageClient::page_did_request_all_cookies_cookiestore(URL::URL const& url)
 {
     return client().did_request_all_cookies_cookiestore(url);
 }
 
-Optional<Web::Cookie::Cookie> PageClient::page_did_request_named_cookie(URL::URL const& url, String const& name)
+Optional<HTTP::Cookie::Cookie> PageClient::page_did_request_named_cookie(URL::URL const& url, String const& name)
 {
     return client().did_request_named_cookie(url, name);
 }
 
-Web::Cookie::VersionedCookie PageClient::page_did_request_cookie(URL::URL const& url, Web::Cookie::Source source)
+HTTP::Cookie::VersionedCookie PageClient::page_did_request_cookie(URL::URL const& url, HTTP::Cookie::Source source)
 {
     auto response = client().send_sync_but_allow_failure<Messages::WebContentClient::DidRequestCookie>(m_id, url, source);
     if (!response) {
@@ -560,7 +564,7 @@ Web::Cookie::VersionedCookie PageClient::page_did_request_cookie(URL::URL const&
     return response->take_cookie();
 }
 
-void PageClient::page_did_set_cookie(URL::URL const& url, Web::Cookie::ParsedCookie const& cookie, Web::Cookie::Source source)
+void PageClient::page_did_set_cookie(URL::URL const& url, HTTP::Cookie::ParsedCookie const& cookie, HTTP::Cookie::Source source)
 {
     auto response = client().send_sync_but_allow_failure<Messages::WebContentClient::DidSetCookie>(url, cookie, source);
     if (!response) {
@@ -569,7 +573,7 @@ void PageClient::page_did_set_cookie(URL::URL const& url, Web::Cookie::ParsedCoo
     }
 }
 
-void PageClient::page_did_update_cookie(Web::Cookie::Cookie const& cookie)
+void PageClient::page_did_update_cookie(HTTP::Cookie::Cookie const& cookie)
 {
     client().async_did_update_cookie(cookie);
 

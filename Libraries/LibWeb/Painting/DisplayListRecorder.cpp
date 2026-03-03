@@ -44,11 +44,26 @@ void DisplayListRecorder::add_rounded_rect_clip(CornerRadii corner_radii, Gfx::I
     APPEND(AddRoundedRectClip { corner_radii, border_rect, corner_clip });
 }
 
-void DisplayListRecorder::add_mask(RefPtr<DisplayList> display_list, Gfx::IntRect rect, Gfx::MaskKind kind)
+void DisplayListRecorder::begin_masks(ReadonlySpan<MaskInfo> masks)
 {
-    if (rect.is_empty())
-        return;
-    APPEND(AddMask { move(display_list), rect, kind });
+    for (auto const& mask : masks) {
+        save();
+        add_clip_rect(mask.rect);
+        save_layer();
+    }
+}
+
+void DisplayListRecorder::end_masks(ReadonlySpan<MaskInfo> masks)
+{
+    for (size_t i = masks.size(); i-- > 0;) {
+        auto const& mask = masks[i];
+        auto mask_kind = mask.kind == Gfx::MaskKind::Luminance ? Optional<Gfx::MaskKind>(Gfx::MaskKind::Luminance) : Optional<Gfx::MaskKind> {};
+        apply_effects(1.0f, Gfx::CompositingAndBlendingOperator::DestinationIn, {}, mask_kind);
+        paint_nested_display_list(mask.display_list, mask.rect);
+        restore(); // DstIn layer
+        restore(); // content layer
+        restore(); // clip save
+    }
 }
 
 void DisplayListRecorder::fill_rect(Gfx::IntRect const& rect, Color color)
@@ -165,16 +180,11 @@ void DisplayListRecorder::draw_rect(Gfx::IntRect const& rect, Color color, bool 
         .rough = rough });
 }
 
-void DisplayListRecorder::draw_painting_surface(Gfx::IntRect const& dst_rect, NonnullRefPtr<Gfx::PaintingSurface> surface, Gfx::IntRect const& src_rect, Gfx::ScalingMode scaling_mode)
+void DisplayListRecorder::draw_external_content(Gfx::IntRect const& dst_rect, NonnullRefPtr<ExternalContentSource> source, Gfx::ScalingMode scaling_mode)
 {
     if (dst_rect.is_empty())
         return;
-    APPEND(DrawPaintingSurface {
-        .dst_rect = dst_rect,
-        .surface = surface,
-        .src_rect = src_rect,
-        .scaling_mode = scaling_mode,
-    });
+    APPEND(DrawExternalContent { .dst_rect = dst_rect, .source = move(source), .scaling_mode = scaling_mode });
 }
 
 void DisplayListRecorder::draw_scaled_immutable_bitmap(Gfx::IntRect const& dst_rect, Gfx::IntRect const& clip_rect, Gfx::ImmutableBitmap const& bitmap, Gfx::ScalingMode scaling_mode)
@@ -275,13 +285,13 @@ void DisplayListRecorder::restore()
     APPEND(Restore {});
 }
 
-void DisplayListRecorder::apply_backdrop_filter(Gfx::IntRect const& backdrop_region, BorderRadiiData const& border_radii_data, Gfx::Filter const& backdrop_filter)
+void DisplayListRecorder::apply_backdrop_filter(Gfx::IntRect const& backdrop_region, CornerRadii const& corner_radii, Gfx::Filter const& backdrop_filter)
 {
     if (backdrop_region.is_empty())
         return;
     APPEND(ApplyBackdropFilter {
         .backdrop_region = backdrop_region,
-        .border_radii_data = border_radii_data,
+        .corner_radii = corner_radii,
         .backdrop_filter = backdrop_filter,
     });
 }
@@ -339,7 +349,7 @@ void DisplayListRecorder::fill_rect_with_rounded_corners(Gfx::IntRect const& a_r
             { bottom_left_radius, bottom_left_radius } });
 }
 
-void DisplayListRecorder::paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, CSSPixelFraction scroll_size, Color thumb_color, Color track_color, bool vertical)
+void DisplayListRecorder::paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, double scroll_size, Color thumb_color, Color track_color, bool vertical)
 {
     APPEND(PaintScrollBar {
         .scroll_frame_id = scroll_frame_id,
@@ -351,9 +361,9 @@ void DisplayListRecorder::paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutt
         .vertical = vertical });
 }
 
-void DisplayListRecorder::apply_effects(float opacity, Gfx::CompositingAndBlendingOperator compositing_and_blending_operator, Optional<Gfx::Filter> filter)
+void DisplayListRecorder::apply_effects(float opacity, Gfx::CompositingAndBlendingOperator compositing_and_blending_operator, Optional<Gfx::Filter> filter, Optional<Gfx::MaskKind> mask_kind)
 {
-    APPEND(ApplyEffects { .opacity = opacity, .compositing_and_blending_operator = compositing_and_blending_operator, .filter = move(filter) });
+    APPEND(ApplyEffects { .opacity = opacity, .compositing_and_blending_operator = compositing_and_blending_operator, .filter = move(filter), .mask_kind = mask_kind });
 }
 
 }

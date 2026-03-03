@@ -52,14 +52,13 @@ public:
     virtual void report_finished_handling_input_event(u64 page_id, Web::EventResult event_was_handled) override;
 
     void set_palette_impl(Gfx::PaletteImpl&);
-    void set_viewport_size(Web::DevicePixelSize const&);
+    void set_viewport(Web::DevicePixelSize const&, double device_pixel_ratio);
     void set_screen_rects(Vector<Web::DevicePixelRect> const& rects, size_t main_screen_index)
     {
         m_all_screen_rects = rects;
         m_main_screen_index = main_screen_index;
     }
-    void set_device_pixel_ratio(double device_pixel_ratio);
-    void set_zoom_level(double zoom_level) { m_zoom_level = zoom_level; }
+    void set_zoom_level(double zoom_level);
     void set_maximum_frames_per_second(u64 maximum_frames_per_second);
     void set_preferred_color_scheme(Web::CSS::PreferredColorScheme);
     void set_preferred_contrast(Web::CSS::PreferredContrast);
@@ -129,6 +128,7 @@ private:
     virtual void page_did_request_maximize_window() override;
     virtual void page_did_request_minimize_window() override;
     virtual void page_did_request_fullscreen_window() override;
+    virtual void page_did_request_exit_fullscreen() override;
     virtual void page_did_request_tooltip_override(Web::CSSPixelPoint, ByteString const&) override;
     virtual void page_did_stop_tooltip_override() override;
     virtual void page_did_enter_tooltip_area(ByteString const&) override;
@@ -156,12 +156,12 @@ private:
     virtual void page_did_receive_document_cookie_version_buffer(Core::AnonymousBuffer document_cookie_version_buffer) override;
     virtual void page_did_request_document_cookie_version_index(Web::UniqueNodeID document_id, String const& domain) override;
     virtual void page_did_receive_document_cookie_version_index(Web::UniqueNodeID document_id, Core::SharedVersionIndex document_index) override;
-    virtual Vector<Web::Cookie::Cookie> page_did_request_all_cookies_webdriver(URL::URL const&) override;
-    virtual Vector<Web::Cookie::Cookie> page_did_request_all_cookies_cookiestore(URL::URL const&) override;
-    virtual Optional<Web::Cookie::Cookie> page_did_request_named_cookie(URL::URL const&, String const&) override;
-    virtual Web::Cookie::VersionedCookie page_did_request_cookie(URL::URL const&, Web::Cookie::Source) override;
-    virtual void page_did_set_cookie(URL::URL const&, Web::Cookie::ParsedCookie const&, Web::Cookie::Source) override;
-    virtual void page_did_update_cookie(Web::Cookie::Cookie const&) override;
+    virtual Vector<HTTP::Cookie::Cookie> page_did_request_all_cookies_webdriver(URL::URL const&) override;
+    virtual Vector<HTTP::Cookie::Cookie> page_did_request_all_cookies_cookiestore(URL::URL const&) override;
+    virtual Optional<HTTP::Cookie::Cookie> page_did_request_named_cookie(URL::URL const&, String const&) override;
+    virtual HTTP::Cookie::VersionedCookie page_did_request_cookie(URL::URL const&, HTTP::Cookie::Source) override;
+    virtual void page_did_set_cookie(URL::URL const&, HTTP::Cookie::ParsedCookie const&, HTTP::Cookie::Source) override;
+    virtual void page_did_update_cookie(HTTP::Cookie::Cookie const&) override;
     virtual void page_did_expire_cookies_with_time_offset(AK::Duration) override;
     virtual Optional<String> page_did_request_storage_item(Web::StorageAPI::StorageEndpointType storage_endpoint, String const& storage_key, String const& bottle_key) override;
     virtual WebView::StorageSetResult page_did_set_storage_item(Web::StorageAPI::StorageEndpointType storage_endpoint, String const& storage_key, String const& bottle_key, String const& value) override;
@@ -206,6 +206,7 @@ private:
     RefPtr<Gfx::PaletteImpl> m_palette_impl;
     Vector<Web::DevicePixelRect> m_all_screen_rects { Web::DevicePixelRect {} };
     size_t m_main_screen_index { 0 };
+    Web::DevicePixelSize m_viewport_size;
     double m_device_pixel_ratio { 1.0 };
     double m_zoom_level { 1.0 };
     double m_maximum_frames_per_second { 60.0 };

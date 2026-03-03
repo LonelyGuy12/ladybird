@@ -11,6 +11,7 @@
 #include <AK/StringBuilder.h>
 #include <LibRegex/RegexMatcher.h>
 #include <LibRegex/RegexParser.h>
+#include <LibUnicode/CharacterTypes.h>
 
 #if REGEX_DEBUG
 #    include <LibRegex/RegexDebug.h>
@@ -513,13 +514,6 @@ private:
     Node* m_last { nullptr };
 };
 
-struct SufficientlyUniformValueTraits : DefaultTraits<u64> {
-    static constexpr unsigned hash(u64 value)
-    {
-        return (value >> 32) ^ value;
-    }
-};
-
 template<class Parser>
 Matcher<Parser>::ExecuteResult Matcher<Parser>::execute(MatchInput const& input, MatchState& state, size_t& operations) const
 {
@@ -548,7 +542,7 @@ Matcher<Parser>::ExecuteResult Matcher<Parser>::execute(MatchInput const& input,
                 haystack = input_view.substring_view(state.string_position_in_code_units, needle_view.length_in_code_units());
 
             if (is_insensitive) {
-                if (!haystack.equals_ignoring_ascii_case(needle_view))
+                if (!Unicode::ranges_equal_ignoring_case(haystack, needle_view, input.view.unicode()))
                     return ExecuteResult::DidNotMatch;
             } else {
                 if (haystack != needle_view)
@@ -565,7 +559,7 @@ Matcher<Parser>::ExecuteResult Matcher<Parser>::execute(MatchInput const& input,
     }
 
     BumpAllocatedLinkedList<MatchState> states_to_try_next;
-    HashTable<u64, SufficientlyUniformValueTraits> seen_state_hashes;
+    HashTable<u64, IdentityHashTraits<u64>> seen_state_hashes;
 #if REGEX_DEBUG
     size_t recursion_level = 0;
 #endif
@@ -720,6 +714,6 @@ template<typename Parser>
 struct AK::Traits<regex::CacheKey<Parser>> : public AK::DefaultTraits<regex::CacheKey<Parser>> {
     static unsigned hash(regex::CacheKey<Parser> const& key)
     {
-        return pair_int_hash(key.pattern.hash(), int_hash(to_underlying(key.options.value())));
+        return pair_int_hash(key.pattern.hash(), to_underlying(key.options.value()));
     }
 };

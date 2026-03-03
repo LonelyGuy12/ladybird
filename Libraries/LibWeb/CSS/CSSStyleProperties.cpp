@@ -9,6 +9,7 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
+#include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
@@ -174,13 +175,12 @@ Optional<StyleProperty const&> CSSStyleProperties::custom_property(FlyString con
 
         element.document().update_style();
 
-        auto const* element_to_check = &element;
-        while (element_to_check) {
-            if (auto property = element_to_check->custom_properties(pseudo_element).get(custom_property_name); property.has_value())
-                return *property;
+        auto data = element.custom_property_data(pseudo_element);
+        if (!data)
+            return {};
 
-            element_to_check = element_to_check->parent_element();
-        }
+        if (auto const* property = data->get(custom_property_name))
+            return *property;
 
         return {};
     }
@@ -545,7 +545,11 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
         if (!abstract_element.element().is_connected())
             return {};
 
-        Layout::NodeWithStyle* layout_node = abstract_element.layout_node();
+        // NB: We grab the layout node before deciding whether update_layout() is needed.
+        //     For properties that don't need layout or a layout node (the else branch below),
+        //     we skip update_layout() entirely and use whatever layout node already exists.
+        //     For the other paths, we call update_layout() and re-fetch below.
+        Layout::NodeWithStyle* layout_node = abstract_element.unsafe_layout_node();
 
         // Determine what work is needed for this property:
         // 1. Properties that need layout computation (used values) - always run update_layout()
@@ -559,7 +563,7 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
             // always need update_layout() to ensure both style and layout tree are up to date.
             abstract_element.document().update_layout(DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty);
             layout_node = abstract_element.layout_node();
-        } else {
+        } else if (abstract_element.document().element_needs_style_update(abstract_element)) {
             // Just ensure styles are up to date.
             abstract_element.document().update_style();
         }
@@ -1348,7 +1352,6 @@ String CSSStyleProperties::serialize_a_css_value(Vector<StyleProperty> list) con
         return ShorthandStyleValue::create(shorthand_id, longhand_ids, longhand_values);
     };
 
-    // FIXME: Not all shorthands are represented by ShorthandStyleValue, we still need to add support for those that don't.
     return make_shorthand_value(shorthand.value())->to_string(SerializationMode::Normal);
 }
 

@@ -9,10 +9,12 @@
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Dump.h>
+#include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/BlockContainer.h>
 #include <LibWeb/Layout/BlockFormattingContext.h>
 #include <LibWeb/Layout/Box.h>
@@ -147,16 +149,7 @@ void BlockFormattingContext::parent_context_did_dimension_child_root_box()
         floating_box->used_values.set_content_x(float_containing_block_width - floating_box->offset_from_edge);
     }
 
-    if (m_layout_mode == LayoutMode::Normal) {
-        // We can also layout absolutely positioned boxes within this BFC.
-        for (auto& child : root().contained_abspos_children()) {
-            auto& box = as<Box>(*child);
-            auto& cb_state = m_state.get(*box.containing_block());
-            auto available_width = AvailableSize::make_definite(cb_state.content_width() + cb_state.padding_left + cb_state.padding_right);
-            auto available_height = AvailableSize::make_definite(cb_state.content_height() + cb_state.padding_top + cb_state.padding_bottom);
-            layout_absolutely_positioned_element(box, AvailableSpace(available_width, available_height));
-        }
-    }
+    layout_absolutely_positioned_children();
 }
 
 bool BlockFormattingContext::box_should_avoid_floats_because_it_establishes_fc(Box const& box)
@@ -616,7 +609,9 @@ void BlockFormattingContext::layout_inline_children(BlockContainer const& block_
         auto used_width_px = context.automatic_content_width();
         // https://www.w3.org/TR/css-sizing-3/#sizing-values
         // Percentages are resolved against the width/height, as appropriate, of the box’s containing block.
-        auto containing_block_width = m_state.get(*block_container.containing_block()).content_width();
+        CSSPixels containing_block_width = 0;
+        if (auto const* containing_block_used_values = m_state.try_get(*block_container.containing_block()))
+            containing_block_width = containing_block_used_values->content_width();
         auto available_width = AvailableSize::make_definite(containing_block_width);
         if (!should_treat_max_width_as_none(block_container, available_space.width)) {
             auto max_width_px = calculate_inner_width(block_container, available_width, block_container.computed_values().max_width());
@@ -715,19 +710,32 @@ CSSPixels BlockFormattingContext::compute_auto_height_for_block_level_element(Bo
             return marker_line_height;
     }
 
+    // AD-HOC: Contenteditable elements must have a minimum height (line-height) when empty, to remain clickable and
+    //         usable for text input, even though this is not specified.
+    //         See: https://github.com/w3c/editing/issues/70.
+    if (auto const* element = as_if<DOM::Element>(box.dom_node()); element && element->is_editing_host())
+        return box.computed_values().line_height();
+
     // 4. zero, otherwise
     return 0;
 }
 
 static CSSPixels containing_block_height_to_resolve_percentage_in_quirks_mode(Box const& box, LayoutState const& state)
 {
+    auto content_height_of = [&](NodeWithStyleAndBoxModelMetrics const& node) -> CSSPixels {
+        auto const* node_used_values = state.try_get(node);
+        if (!node_used_values)
+            return 0;
+        return node_used_values->content_height();
+    };
+
     // https://quirks.spec.whatwg.org/#the-percentage-height-calculation-quirk
     auto containing_block = box.containing_block();
     while (containing_block) {
         // 1. Let element be the nearest ancestor containing block of element, if there is one.
         //    Otherwise, return the initial containing block.
         if (containing_block->is_viewport()) {
-            return state.get(*containing_block).content_height();
+            return content_height_of(*containing_block);
         }
 
         // 2. If element has a computed value of the display property that is table-cell, then return a
@@ -739,13 +747,13 @@ static CSSPixels containing_block_height_to_resolve_percentage_in_quirks_mode(Bo
 
         // 3. If element has a computed value of the height property that is not auto, then return element.
         if (!containing_block->computed_values().height().is_auto()) {
-            return state.get(*containing_block).content_height();
+            return content_height_of(*containing_block);
         }
 
         // 4. If element has a computed value of the position property that is absolute, or if element is a
         //    not a block container or a table wrapper box, then return element.
         if (containing_block->is_absolutely_positioned() || !is<BlockContainer>(*containing_block) || is<TableWrapper>(*containing_block)) {
-            return state.get(*containing_block).content_height();
+            return content_height_of(*containing_block);
         }
 
         // 5. Jump to the first step.
@@ -756,14 +764,17 @@ static CSSPixels containing_block_height_to_resolve_percentage_in_quirks_mode(Bo
 
 void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContainer const& block_container, CSSPixels& bottom_of_lowest_margin_box, AvailableSpace const& available_space)
 {
-    auto& box_state = m_state.get_mutable(box);
-
     if (box.is_absolutely_positioned()) {
-        StaticPositionRect static_position;
-        static_position.rect = { { 0, m_y_offset_of_current_block_container.value() }, { 0, 0 } };
-        box_state.set_static_position_rect(static_position);
+        if (m_layout_mode == LayoutMode::Normal) {
+            auto& box_state = m_state.get_mutable(box);
+            StaticPositionRect static_position;
+            static_position.rect = { { 0, m_y_offset_of_current_block_container.value() }, { 0, 0 } };
+            box_state.set_static_position_rect(static_position);
+        }
         return;
     }
+
+    auto& box_state = m_state.get_mutable(box);
 
     // NOTE: ListItemMarkerBoxes are placed by their corresponding ListItemBox.
     if (is<ListItemMarkerBox>(box))
@@ -883,8 +894,10 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
         // For boxes with auto height but non-auto min-height, we need to determine if the content height is less than
         // min-height. If so, we run layout with min-height as the available height.
         if (should_treat_height_as_auto(box, available_space) && !box.computed_values().min_height().is_auto()) {
-            LayoutState throwaway_state;
-            auto measuring_context = create_independent_formatting_context_if_needed(throwaway_state, m_layout_mode, box);
+            LayoutState throwaway_state(box);
+            throwaway_state.populate_node_from(m_state, *box.containing_block());
+
+            auto measuring_context = create_independent_formatting_context_if_needed(throwaway_state, LayoutMode::IntrinsicSizing, box);
             measuring_context->run(inner_available_space);
             auto content_height = measuring_context->automatic_content_height();
             auto min_height = calculate_inner_height(box, available_space, box.computed_values().min_height());
@@ -928,6 +941,12 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
         resolve_used_height_if_treated_as_auto(box, available_space_for_height_resolution, independent_formatting_context);
     }
 
+    // Now that our children are formatted we place the ListItemBox with the left space we remembered.
+    if (is_list_item_box_without_css_content)
+        // The marker pseudo-element will be created from a ListItemMarkerBox
+        layout_list_item_marker(*li_box, left_space_before_children_formatted);
+    // Otherwise, it will be a dealt with as a generic pseudo-element with the content of the ::marker pseudo-element.
+
     if (independent_formatting_context || !margins_collapse_through(box, m_state)) {
         if (!m_margin_state.box_last_in_flow_child_margin_bottom_collapsed()) {
             m_margin_state.reset();
@@ -941,12 +960,6 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
 
     auto const& block_container_state = m_state.get(block_container);
     compute_inset(box, content_box_rect(block_container_state).size());
-
-    // Now that our children are formatted we place the ListItemBox with the left space we remembered.
-    if (is_list_item_box_without_css_content)
-        // The marker pseudo-element will be created from a ListItemMarkerBox
-        layout_list_item_marker(*li_box, left_space_before_children_formatted);
-    // Otherwise, it will be a dealt with as a generic pseudo-element with the content of the ::marker pseudo-element.
 
     bottom_of_lowest_margin_box = max(bottom_of_lowest_margin_box, box_state.offset.y() + box_state.content_height() + box_state.margin_box_bottom());
 
@@ -1089,7 +1102,7 @@ void BlockFormattingContext::place_block_level_element_in_normal_flow_horizontal
 
     if ((!m_left_floats.current_boxes.is_empty() || !m_right_floats.current_boxes.is_empty())
         && box_should_avoid_floats_because_it_establishes_fc(child_box)) {
-        auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(box_state, root());
+        auto box_in_root_rect = margin_box_rect_in_ancestor_coordinate_space(box_state, root());
         auto space_and_containing_margin = space_used_and_containing_margin_for_floats(box_in_root_rect.y());
         available_width_within_containing_block -= space_and_containing_margin.left_used_space + space_and_containing_margin.right_used_space;
 
@@ -1185,7 +1198,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
                 offset_from_edge = box_state.content_width() + box_state.margin_box_right();
         };
 
-        auto box_in_root_rect = content_box_rect_in_ancestor_coordinate_space(box_state, root());
+        auto box_in_root_rect = margin_box_rect_in_ancestor_coordinate_space(box_state, root());
         CSSPixels y_in_root = box_in_root_rect.y();
         CSSPixels y = box_state.offset.y();
 
@@ -1255,7 +1268,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
                     lowest_margin_edge = max(lowest_margin_edge, current_rect.bottom());
                 }
 
-                side_data.y_offset += max<CSSPixels>(0, lowest_margin_edge - y_in_root + box_state.margin_box_top());
+                side_data.y_offset += max<CSSPixels>(0, lowest_margin_edge - y_in_root);
 
                 // Also, forget all previous boxes floated to this side while since they're no longer relevant.
                 side_data.clear();
@@ -1371,8 +1384,8 @@ void BlockFormattingContext::layout_list_item_marker(ListItemBox const& list_ite
     auto offset_y = round(max(CSSPixels(0), (marker.computed_values().line_height() - marker_height) / 2));
     marker_state.set_content_offset({ offset_x, offset_y });
 
-    if (marker_height > list_item_state.content_height())
-        list_item_state.set_content_height(marker_height);
+    if (marker.computed_values().line_height() > list_item_state.content_height())
+        list_item_state.set_content_height(marker.computed_values().line_height());
 }
 
 BlockFormattingContext::SpaceUsedAndContainingMarginForFloats BlockFormattingContext::space_used_and_containing_margin_for_floats(CSSPixels y) const
@@ -1504,10 +1517,11 @@ Optional<int> BlockFormattingContext::determine_used_value_for_column_count(CSSP
     }
     auto column_gap = get_column_gap_used_value_for_multicol(U);
     auto column_width = computed_values.column_width().to_px(root(), U);
-    if (computed_values.column_count().is_auto()) {
-        return max(1, ((U + column_gap) / (column_width + column_gap)).to_int());
-    }
-    return min(computed_values.column_count().value(), max(1, ((U + column_gap) / (column_width + column_gap)).to_int()));
+    auto divisor = column_width + column_gap;
+    auto column_count = divisor == 0 ? 1 : max(1, ((U + column_gap) / divisor).to_int());
+    if (computed_values.column_count().is_auto())
+        return column_count;
+    return min(computed_values.column_count().value(), column_count);
 }
 CSSPixels BlockFormattingContext::determine_used_value_for_column_width(CSSPixels const& U, int N) const
 {

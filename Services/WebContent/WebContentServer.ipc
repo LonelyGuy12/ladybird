@@ -1,5 +1,6 @@
 #include <LibCore/SharedVersion.h>
 #include <LibGfx/Rect.h>
+#include <LibHTTP/Cookie/Cookie.h>
 #include <LibIPC/File.h>
 #include <LibURL/URL.h>
 #include <LibWeb/Clipboard/SystemClipboard.h>
@@ -40,7 +41,7 @@ endpoint WebContentServer
 
     ready_to_paint(u64 page_id) =|
 
-    set_viewport_size(u64 page_id, Web::DevicePixelSize size) =|
+    set_viewport(u64 page_id, Web::DevicePixelSize size, double device_pixel_ratio) =|
 
     key_event(u64 page_id, Web::KeyEvent event) =|
     mouse_event(u64 page_id, Web::MouseEvent event) =|
@@ -102,7 +103,6 @@ endpoint WebContentServer
     set_enable_global_privacy_control(u64 page_id, bool enable) =|
     set_has_focus(u64 page_id, bool has_focus) =|
     set_is_scripting_enabled(u64 page_id, bool is_scripting_enabled) =|
-    set_device_pixel_ratio(u64 page_id, double device_pixel_ratio) =|
     set_zoom_level(u64 page_id, double zoom_level) =|
     set_maximum_frames_per_second(u64 page_id, double maximum_frames_per_second) =|
 
@@ -127,6 +127,7 @@ endpoint WebContentServer
     toggle_media_play_state(u64 page_id) =|
     toggle_media_mute_state(u64 page_id) =|
     toggle_media_loop_state(u64 page_id) =|
+    toggle_media_fullscreen_state(u64 page_id) =|
     toggle_media_controls_state(u64 page_id) =|
 
     toggle_page_mute_state(u64 page_id) =|
@@ -137,5 +138,9 @@ endpoint WebContentServer
 
     set_document_cookie_version_buffer(u64 page_id, Core::AnonymousBuffer document_cookie_version_buffer) =|
     set_document_cookie_version_index(u64 page_id, i64 document_id, Core::SharedVersionIndex document_index) =|
-    cookies_changed(u64 page_id, Vector<Web::Cookie::Cookie> cookies) =|
+    cookies_changed(u64 page_id, Vector<HTTP::Cookie::Cookie> cookies) =|
+
+    request_close(u64 page_id) =|
+
+    exit_fullscreen(u64 page_id) =|
 }

@@ -12,6 +12,7 @@
 #include <LibWeb/Painting/DisplayListRecorder.h>
 
 class GrDirectContext;
+class SkPaint;
 
 namespace Web::Painting {
 
@@ -25,9 +26,9 @@ private:
     void flush() override;
     void draw_glyph_run(DrawGlyphRun const&) override;
     void fill_rect(FillRect const&) override;
-    void draw_painting_surface(DrawPaintingSurface const&) override;
     void draw_scaled_immutable_bitmap(DrawScaledImmutableBitmap const&) override;
     void draw_repeated_immutable_bitmap(DrawRepeatedImmutableBitmap const&) override;
+    void draw_external_content(DrawExternalContent const&) override;
     void add_clip_rect(AddClipRect const&) override;
     void save(Save const&) override;
     void save_layer(SaveLayer const&) override;
@@ -48,7 +49,6 @@ private:
     void paint_radial_gradient(PaintRadialGradient const&) override;
     void paint_conic_gradient(PaintConicGradient const&) override;
     void add_rounded_rect_clip(AddRoundedRectClip const&) override;
-    void add_mask(AddMask const&) override;
     void paint_scrollbar(PaintScrollBar const&) override;
     void paint_nested_display_list(PaintNestedDisplayList const&) override;
     void apply_effects(ApplyEffects const&) override;
@@ -58,11 +58,9 @@ private:
 
     bool would_be_fully_clipped_by_painter(Gfx::IntRect) const override;
 
-    RefPtr<Gfx::SkiaBackendContext> m_context;
+    SkPaint paint_style_to_skia_paint(SVGPaintServerPaintStyle const&, Gfx::FloatRect const& bounding_rect);
 
-    struct CachedRuntimeEffects;
-    OwnPtr<CachedRuntimeEffects> m_cached_runtime_effects;
-    CachedRuntimeEffects& cached_runtime_effects();
+    RefPtr<Gfx::SkiaBackendContext> m_context;
 };
 
 }

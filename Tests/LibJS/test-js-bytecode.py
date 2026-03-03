@@ -53,6 +53,9 @@ def diff(a: str, a_file: Path, b: str, b_file: Path) -> None:
         print(f"{color_prefix}{line}\x1b[0m")
 
 
+REBASELINE = False
+
+
 def test(file: Path) -> bool:
     args = [
         str(BUILD_DIR / "bin/js"),
@@ -62,6 +65,8 @@ def test(file: Path) -> bool:
         # TODO: allow for dumping bytecode without running script
         # "--parse-only",
     ]
+    if file.suffix == ".mjs":
+        args.append("--as-module")
     process = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     stdout = process.stdout.decode().strip()
@@ -72,10 +77,15 @@ def test(file: Path) -> bool:
 
     stdout = strip_color(stdout)
 
-    output_file = BYTECODE_TEST_DIR / "output" / file.with_suffix(".txt")
     expected_file = BYTECODE_TEST_DIR / "expected" / file.with_suffix(".txt")
+    output_file = BYTECODE_TEST_DIR / "output" / file.with_suffix(".txt")
 
     output_file.write_text(stdout, encoding="utf8")
+
+    if REBASELINE:
+        expected_file.write_text(stdout + "\n", encoding="utf8")
+        return False
+
     expected = expected_file.read_text(encoding="utf8").strip()
 
     if stdout != expected:
@@ -91,15 +101,21 @@ def test(file: Path) -> bool:
 def main() -> int:
     setup()
 
+    global REBASELINE
+
     parser = ArgumentParser()
     parser.add_argument("-j", "--jobs", type=int)
+    parser.add_argument("--rebaseline", action="store_true")
 
     args = parser.parse_args()
+    REBASELINE = args.rebaseline
 
     input_dir = BYTECODE_TEST_DIR / "input"
     failed = 0
 
-    js_files = [js_file for js_file in sorted(input_dir.iterdir()) if js_file.is_file() and js_file.suffix == ".js"]
+    js_files = [
+        js_file for js_file in sorted(input_dir.iterdir()) if js_file.is_file() and js_file.suffix in (".js", ".mjs")
+    ]
 
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
         executables = [executor.submit(test, js_file.relative_to(input_dir)) for js_file in js_files]

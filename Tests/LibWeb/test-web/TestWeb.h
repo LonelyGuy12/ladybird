@@ -24,6 +24,7 @@ enum class TestMode {
     Layout,
     Text,
     Ref,
+    Screenshot,
     Crash,
 };
 
@@ -53,6 +54,8 @@ struct Test {
     UnixDateTime start_time {};
     UnixDateTime end_time {};
     size_t index { 0 };
+    size_t run_index { 1 };
+    size_t total_runs { 1 };
 
     String text {};
     bool did_finish_test { false };
@@ -64,6 +67,9 @@ struct Test {
 
     RefPtr<Gfx::Bitmap const> actual_screenshot {};
     RefPtr<Gfx::Bitmap const> expectation_screenshot {};
+
+    u64 diff_pixel_error_count { 0 };
+    u8 diff_maximum_error { 0 };
 
     RefPtr<Core::Timer> timeout_timer {};
 };

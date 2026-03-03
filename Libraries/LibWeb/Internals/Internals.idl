@@ -54,7 +54,6 @@ interface Internals {
     undefined simulateDragMove(double x, double y);
     undefined simulateDrop(double x, double y);
 
-    undefined enableCookiesOnFileDomains();
     undefined expireCookiesWithTimeOffset(long long seconds);
 
     boolean setHttpMemoryCacheEnabled(boolean enabled);
@@ -70,6 +69,8 @@ interface Internals {
     readonly attribute boolean headless;
 
     DOMString dumpDisplayList();
+    DOMString dumpLayoutTree(Node node);
+    DOMString dumpPaintableTree(Node node);
     DOMString dumpStackingContextTree();
     DOMString dumpGCGraph();
 
@@ -78,8 +79,12 @@ interface Internals {
 
     undefined handleSDLInputEvents();
 
+    undefined setEnvironmentsTopLevelURL(USVString url);
+
     InternalGamepad connectVirtualGamepad();
 
     undefined setHighlightedNode(Node? node);
+
+    undefined clearElement(HTMLElement element);
 
 };

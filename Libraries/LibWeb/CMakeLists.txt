@@ -1,3 +1,4 @@
+include(fontconfig)
 include(libweb_generators)
 include(vulkan)
 include(skia)
@@ -82,8 +83,6 @@ set(SOURCES
     ContentSecurityPolicy/SecurityPolicyViolationEvent.cpp
     ContentSecurityPolicy/SerializedPolicy.cpp
     ContentSecurityPolicy/Violation.cpp
-    Cookie/Cookie.cpp
-    Cookie/ParsedCookie.cpp
     CookieStore/CookieChangeEvent.cpp
     CookieStore/CookieStore.cpp
     CredentialManagement/Credential.cpp
@@ -105,7 +104,10 @@ set(SOURCES
     CSS/CascadedProperties.cpp
     CSS/Clip.cpp
     CSS/ComputedProperties.cpp
+    CSS/CustomPropertyData.cpp
     CSS/CountersSet.cpp
+    CSS/CounterStyle.cpp
+    CSS/CounterStyleDefinition.cpp
     CSS/CSS.cpp
     CSS/CSSAnimation.cpp
     CSS/CSSConditionRule.cpp
@@ -113,6 +115,8 @@ set(SOURCES
     CSS/CSSDescriptors.cpp
     CSS/CSSFontFaceDescriptors.cpp
     CSS/CSSFontFaceRule.cpp
+    CSS/CSSFontFeatureValuesMap.cpp
+    CSS/CSSFontFeatureValuesRule.cpp
     CSS/CSSGroupingRule.cpp
     CSS/CSSImageValue.cpp
     CSS/CSSImportRule.cpp
@@ -165,6 +169,7 @@ set(SOURCES
     CSS/EasingFunction.cpp
     CSS/EdgeRect.cpp
     CSS/Fetch.cpp
+    CSS/Filter.cpp
     CSS/Flex.cpp
     CSS/FontComputer.cpp
     CSS/FontFace.cpp
@@ -246,6 +251,7 @@ set(SOURCES
     CSS/StyleValues/CounterDefinitionsStyleValue.cpp
     CSS/StyleValues/CounterStyleSystemStyleValue.cpp
     CSS/StyleValues/CounterStyleValue.cpp
+    CSS/StyleValues/CounterStyleStyleValue.cpp
     CSS/StyleValues/CursorStyleValue.cpp
     CSS/StyleValues/CustomIdentStyleValue.cpp
     CSS/StyleValues/DimensionStyleValue.cpp
@@ -255,6 +261,7 @@ set(SOURCES
     CSS/StyleValues/FilterValueListStyleValue.cpp
     CSS/StyleValues/FontSourceStyleValue.cpp
     CSS/StyleValues/FontStyleStyleValue.cpp
+    CSS/StyleValues/FontVariantAlternatesFunctionStyleValue.cpp
     CSS/StyleValues/GridAutoFlowStyleValue.cpp
     CSS/StyleValues/GridTemplateAreaStyleValue.cpp
     CSS/StyleValues/GridTrackPlacementStyleValue.cpp
@@ -289,6 +296,7 @@ set(SOURCES
     CSS/StyleValues/TextUnderlinePositionStyleValue.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
     CSS/StyleValues/TreeCountingFunctionStyleValue.cpp
+    CSS/StyleValues/TupleStyleValue.cpp
     CSS/StyleValues/UnicodeRangeStyleValue.cpp
     CSS/StyleValues/UnresolvedStyleValue.cpp
     CSS/StyleValues/ViewFunctionStyleValue.cpp
@@ -351,7 +359,7 @@ set(SOURCES
     DOM/Slottable.cpp
     DOM/StaticNodeList.cpp
     DOM/StaticRange.cpp
-    DOM/StyleElementUtils.cpp
+    DOM/StyleElementBase.cpp
     DOM/StyleInvalidator.cpp
     DOM/Text.cpp
     DOM/TreeWalker.cpp
@@ -438,7 +446,7 @@ set(SOURCES
     HighResolutionTime/Performance.cpp
     HighResolutionTime/TimeOrigin.cpp
     HTML/AbstractWorker.cpp
-    HTML/AnimatedBitmapDecodedImageData.cpp
+    HTML/BitmapDecodedImageData.cpp
     HTML/AnimationFrameCallbackDriver.cpp
     HTML/AttributeNames.cpp
     HTML/AudioTrack.cpp
@@ -542,6 +550,7 @@ set(SOURCES
     HTML/HTMLMapElement.cpp
     HTML/HTMLMarqueeElement.cpp
     HTML/HTMLMediaElement.cpp
+    HTML/MediaControls.cpp
     HTML/HTMLMenuElement.cpp
     HTML/HTMLMetaElement.cpp
     HTML/HTMLMeterElement.cpp
@@ -662,6 +671,7 @@ set(SOURCES
     HTML/SessionHistoryTraversalQueue.cpp
     HTML/ShadowRealmGlobalScope.cpp
     HTML/SharedResourceRequest.cpp
+    HTML/AnimatedDecodedImageData.cpp
     HTML/SharedWorker.cpp
     HTML/SharedWorkerGlobalScope.cpp
     HTML/SourceSet.cpp
@@ -726,11 +736,13 @@ set(SOURCES
     Infra/ByteSequences.cpp
     Infra/JSON.cpp
     Infra/Strings.cpp
+    Internals/FakeXRDevice.cpp
     Internals/InternalAnimationTimeline.cpp
     Internals/InternalGamepad.cpp
     Internals/Internals.cpp
     Internals/InternalsBase.cpp
     Internals/WebUI.cpp
+    Internals/XRTest.cpp
     IntersectionObserver/IntersectionObserver.cpp
     IntersectionObserver/IntersectionObserverEntry.cpp
     Layout/AudioBox.cpp
@@ -762,6 +774,7 @@ set(SOURCES
     Layout/Node.cpp
     Layout/RadioButton.cpp
     Layout/ReplacedBox.cpp
+    Layout/ReplacedWithChildrenFormattingContext.cpp
     Layout/SVGBox.cpp
     Layout/SVGClipBox.cpp
     Layout/SVGForeignObjectBox.cpp
@@ -770,6 +783,7 @@ set(SOURCES
     Layout/SVGGraphicsBox.cpp
     Layout/SVGImageBox.cpp
     Layout/SVGMaskBox.cpp
+    Layout/SVGPatternBox.cpp
     Layout/SVGSVGBox.cpp
     Layout/SVGTextBox.cpp
     Layout/SVGTextPathBox.cpp
@@ -809,15 +823,16 @@ set(SOURCES
     NavigationTiming/PerformanceNavigation.cpp
     NavigationTiming/PerformanceTiming.cpp
     NotificationsAPI/Notification.cpp
+    Page/AutoScrollHandler.cpp
     Page/DragAndDropEventHandler.cpp
     Page/ElementResizeAction.cpp
     Page/EventHandler.cpp
     Page/InputEvent.cpp
     Page/Page.cpp
     Painting/AccumulatedVisualContext.cpp
-    Painting/AudioPaintable.cpp
     Painting/BackgroundPainting.cpp
     Painting/BackingStoreManager.cpp
+    Painting/Blending.cpp
     Painting/BorderPainting.cpp
     Painting/BorderRadiiData.cpp
     Painting/BorderRadiusCornerClipper.cpp
@@ -830,15 +845,16 @@ set(SOURCES
     Painting/DisplayListPlayerSkia.cpp
     Painting/DisplayListRecorder.cpp
     Painting/DisplayListRecordingContext.cpp
+    Painting/ExternalContentSource.cpp
     Painting/FieldSetPaintable.cpp
     Painting/GradientPainting.cpp
     Painting/ImagePaintable.cpp
     Painting/LabelablePaintable.cpp
     Painting/MarkerPaintable.cpp
-    Painting/MediaPaintable.cpp
     Painting/NavigableContainerViewportPaintable.cpp
     Painting/Paintable.cpp
     Painting/PaintableBox.cpp
+    Painting/PaintStyle.cpp
     Painting/PaintableFragment.cpp
     Painting/PaintableWithLines.cpp
     Painting/RadioButtonPaintable.cpp
@@ -853,6 +869,7 @@ set(SOURCES
     Painting/SVGMaskable.cpp
     Painting/SVGMaskPaintable.cpp
     Painting/SVGPaintable.cpp
+    Painting/SVGPatternPaintable.cpp
     Painting/SVGPathPaintable.cpp
     Painting/SVGSVGPaintable.cpp
     Painting/TableBordersPainting.cpp
@@ -867,11 +884,9 @@ set(SOURCES
     PermissionsPolicy/AutoplayAllowlist.cpp
     PixelUnits.cpp
     Platform/EventLoopPlugin.cpp
-    Platform/EventLoopPluginSerenity.cpp
     Platform/FontPlugin.cpp
     Platform/ImageCodecPlugin.cpp
     Platform/Timer.cpp
-    Platform/TimerSerenity.cpp
     ReferrerPolicy/AbstractOperations.cpp
     ReferrerPolicy/ReferrerPolicy.cpp
     RequestIdleCallback/IdleDeadline.cpp
@@ -940,6 +955,7 @@ set(SOURCES
     SVG/Path.cpp
     SVG/SVGAElement.cpp
     SVG/SVGAnimatedEnumeration.cpp
+    SVG/SVGAnimatedInteger.cpp
     SVG/SVGAnimatedLength.cpp
     SVG/SVGAnimatedLengthList.cpp
     SVG/SVGAnimatedNumber.cpp
@@ -960,6 +976,7 @@ set(SOURCES
     SVG/SVGFEColorMatrixElement.cpp
     SVG/SVGFEComponentTransferElement.cpp
     SVG/SVGFECompositeElement.cpp
+    SVG/SVGFEDisplacementMapElement.cpp
     SVG/SVGFEDropShadowElement.cpp
     SVG/SVGFEFloodElement.cpp
     SVG/SVGFEFuncAElement.cpp
@@ -972,6 +989,7 @@ set(SOURCES
     SVG/SVGFEMergeNodeElement.cpp
     SVG/SVGFEMorphologyElement.cpp
     SVG/SVGFEOffsetElement.cpp
+    SVG/SVGFETurbulenceElement.cpp
     SVG/SVGFilterElement.cpp
     SVG/SVGFilterPrimitiveStandardAttributes.cpp
     SVG/SVGFitToViewBox.cpp
@@ -991,6 +1009,7 @@ set(SOURCES
     SVG/SVGNumber.cpp
     SVG/SVGNumberList.cpp
     SVG/SVGPathElement.cpp
+    SVG/SVGPatternElement.cpp
     SVG/SVGPolygonElement.cpp
     SVG/SVGPolylineElement.cpp
     SVG/SVGRadialGradientElement.cpp
@@ -1026,6 +1045,7 @@ set(SOURCES
     UIEvents/KeyboardEvent.cpp
     UIEvents/MouseEvent.cpp
     UIEvents/PointerEvent.cpp
+    UIEvents/PointerTypes.cpp
     UIEvents/TextEvent.cpp
     UIEvents/UIEvent.cpp
     UIEvents/WheelEvent.cpp
@@ -1192,6 +1212,7 @@ generate_html_implementation()
 set(GENERATED_SOURCES
     ARIA/AriaRoles.cpp
     CSS/DefaultStyleSheetSource.cpp
+    CSS/MediaControlsStyleSheetSource.cpp
     CSS/DescriptorID.cpp
     CSS/Enums.cpp
     CSS/EnvironmentVariable.cpp
@@ -1253,24 +1274,11 @@ find_package(LibXml2 REQUIRED)
 
 target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia ${ANGLE_TARGETS} SDL3::SDL3 LibXml2::LibXml2)
 
-generate_js_bindings(LibWeb)
-
-if (ENABLE_SWIFT)
-    include(collections)
-
-    set(generated_headers ${GENERATED_SOURCES})
-    list(FILTER generated_headers INCLUDE REGEX "\\.h$")
-    list(TRANSFORM generated_headers PREPEND "${CMAKE_CURRENT_BINARY_DIR}/")
-    list(APPEND LIBWEB_ALL_GENERATED_HEADERS ${generated_headers})
-
-    generate_clang_module_map(LibWeb GENERATED_FILES ${LIBWEB_ALL_GENERATED_HEADERS})
-
-    target_sources(LibWeb PRIVATE
-        HTML/Parser/HTMLToken.swift
-        HTML/Parser/HTMLTokenizer.swift
-        HTML/Parser/HTMLTokenizerHelpers.cpp
-        HTML/Parser/SpeculativeHTMLParser.swift
-    )
-    target_link_libraries(LibWeb PRIVATE AK Collections)
-    add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx LibGC)
+if (HAS_FONTCONFIG)
+    target_link_libraries(LibWeb PRIVATE Fontconfig::Fontconfig)
 endif()
+
+# FIXME: https://github.com/microsoft/vcpkg/issues/42324
+target_include_directories(LibWeb PRIVATE ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include)
+
+generate_js_bindings(LibWeb)

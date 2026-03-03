@@ -9,13 +9,9 @@
  */
 
 #include <AK/ByteString.h>
-#include <AK/FixedArray.h>
 #include <AK/ScopeGuard.h>
-#include <AK/ScopedValueRollback.h>
 #include <AK/StdLibExtras.h>
-#include <AK/String.h>
 #include <AK/Vector.h>
-#include <LibCore/Environment.h>
 #include <LibCore/System.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -448,16 +444,6 @@ ErrorOr<int> mkstemp(Span<char> pattern)
     if (fd < 0)
         return Error::from_syscall("mkstemp"sv, errno);
     return fd;
-}
-
-ErrorOr<String> mkdtemp(Span<char> pattern)
-{
-    auto* path = ::mkdtemp(pattern.data());
-    if (path == nullptr) {
-        return Error::from_errno(errno);
-    }
-
-    return String::from_utf8(StringView { path, strlen(path) });
 }
 
 ErrorOr<void> rename(StringView old_path, StringView new_path)

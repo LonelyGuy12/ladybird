@@ -71,7 +71,7 @@ private:
     virtual void load_html(u64 page_id, ByteString) override;
     virtual void reload(u64 page_id) override;
     virtual void traverse_the_history_by_delta(u64 page_id, i32 delta) override;
-    virtual void set_viewport_size(u64 page_id, Web::DevicePixelSize) override;
+    virtual void set_viewport(u64 page_id, Web::DevicePixelSize, double device_pixel_ratio) override;
     virtual void key_event(u64 page_id, Web::KeyEvent) override;
     virtual void mouse_event(u64 page_id, Web::MouseEvent) override;
     virtual void drag_event(u64 page_id, Web::DragEvent) override;
@@ -117,7 +117,6 @@ private:
     virtual void set_has_focus(u64 page_id, bool) override;
     virtual void set_is_scripting_enabled(u64 page_id, bool) override;
     virtual void set_zoom_level(u64 page_id, double zoom_level) override;
-    virtual void set_device_pixel_ratio(u64 page_id, double device_pixel_ratio) override;
     virtual void set_maximum_frames_per_second(u64 page_id, double) override;
     virtual void set_window_position(u64 page_id, Web::DevicePixelPoint) override;
     virtual void set_window_size(u64 page_id, Web::DevicePixelSize) override;
@@ -141,6 +140,7 @@ private:
     virtual void toggle_media_play_state(u64 page_id) override;
     virtual void toggle_media_mute_state(u64 page_id) override;
     virtual void toggle_media_loop_state(u64 page_id) override;
+    virtual void toggle_media_fullscreen_state(u64 page_id) override;
     virtual void toggle_media_controls_state(u64 page_id) override;
 
     virtual void toggle_page_mute_state(u64 page_id) override;
@@ -165,7 +165,11 @@ private:
 
     virtual void set_document_cookie_version_buffer(u64 page_id, Core::AnonymousBuffer document_cookie_version_buffer) override;
     virtual void set_document_cookie_version_index(u64 page_id, i64 document_id, Core::SharedVersionIndex document_index) override;
-    virtual void cookies_changed(u64 page_id, Vector<Web::Cookie::Cookie>) override;
+    virtual void cookies_changed(u64 page_id, Vector<HTTP::Cookie::Cookie>) override;
+
+    virtual void request_close(u64 page_id) override;
+
+    virtual void exit_fullscreen(u64 page_id) override;
 
     NonnullOwnPtr<PageHost> m_page_host;
 

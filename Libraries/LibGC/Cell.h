@@ -6,15 +6,12 @@
 
 #pragma once
 
-#include <AK/Badge.h>
 #include <AK/Format.h>
 #include <AK/Forward.h>
 #include <AK/HashMap.h>
 #include <AK/Noncopyable.h>
 #include <AK/Platform.h>
 #include <AK/StringView.h>
-#include <AK/Swift.h>
-#include <AK/Weakable.h>
 #include <LibGC/Forward.h>
 #include <LibGC/Internals.h>
 #include <LibGC/NanBoxedValue.h>
@@ -72,17 +69,17 @@ public:
                 visit_impl(*cell);
         }
 
-        void visit(Cell& cell) SWIFT_NAME(visitRef(_:))
+        void visit(Cell& cell)
         {
             visit_impl(cell);
         }
 
-        void visit(Cell const* cell) SWIFT_NAME(visitConst(_:))
+        void visit(Cell const* cell)
         {
             visit(const_cast<Cell*>(cell));
         }
 
-        void visit(Cell const& cell) SWIFT_NAME(visitConstRef(_:))
+        void visit(Cell const& cell)
         {
             visit(const_cast<Cell&>(cell));
         }
@@ -185,7 +182,7 @@ public:
                 visit(optional.value());
         }
 
-        void visit(NanBoxedValue const& value) SWIFT_NAME(visitValue(_:));
+        void visit(NanBoxedValue const& value);
 
         // Allow explicitly ignoring a GC-allocated member in a visit_edges implementation instead
         // of just not using it.
@@ -200,7 +197,7 @@ public:
         virtual void visit_impl(Cell&) = 0;
         virtual void visit_impl(ReadonlySpan<NanBoxedValue>) = 0;
         virtual ~Visitor() = default;
-    } SWIFT_UNSAFE_REFERENCE;
+    };
 
     MUST_UPCALL virtual void visit_edges(Visitor&) { }
 
@@ -220,7 +217,7 @@ protected:
 private:
     bool m_mark { false };
     State m_state { State::Live };
-} SWIFT_UNSAFE_REFERENCE;
+};
 
 }
 

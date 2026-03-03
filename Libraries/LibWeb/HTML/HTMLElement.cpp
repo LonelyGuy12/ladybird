@@ -546,17 +546,19 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
         // 2. If ancestor is not closed-shadow-hidden from the element and satisfies at least one of the following,
         //    terminate this algorithm and return ancestor.
         if (!ancestor_is_closed_shadow_hidden) {
+            // NB: An ancestor in the flat tree may not have a layout node (e.g., it has display: none).
+            //     Such ancestors can't be positioned or establish containing blocks, so we skip those checks.
             // - The element is in a fixed position containing block, and ancestor is a containing block for
             //   fixed-positioned descendants.
             // FIXME: This is ambiguous but I believe it means any ancestor establishes a fixed position containing block.
             //        https://github.com/w3c/csswg-drafts/pull/12531/commits/48e905bb3859f80ce822299f7e6b76515d867fc3#r2623785087
-            if (!no_ancestor_establishes_a_fixed_position_containing_block && ancestor->layout_node()->establishes_a_fixed_positioning_containing_block())
+            if (!no_ancestor_establishes_a_fixed_position_containing_block && ancestor->layout_node() && ancestor->layout_node()->establishes_a_fixed_positioning_containing_block())
                 return const_cast<Element*>(ancestor);
             // - The element is not in a fixed position containing block, and:
             if (no_ancestor_establishes_a_fixed_position_containing_block) {
                 // - ancestor is a containing block of absolutely-positioned descendants (regardless of whether there
                 //   are any absolutely-positioned descendants).
-                if (ancestor->layout_node()->is_positioned())
+                if (ancestor->layout_node() && ancestor->layout_node()->is_positioned())
                     return const_cast<Element*>(ancestor);
                 // - It is the body element.
                 if (ancestor->is_html_body_element())
@@ -724,6 +726,10 @@ void HTMLElement::attribute_changed(FlyString const& name, Optional<String> cons
             // Having an invalid value maps to the "inherit" state.
             m_content_editable_state = ContentEditableState::Inherit;
         }
+        for_each_in_inclusive_subtree([](Node& node) {
+            node.recompute_editable_subtree_flag();
+            return TraversalDecision::Continue;
+        });
     } else if (name == HTML::AttributeNames::inert) {
         // https://html.spec.whatwg.org/multipage/interaction.html#the-inert-attribute
         // The inert attribute is a boolean attribute that indicates, by its presence, that the element and all its flat tree descendants which don't otherwise escape inertness
@@ -775,7 +781,8 @@ void HTMLElement::set_subtree_inertness(bool is_inert)
         return TraversalDecision::Continue;
     });
 
-    if (auto paintable_box = this->paintable_box())
+    // NB: Called during inner text collection, layout may not be current.
+    if (auto paintable_box = this->unsafe_paintable_box())
         paintable_box->set_needs_paint_only_properties_update(true);
 }
 

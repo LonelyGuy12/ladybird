@@ -26,6 +26,7 @@
 #include <LibJS/Runtime/JSONObject.h>
 #include <LibJS/Runtime/StringPrototype.h>
 #include <LibJS/Runtime/ValueInlines.h>
+#include <LibJS/Script.h>
 #include <LibJS/SourceTextModule.h>
 #include <LibMain/Main.h>
 #include <LibTextCodec/Decoder.h>
@@ -194,11 +195,8 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
 
     JS::ThrowCompletionOr<JS::Value> result { JS::js_undefined() };
 
-    auto run_script_or_module = [&](auto& script_or_module) {
-        if (s_dump_ast)
-            script_or_module->parse_node().dump(0);
-
-        result = vm.bytecode_interpreter().run(*script_or_module);
+    auto dump_ast = [&](auto const& node) {
+        node.dump({ .prefix = {}, .use_color = !s_strip_ansi });
     };
 
     if (!s_as_module) {
@@ -215,8 +213,11 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
             outln("{}", error_string);
             result = vm.throw_completion<JS::SyntaxError>(move(error_string));
         } else {
+            auto script = script_or_error.release_value();
+            if (s_dump_ast && script->parse_node())
+                dump_ast(*script->parse_node());
             if (!parse_only)
-                run_script_or_module(script_or_error.value());
+                result = vm.bytecode_interpreter().run(*script);
         }
     } else {
         auto module_or_error = JS::SourceTextModule::parse(source, realm, source_name);
@@ -232,8 +233,11 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
             outln("{}", error_string);
             result = vm.throw_completion<JS::SyntaxError>(move(error_string));
         } else {
+            auto module = module_or_error.release_value();
+            if (s_dump_ast && module->parse_node())
+                dump_ast(*module->parse_node());
             if (!parse_only)
-                run_script_or_module(module_or_error.value());
+                result = vm.bytecode_interpreter().run(*module);
         }
     }
 
@@ -241,9 +245,8 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
         warnln("Uncaught exception: ");
         TRY(print(thrown_value, PrintTarget::StandardError));
 
-        if (!thrown_value.is_object() || !is<JS::Error>(thrown_value.as_object()))
-            return {};
-        warnln("{}", static_cast<JS::Error const&>(thrown_value.as_object()).stack_string(JS::CompactTraceback::Yes));
+        if (auto error = thrown_value.template as_if<JS::Error>())
+            warnln("{}", error->stack_string(JS::CompactTraceback::Yes));
         return {};
     };
 
@@ -778,12 +781,10 @@ static ErrorOr<int> run_repl(bool gc_on_every_allocation, bool syntax_highlight)
             auto variable = value_or_error.value();
             VERIFY(!variable.is_special_empty_value());
 
-            if (!variable.is_object())
-                break;
-
-            auto const object = MUST(variable.to_object(*g_vm));
-            auto const& shape = object->shape();
-            list_all_properties(shape, property_name);
+            if (auto object = variable.template as_if<JS::Object>()) {
+                auto const& shape = object->shape();
+                list_all_properties(shape, property_name);
+            }
             break;
         }
         case CompleteVariable: {
@@ -842,6 +843,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     [[maybe_unused]] bool syntax_highlight = !disable_syntax_highlight;
+
+    JS::g_dump_ast = s_dump_ast;
+    JS::g_dump_ast_use_color = !s_strip_ansi;
 
     AK::set_debug_enabled(!disable_debug_printing);
     s_history_path = TRY(String::formatted("{}/.js-history", Core::StandardPaths::home_directory()));

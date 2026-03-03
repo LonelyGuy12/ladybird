@@ -10,8 +10,10 @@
 #include <AK/QuickSort.h>
 #include <AK/TemporaryChange.h>
 #include <LibGfx/Rect.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/DisplayList.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/PaintableBox.h>
@@ -281,6 +283,12 @@ void StackingContext::paint_internal(DisplayListRecordingContext& context) const
 
 void StackingContext::paint(DisplayListRecordingContext& context) const
 {
+    // https://drafts.csswg.org/css-transforms-1/#transform-function-lists
+    // If a transform function causes the current transformation matrix of an object to be non-invertible, the object
+    // and its content do not get displayed.
+    if (paintable_box().has_non_invertible_css_transform())
+        return;
+
     if (paintable_box().computed_values().opacity() == 0.0f)
         return;
 
@@ -292,9 +300,6 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
     auto const& computed_values = paintable_box().computed_values();
     auto mask_image = computed_values.mask_image();
 
-    // Mask handling stays at paint time with its own save/restore.
-    bool needs_to_save_state = mask_image || paintable_box().get_mask_area().has_value() || paintable_box().get_clip_area().has_value();
-
     auto effective_state = paintable_box().accumulated_visual_context();
     context.display_list_recorder().set_accumulated_visual_context(effective_state);
 
@@ -305,35 +310,34 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
         context.display_list_recorder().fill_rect_transparent(device_rect);
     }
 
-    if (needs_to_save_state) {
-        context.display_list_recorder().save();
-    }
+    // Collect all masks (CSS mask-image, SVG <mask>, SVG <clipPath>).
+    Vector<DisplayListRecorder::MaskInfo> masks;
 
     if (mask_image) {
-        auto mask_display_list = DisplayList::create(context.device_pixels_per_css_pixel());
+        auto mask_display_list = DisplayList::create();
         DisplayListRecorder display_list_recorder(*mask_display_list);
         auto mask_painting_context = context.clone(display_list_recorder);
         auto mask_rect_in_device_pixels = context.enclosing_device_rect(paintable_box().absolute_padding_box_rect());
         mask_image->paint(mask_painting_context, { {}, mask_rect_in_device_pixels.size() }, CSS::ImageRendering::Auto);
-        context.display_list_recorder().add_mask(mask_display_list, mask_rect_in_device_pixels.to_type<int>(), Gfx::MaskKind::Alpha);
+        masks.append({ mask_display_list, mask_rect_in_device_pixels.to_type<int>(), Gfx::MaskKind::Alpha });
     }
 
-    // Apply <mask> if present
     if (auto mask_area = paintable_box().get_mask_area(); mask_area.has_value()) {
         if (auto mask_display_list = paintable_box().calculate_mask(context, *mask_area)) {
             auto rect = context.enclosing_device_rect(*mask_area).to_type<int>();
             auto kind = paintable_box().get_mask_type().value_or(Gfx::MaskKind::Alpha);
-            context.display_list_recorder().add_mask(mask_display_list, rect, kind);
+            masks.append({ mask_display_list, rect, kind });
         }
     }
 
-    // Apply <clipPath> if present
     if (auto clip_area = paintable_box().get_clip_area(); clip_area.has_value()) {
         if (auto clip_display_list = paintable_box().calculate_clip(context, *clip_area)) {
             auto rect = context.enclosing_device_rect(*clip_area).to_type<int>();
-            context.display_list_recorder().add_mask(clip_display_list, rect, Gfx::MaskKind::Alpha);
+            masks.append({ clip_display_list, rect, Gfx::MaskKind::Alpha });
         }
     }
+
+    context.display_list_recorder().begin_masks(masks);
 
     auto context_before_children = context.display_list_recorder().accumulated_visual_context();
 
@@ -341,12 +345,16 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
 
     context.display_list_recorder().set_accumulated_visual_context(context_before_children);
 
-    if (needs_to_save_state)
-        context.display_list_recorder().restore();
+    context.display_list_recorder().end_masks(masks);
 }
 
 TraversalDecision StackingContext::hit_test(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const
 {
+    // AD-HOC: Elements with non-invertible transforms are not displayed per the spec,
+    //         so they should not be hit-testable either.
+    if (paintable_box().has_non_invertible_css_transform())
+        return TraversalDecision::Continue;
+
     auto const is_visible = paintable_box().computed_values().visibility() == CSS::Visibility::Visible;
 
     // NOTE: Hit testing basically happens in reverse painting order.
@@ -384,13 +392,16 @@ TraversalDecision StackingContext::hit_test(CSSPixelPoint position, HitTestType 
         // Hit test the stacking context root's own fragments if it's a PaintableWithLines.
         if (is<PaintableWithLines>(paintable_box())) {
             auto const& paintable_with_lines = as<PaintableWithLines>(paintable_box());
-            auto const& viewport_paintable = *paintable_box().document().paintable();
-            auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+            auto pixel_ratio = static_cast<float>(paintable_box().document().page().client().device_pixels_per_css_pixel());
+            auto const& scroll_state = paintable_box().document().paintable()->scroll_state_snapshot();
             Optional<CSSPixelPoint> local_position;
-            if (auto state = paintable_box().accumulated_visual_context())
-                local_position = state->transform_point_for_hit_test(position, scroll_state);
-            else
+            if (auto state = paintable_box().accumulated_visual_context()) {
+                auto result = state->transform_point_for_hit_test(position.to_type<float>() * pixel_ratio, scroll_state);
+                if (result.has_value())
+                    local_position = (*result / pixel_ratio).to_type<CSSPixels>();
+            } else {
                 local_position = position;
+            }
 
             if (local_position.has_value()) {
                 if (paintable_with_lines.hit_test_fragments(position, local_position.value(), type, callback) == TraversalDecision::Break)
@@ -432,13 +443,16 @@ TraversalDecision StackingContext::hit_test(CSSPixelPoint position, HitTestType 
     if (!is_visible || !paintable_box().visible_for_hit_testing())
         return TraversalDecision::Continue;
 
-    auto const& viewport_paintable = *paintable_box().document().paintable();
-    auto const& scroll_state = viewport_paintable.scroll_state_snapshot();
+    auto pixel_ratio = static_cast<float>(paintable_box().document().page().client().device_pixels_per_css_pixel());
+    auto const& scroll_state = paintable_box().document().paintable()->scroll_state_snapshot();
     Optional<CSSPixelPoint> local_position;
-    if (auto state = paintable_box().accumulated_visual_context())
-        local_position = state->transform_point_for_hit_test(position, scroll_state);
-    else
+    if (auto state = paintable_box().accumulated_visual_context()) {
+        auto result = state->transform_point_for_hit_test(position.to_type<float>() * pixel_ratio, scroll_state);
+        if (result.has_value())
+            local_position = (*result / pixel_ratio).to_type<CSSPixels>();
+    } else {
         local_position = position;
+    }
 
     if (local_position.has_value() && paintable_box().absolute_border_box_rect().contains(local_position.value())) {
         if (callback({ const_cast<PaintableBox&>(paintable_box()) }) == TraversalDecision::Break)

@@ -35,6 +35,12 @@ namespace WebView {
 Application* Application::s_the = nullptr;
 
 struct ApplicationSettingsObserver : public SettingsObserver {
+    virtual void browsing_data_settings_changed() override
+    {
+        auto const& browsing_data_settings = Application::settings().browsing_data_settings();
+        Application::request_server_client().async_set_disk_cache_settings(browsing_data_settings.disk_cache_settings);
+    }
+
     virtual void dns_settings_changed() override
     {
         Application::settings().dns_settings().visit(
@@ -122,6 +128,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     bool disable_content_filter = false;
     Optional<StringView> resource_substitution_map_path;
     bool enable_autoplay = false;
+    bool expose_experimental_interfaces = false;
     bool expose_internals_object = false;
     bool force_cpu_painting = false;
     bool force_fontconfig = false;
@@ -173,6 +180,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     args_parser.add_option(disable_http_disk_cache, "Disable HTTP disk cache", "disable-http-disk-cache");
     args_parser.add_option(disable_content_filter, "Disable content filter", "disable-content-filter");
     args_parser.add_option(enable_autoplay, "Enable multimedia autoplay", "enable-autoplay");
+    args_parser.add_option(expose_experimental_interfaces, "Expose experimental IDL interfaces", "expose-experimental-interfaces");
     args_parser.add_option(expose_internals_object, "Expose internals object", "expose-internals-object");
     args_parser.add_option(force_cpu_painting, "Force CPU painting", "force-cpu-painting");
     args_parser.add_option(force_fontconfig, "Force using fontconfig for font loading", "force-fontconfig");
@@ -283,6 +291,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         .disable_site_isolation = disable_site_isolation ? DisableSiteIsolation::Yes : DisableSiteIsolation::No,
         .enable_idl_tracing = enable_idl_tracing ? EnableIDLTracing::Yes : EnableIDLTracing::No,
         .enable_http_memory_cache = disable_http_memory_cache ? EnableMemoryHTTPCache::No : EnableMemoryHTTPCache::Yes,
+        .expose_experimental_interfaces = expose_experimental_interfaces ? ExposeExperimentalInterfaces::Yes : ExposeExperimentalInterfaces::No,
         .expose_internals_object = expose_internals_object ? ExposeInternalsObject::Yes : ExposeInternalsObject::No,
         .force_cpu_painting = force_cpu_painting ? ForceCPUPainting::Yes : ForceCPUPainting::No,
         .force_fontconfig = force_fontconfig ? ForceFontconfig::Yes : ForceFontconfig::No,
@@ -293,6 +302,14 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     };
 
     create_platform_options(m_browser_options, m_request_server_options, m_web_content_options);
+
+    // Test mode implies experimental interfaces and internals object are exposed and the Skia CPU backend is used.
+    if (m_web_content_options.is_test_mode == IsTestMode::Yes) {
+        m_web_content_options.expose_experimental_interfaces = ExposeExperimentalInterfaces::Yes;
+        m_web_content_options.expose_internals_object = ExposeInternalsObject::Yes;
+        m_web_content_options.force_cpu_painting = ForceCPUPainting::Yes;
+    }
+
     initialize_actions();
 
     m_event_loop = create_platform_event_loop();
@@ -409,6 +426,10 @@ ErrorOr<void> Application::launch_services()
 ErrorOr<void> Application::launch_request_server()
 {
     m_request_server_client = TRY(launch_request_server_process());
+
+    m_request_server_client->on_retrieve_http_cookie = [this](URL::URL const& url) {
+        return m_cookie_jar->get_cookie(url, HTTP::Cookie::Source::Http);
+    };
 
     m_request_server_client->on_request_server_died = [this]() {
         m_request_server_client = nullptr;

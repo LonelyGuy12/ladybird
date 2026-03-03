@@ -31,9 +31,13 @@ using namespace AK::SIMD;
 #ifdef AK_COMPILER_CLANG
 #    define TAILCALL [[clang::musttail]]
 #    define HAS_TAILCALL
-#elif defined(AK_COMPILER_GCC) && (__GNUC__ > 14)
-#    define TAILCALL [[gnu::musttail]]
-#    define HAS_TAILCALL
+#elif defined(AK_COMPILER_GCC)
+#    if ((__GNUC__ > 15) || ((__GNUC__ == 15) && defined(NDEBUG) && !defined(HAS_ADDRESS_SANITIZER)))
+#        define TAILCALL [[gnu::musttail]]
+#        define HAS_TAILCALL
+#    else
+#        define TAILCALL
+#    endif
 #else
 #    define TAILCALL
 #endif
@@ -5818,7 +5822,6 @@ CompiledInstructions try_compile_instructions(Expression const& expression, Span
                 i32_const_value = instruction.arguments().get<i32>();
                 pattern_state = InsnPatternState::GetLocalI32Const;
             } else if (instruction.opcode() == Instructions::local_get) {
-                swap(local_index_0, local_index_1);
                 local_index_1 = instruction.local_index();
                 pattern_state = InsnPatternState::GetLocalx2;
             } else if (instruction.opcode() == Instructions::i32_add) {
@@ -5834,9 +5837,8 @@ CompiledInstructions try_compile_instructions(Expression const& expression, Span
                 set_default_dispatch(result.extra_instruction_storage.unsafe_last());
                 pattern_state = InsnPatternState::Nothing;
                 continue;
-            }
-            if (instruction.opcode() == Instructions::i32_and) {
-                // `i32.const a; local.get b; i32.add` -> `i32.and_constlocal b a`.
+            } else if (instruction.opcode() == Instructions::i32_and) {
+                // `i32.const a; local.get b; i32.and` -> `i32.and_constlocal b a`.
                 // Replace the previous two ops with noops, and add i32.and_constlocal.
                 set_default_dispatch(nop, result.dispatches.size() - 1);
                 set_default_dispatch(nop, result.dispatches.size() - 2);
@@ -5848,8 +5850,9 @@ CompiledInstructions try_compile_instructions(Expression const& expression, Span
                 set_default_dispatch(result.extra_instruction_storage.unsafe_last());
                 pattern_state = InsnPatternState::Nothing;
                 continue;
+            } else {
+                pattern_state = InsnPatternState::Nothing;
             }
-            pattern_state = InsnPatternState::Nothing;
             break;
         case InsnPatternState::I64Const:
             if (instruction.opcode() == Instructions::local_get) {
@@ -5899,7 +5902,6 @@ CompiledInstructions try_compile_instructions(Expression const& expression, Span
                 i64_const_value = instruction.arguments().get<i64>();
                 pattern_state = InsnPatternState::GetLocalI64Const;
             } else if (instruction.opcode() == Instructions::local_get) {
-                swap(local_index_0, local_index_1);
                 local_index_1 = instruction.local_index();
                 pattern_state = InsnPatternState::GetLocalx2;
             } else if (instruction.opcode() == Instructions::i64_add) {

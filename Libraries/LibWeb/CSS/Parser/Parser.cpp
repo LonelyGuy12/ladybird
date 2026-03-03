@@ -15,6 +15,7 @@
 #include <AK/Debug.h>
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibURL/Parser.h>
+#include <LibWeb/CSS/CSSFontFeatureValuesRule.h>
 #include <LibWeb/CSS/CSSMarginRule.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
@@ -49,6 +50,12 @@ ParsingParams::ParsingParams(JS::Realm& realm, ParsingMode mode)
 {
 }
 
+ParsingParams::ParsingParams(JS::Realm& realm, IsUAStyleSheet is_ua_style_sheet)
+    : realm(realm)
+    , is_ua_style_sheet(is_ua_style_sheet)
+{
+}
+
 ParsingParams::ParsingParams(DOM::Document const& document, ParsingMode mode)
     : realm(const_cast<JS::Realm&>(document.realm()))
     , document(&document)
@@ -66,6 +73,7 @@ Parser::Parser(ParsingParams const& context, Vector<Token> tokens)
     : m_document(context.document)
     , m_realm(context.realm)
     , m_parsing_mode(context.mode)
+    , m_is_ua_style_sheet(context.is_ua_style_sheet)
     , m_tokens(move(tokens))
     , m_token_stream(m_tokens)
     , m_value_context(move(context.value_context))
@@ -1513,8 +1521,13 @@ bool Parser::is_valid_in_the_current_context(Declaration const&) const
         // Grouping rules can contain declarations if they are themselves inside a style rule
         return m_rule_context.contains_slow(RuleContext::Style);
 
+    case RuleContext::FontFeatureValue:
+        // Each feature value block accepts a list of declarations
+        return true;
+
     case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
+    case RuleContext::AtFontFeatureValues:
     case RuleContext::AtPage:
     case RuleContext::AtProperty:
     case RuleContext::Margin:
@@ -1568,12 +1581,15 @@ bool Parser::is_valid_in_the_current_context(AtRule const& at_rule) const
 
     case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
+    case RuleContext::FontFeatureValue:
     case RuleContext::AtKeyframes:
     case RuleContext::Keyframe:
     case RuleContext::AtProperty:
     case RuleContext::Margin:
         // These can't contain any at-rules
         return false;
+    case RuleContext::AtFontFeatureValues:
+        return CSSFontFeatureValuesRule::is_font_feature_value_type_at_keyword(at_rule.name);
     }
 
     VERIFY_NOT_REACHED();
@@ -1612,6 +1628,8 @@ bool Parser::is_valid_in_the_current_context(QualifiedRule const&) const
 
     case RuleContext::AtCounterStyle:
     case RuleContext::AtFontFace:
+    case RuleContext::AtFontFeatureValues:
+    case RuleContext::FontFeatureValue:
     case RuleContext::AtPage:
     case RuleContext::AtProperty:
     case RuleContext::Keyframe:

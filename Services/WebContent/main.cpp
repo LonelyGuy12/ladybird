@@ -23,6 +23,7 @@
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/Fetching/Fetching.h>
 #include <LibWeb/HTML/Scripting/PythonEngine.h>
+#include <LibWeb/HTML/UniversalGlobalScope.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Internals/Internals.h>
 #include <LibWeb/Loader/ContentFilter.h>
@@ -30,9 +31,9 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Painting/BackingStoreManager.h>
 #include <LibWeb/Painting/PaintableBox.h>
-#include <LibWeb/Platform/EventLoopPluginSerenity.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/WebIDL/Tracing.h>
-#include <LibWebView/Plugins/FontPlugin.h>
 #include <LibWebView/Plugins/ImageCodecPlugin.h>
 #include <LibWebView/SiteIsolation.h>
 #include <LibWebView/Utilities.h>
@@ -81,7 +82,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     WebView::platform_init();
 
-    Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPluginSerenity);
+    Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPlugin);
 
     StringView command_line {};
     StringView executable_path {};
@@ -91,6 +92,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     int request_server_socket { -1 };
     int image_decoder_socket { -1 };
     bool enable_test_mode = false;
+    bool expose_experimental_interfaces = false;
     bool expose_internals_object = false;
     bool wait_for_debugger = false;
     bool log_all_js_exceptions = false;
@@ -104,6 +106,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool disable_scrollbar_painting = false;
     StringView echo_server_port_string_view {};
     StringView default_time_zone {};
+    bool file_origins_are_tuple_origins = false;
 
     Core::ArgsParser args_parser;
     args_parser.add_option(command_line, "Browser process command line", "command-line", 0, "command_line");
@@ -112,6 +115,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(request_server_socket, "File descriptor of the socket for the RequestServer connection", "request-server-socket", 'r', "request_server_socket");
     args_parser.add_option(image_decoder_socket, "File descriptor of the socket for the ImageDecoder connection", "image-decoder-socket", 'i', "image_decoder_socket");
     args_parser.add_option(enable_test_mode, "Enable test mode", "test-mode");
+    args_parser.add_option(expose_experimental_interfaces, "Expose experimental IDL interfaces", "expose-experimental-interfaces");
     args_parser.add_option(expose_internals_object, "Expose internals object", "expose-internals-object");
     args_parser.add_option(certificates, "Path to a certificate file", "certificate", 'C', "certificate");
     args_parser.add_option(wait_for_debugger, "Wait for debugger", "wait-for-debugger");
@@ -127,6 +131,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(echo_server_port_string_view, "Echo server port used in test internals", "echo-server-port", 0, "echo_server_port");
     args_parser.add_option(is_headless, "Report that the browser is running in headless mode", "headless");
     args_parser.add_option(default_time_zone, "Default time zone", "default-time-zone", 0, "time-zone-id");
+    args_parser.add_option(file_origins_are_tuple_origins, "Treat file:// URLs as having tuple origins", "tuple-file-origins");
 
     args_parser.parse(arguments);
 
@@ -139,17 +144,14 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
             dbgln("Failed to set default time zone: {}", result.error());
     }
 
+    if (file_origins_are_tuple_origins)
+        URL::set_file_scheme_urls_have_tuple_origins();
+
     auto& font_provider = static_cast<Gfx::PathFontProvider&>(Gfx::FontDatabase::the().install_system_font_provider(make<Gfx::PathFontProvider>()));
     if (force_fontconfig) {
         font_provider.set_name_but_fixme_should_create_custom_system_font_provider("FontConfig"_string);
     }
     font_provider.load_all_fonts_from_uri("resource://fonts"sv);
-
-    // Test mode implies internals object is exposed and the Skia CPU backend is used
-    if (enable_test_mode) {
-        expose_internals_object = true;
-        force_cpu_painting = true;
-    }
 
     Web::set_browser_process_command_line(command_line);
     Web::set_browser_process_executable_path(executable_path);
@@ -192,8 +194,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     Web::HTML::Window::set_enable_test_mode(enable_test_mode);
     Web::HTML::Window::set_internals_object_exposed(expose_internals_object);
+    Web::HTML::UniversalGlobalScopeMixin::set_experimental_interfaces_exposed(expose_experimental_interfaces);
 
-    Web::Platform::FontPlugin::install(*new WebView::FontPlugin(enable_test_mode, &font_provider));
+    Web::Platform::FontPlugin::install(*new Web::Platform::FontPlugin(enable_test_mode, &font_provider));
 
     Web::Bindings::initialize_main_thread_vm(Web::Bindings::AgentType::SimilarOriginWindow);
 
@@ -201,15 +204,6 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         Web::Bindings::main_thread_vm().heap().set_should_collect_on_every_allocation(true);
 
     TRY(initialize_resource_loader(Web::Bindings::main_thread_vm().heap(), request_server_socket));
-
-    // Initialize Python engine for <script type="text/python"> support
-    Web::Bindings::initialize_python_engine();
-
-    // Set up cleanup handler for Python engine
-    auto cleanup_handler = []() {
-        Web::Bindings::shutdown_python_engine();
-    };
-    atexit(cleanup_handler);
 
     if (log_all_js_exceptions) {
         JS::set_log_all_js_exceptions(true);

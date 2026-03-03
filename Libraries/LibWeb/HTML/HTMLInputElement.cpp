@@ -8,6 +8,7 @@
  * Copyright (c) 2024, Fernando Kiotheka <fer@k6a.dev>
  * Copyright (c) 2025, Felipe Muñoz Mazur <felipe.munoz.mazur@protonmail.com>
  * Copyright (c) 2025, Glenn Skrzypczak <glenn.skrzypczak@gmail.com>
+ * Copyright (c) 2026, Michiel Nijenhuis <michielmitsjol@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -19,6 +20,8 @@
 #include <LibURL/Parser.h>
 #include <LibWeb/Bindings/HTMLInputElementPrototype.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/CSS/CSSStyleProperties.h>
+#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
@@ -209,8 +212,7 @@ void HTMLInputElement::set_checked(bool checked)
         },
         {});
 
-    if (auto* paintable = this->paintable())
-        paintable->set_needs_display();
+    set_needs_display();
 }
 
 void HTMLInputElement::set_checked_binding(bool checked)
@@ -332,12 +334,12 @@ FileFilter HTMLInputElement::parse_accept_attribute() const
 
         // The string "video/*"
         //     Indicates that video files are accepted.
-        if (value.equals_ignoring_ascii_case("video/*"sv))
+        else if (value.equals_ignoring_ascii_case("video/*"sv))
             filter.add_filter(FileFilter::FileType::Video);
 
         // The string "image/*"
         //     Indicates that image files are accepted.
-        if (value.equals_ignoring_ascii_case("image/*"sv))
+        else if (value.equals_ignoring_ascii_case("image/*"sv))
             filter.add_filter(FileFilter::FileType::Image);
 
         // A valid MIME type string with no parameters
@@ -806,6 +808,8 @@ static GC::Ref<CSS::CSSStyleProperties> inner_text_style_when_visible()
                 width: 100%;
                 height: 1lh;
                 align-items: center;
+                overflow: auto;
+                scrollbar-width: none;
                 text-overflow: clip;
                 white-space: nowrap;
             )~~~"sv);
@@ -858,7 +862,10 @@ static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_visible()
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
                 width: 100%;
+                height: 1lh;
                 align-items: center;
+                overflow: hidden;
+                scrollbar-width: none;
                 text-overflow: clip;
                 white-space: nowrap;
             )~~~"sv);
@@ -1143,6 +1150,8 @@ void HTMLInputElement::create_text_input_shadow_tree()
                 width: 100%;
                 height: 1lh;
                 align-items: center;
+                overflow: auto;
+                scrollbar-width: none;
                 text-overflow: clip;
                 white-space: nowrap;
             )~~~"sv);
@@ -1468,8 +1477,12 @@ void HTMLInputElement::did_receive_focus()
     if (m_placeholder_text_node)
         m_placeholder_text_node->invalidate_style(DOM::StyleInvalidationReason::DidReceiveFocus);
 
-    if (has_selectable_text())
-        document().get_selection()->remove_all_ranges();
+    if (has_selectable_text()) {
+        if (document().last_focus_trigger() == FocusTrigger::Key)
+            MUST(select());
+        else
+            document().get_selection()->remove_all_ranges();
+    }
 }
 
 void HTMLInputElement::did_lose_focus()
