@@ -288,9 +288,6 @@ public:
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
 
-    HashMap<FlyString, CSS::CustomPropertyRegistration>& registered_property_set();
-    Optional<CSS::CustomPropertyRegistration const&> get_registered_custom_property(FlyString const& name) const;
-
     double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
 
     Optional<String> get_style_sheet_source(CSS::StyleSheetIdentifier const&) const;
@@ -989,8 +986,6 @@ public:
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
     HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& registered_custom_properties();
 
-    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
-
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
 
     CSS::StyleScope const& style_scope() const { return m_style_scope; }
@@ -1010,9 +1005,10 @@ private:
 
     // Python package management
     bool m_python_packages_loaded { false };
+    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
 
     // ^HTML::GlobalEventHandlers
-    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return GC::Ptr<EventTarget>(static_cast<EventTarget&>(*this)); }
+    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return *this; }
     virtual void finalize() override final;
 
     void invalidate_style_of_elements_affected_by_has();
@@ -1421,5 +1417,12 @@ template<>
 inline bool Node::fast_is<Document>() const { return is_document(); }
 
 bool is_a_registrable_domain_suffix_of_or_is_equal_to(StringView host_suffix_string, URL::Host const& original_host);
+
+}
+
+namespace JS {
+
+template<>
+inline bool JS::Object::fast_is<Web::DOM::Document>() const { return is_dom_document(); }
 
 }

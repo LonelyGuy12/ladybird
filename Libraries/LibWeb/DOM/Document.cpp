@@ -36,6 +36,7 @@
 #include <LibWeb/Bindings/DocumentPrototype.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/Bindings/PythonDOMWrapperCache.h>
 #include <LibWeb/CSS/AnimationEvent.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSImportRule.h>
@@ -66,9 +67,6 @@
 #include <LibWeb/DOM/CustomEvent.h>
 #include <LibWeb/DOM/DOMImplementation.h>
 #include <LibWeb/DOM/Document.h>
-#ifdef ENABLE_PYTHON
-#    include <LibWeb/Bindings/PythonDOMWrapperCache.h>
-#endif
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/DocumentObserver.h>
 #include <LibWeb/DOM/DocumentOrShadowRoot.h>
