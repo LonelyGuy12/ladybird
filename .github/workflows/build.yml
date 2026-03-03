@@ -114,8 +114,12 @@ jobs:
 
       - name: Install dependencies including Clang 19+
         run: |
-          brew update
-          brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool
+          brew update || true   # non-fatal: tap HTTP 500s are transient; homebrew/core still updates
+          for i in 1 2 3; do
+            brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool && break
+            echo "brew install attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
           
           # Ensure Python 3.14 is properly linked
           brew link --overwrite python@3.14
