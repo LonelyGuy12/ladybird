@@ -69,9 +69,8 @@ set(GENERATED_SOURCES
 )
 
 
-# Force CMake reconfiguration to pick up PUBLIC LibCoreMinimal dependency
 ladybird_lib(LibWebView webview EXPLICIT_SYMBOL_EXPORT)
-target_link_libraries(LibWebView PUBLIC LibCoreMinimal PRIVATE LibCore LibDatabase LibDevTools LibFileSystem LibGfx LibHTTP LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax LibTextCodec)
+target_link_libraries(LibWebView PRIVATE LibCore LibDatabase LibDevTools LibFileSystem LibGfx LibHTTP LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax LibTextCodec)
 
 if (APPLE)
     target_link_libraries(LibWebView PRIVATE LibThreading)
