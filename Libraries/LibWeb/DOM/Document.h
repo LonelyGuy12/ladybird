@@ -597,6 +597,7 @@ public:
     // Python package management
     bool has_python_packages_loaded() const { return m_python_packages_loaded; }
     void set_python_packages_loaded(bool loaded) { m_python_packages_loaded = loaded; }
+    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
     void register_viewport_client(ViewportClient&);
     void unregister_viewport_client(ViewportClient&);
     void inform_all_viewport_clients_about_the_current_viewport_rect();
@@ -1043,9 +1044,8 @@ private:
     // ^JS::Object
     virtual bool is_dom_document() const final { return true; }
 
-    // Python package management
+    // Python package management (bool is private, cache is public for PythonDOMBindings)
     bool m_python_packages_loaded { false };
-    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
 
     // ^HTML::GlobalEventHandlers
     virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return *this; }
