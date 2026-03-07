@@ -726,9 +726,6 @@ set(SOURCES
     IndexedDB/IDBVersionChangeEvent.cpp
     IndexedDB/Internal/Algorithms.cpp
     IndexedDB/Internal/Database.cpp
-    IndexedDB/Internal/IDBDatabaseObserver.cpp
-    IndexedDB/Internal/IDBRequestObserver.cpp
-    IndexedDB/Internal/IDBTransactionObserver.cpp
     IndexedDB/Internal/Index.cpp
     IndexedDB/Internal/Key.cpp
     IndexedDB/Internal/ObjectStore.cpp
@@ -1212,7 +1209,6 @@ generate_html_implementation()
 set(GENERATED_SOURCES
     ARIA/AriaRoles.cpp
     CSS/DefaultStyleSheetSource.cpp
-    CSS/MediaControlsStyleSheetSource.cpp
     CSS/DescriptorID.cpp
     CSS/Enums.cpp
     CSS/EnvironmentVariable.cpp
@@ -1233,6 +1229,7 @@ set(GENERATED_SOURCES
     SVG/SVGStyleSheetSource.cpp
     Worker/WebWorkerClientEndpoint.h
     Worker/WebWorkerServerEndpoint.h
+    HTML/MediaControlsDOM.cpp
     HTML/Parser/NamedCharacterReferences.cpp
 )
 

@@ -738,7 +738,7 @@ Optional<ScopedOperand> AssignmentExpression::generate_bytecode(Bytecode::Genera
                         if (!lhs_is_super_expression)
                             generator.emit_put_by_id(*base, property_key_table_index, rval, Bytecode::PutKind::Normal, generator.next_property_lookup_cache(), move(base_identifier));
                         else
-                            generator.emit<Bytecode::Op::PutNormalByIdWithThis>(*base, *this_value, property_key_table_index, rval, generator.next_property_lookup_cache());
+                            generator.emit<Bytecode::Op::PutByIdWithThis>(*base, *this_value, property_key_table_index, rval, Bytecode::PutKind::Normal, generator.next_property_lookup_cache());
                     } else if (expression.property().is_private_identifier()) {
                         auto identifier_table_ref = generator.intern_identifier(as<PrivateIdentifier>(expression.property()).string());
                         generator.emit<Bytecode::Op::PutPrivateById>(*base, identifier_table_ref, rval);
@@ -4255,7 +4255,12 @@ Optional<ScopedOperand> MetaProperty::generate_bytecode(Bytecode::Generator& gen
 Optional<ScopedOperand> ClassFieldInitializerStatement::generate_bytecode(Bytecode::Generator& generator, Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
-    auto value = generator.emit_named_evaluation_if_anonymous_function(*m_expression, generator.intern_identifier(m_class_field_identifier_name), preferred_dst);
+    // Only set lhs_name for compile-time-known keys (non-empty names).
+    // For computed keys, m_class_field_identifier_name is empty and the name is set at runtime.
+    Optional<IdentifierTableIndex> lhs_name;
+    if (!m_class_field_identifier_name.is_empty())
+        lhs_name = generator.intern_identifier(m_class_field_identifier_name);
+    auto value = generator.emit_named_evaluation_if_anonymous_function(*m_expression, lhs_name, preferred_dst);
     generator.perform_needed_unwinds<Bytecode::Op::Return>();
     generator.emit<Bytecode::Op::Return>(value.operand());
     return value;

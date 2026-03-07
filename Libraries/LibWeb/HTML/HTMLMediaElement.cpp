@@ -197,6 +197,7 @@ void HTMLMediaElement::removed_from(DOM::Node* old_parent, DOM::Node& old_root)
 
 void HTMLMediaElement::cancel_the_fetching_process()
 {
+    m_current_fetch_generation++;
     m_fetch_data.clear();
 }
 
@@ -432,7 +433,7 @@ void HTMLMediaElement::set_duration(double duration)
 
     upon_has_ended_playback_possibly_changed();
 
-    set_needs_display();
+    set_needs_repaint();
 }
 
 GC::Ref<WebIDL::Promise> HTMLMediaElement::play()
@@ -1330,7 +1331,7 @@ void HTMLMediaElement::update_video_frame_and_timeline()
         auto sink_update_result = m_selected_video_track_sink->update();
         if (sink_update_result == Media::DisplayingVideoSinkUpdateResult::NewFrameAvailable) {
             ensure_external_content_source().update(m_selected_video_track_sink->current_frame());
-            set_needs_display();
+            set_needs_repaint();
         }
     }
 
@@ -1443,7 +1444,7 @@ void HTMLMediaElement::on_video_track_added(Media::Track const& track)
     auto event = TrackEvent::create(realm, HTML::EventNames::addtrack, move(event_init));
     m_video_tracks->dispatch_event(event);
 
-    set_needs_display();
+    set_needs_repaint();
 }
 
 void HTMLMediaElement::on_metadata_parsed()
@@ -2100,7 +2101,7 @@ void HTMLMediaElement::set_show_poster(bool show_poster)
 
     m_show_poster = show_poster;
 
-    set_needs_display();
+    set_needs_repaint();
 }
 
 void HTMLMediaElement::set_paused(bool paused)
@@ -2118,7 +2119,7 @@ void HTMLMediaElement::set_paused(bool paused)
             document().page().client().page_did_change_audio_play_state(AudioPlayState::Paused);
     }
 
-    set_needs_display();
+    set_needs_repaint();
     set_needs_style_update(true);
 }
 
