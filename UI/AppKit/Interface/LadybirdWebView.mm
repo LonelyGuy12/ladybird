@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ * Copyright (c) 2023-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -857,10 +857,7 @@ struct HideCursor {
             return;
         }
 
-        if (([[self window] styleMask] & NSWindowStyleMaskFullScreen) == 0) {
-            [[self window] toggleFullScreen:nil];
-        }
-
+        [self.observer onEnterFullscreenWindow];
         m_web_view_bridge->did_update_window_rect();
     };
 
@@ -870,10 +867,7 @@ struct HideCursor {
             return;
         }
 
-        if (([[self window] styleMask] & NSWindowStyleMaskFullScreen) != 0) {
-            [[self window] toggleFullScreen:nil];
-        }
-
+        [self.observer onExitFullscreenWindow];
         m_web_view_bridge->did_update_window_rect();
     };
 
