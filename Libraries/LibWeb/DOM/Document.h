@@ -18,39 +18,28 @@
 #include <AK/WeakPtr.h>
 #include <LibCore/Forward.h>
 #include <LibCore/SharedVersion.h>
-#include <LibJS/Console.h>
 #include <LibJS/Forward.h>
 #include <LibURL/Origin.h>
 #include <LibURL/URL.h>
 #include <LibUnicode/Forward.h>
-#include <LibWeb/CSS/CSSPropertyRule.h>
-#include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/EnvironmentVariable.h>
 #include <LibWeb/CSS/StyleScope.h>
-#include <LibWeb/CSS/StyleSheetList.h>
-#include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/ParentNode.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/ViewportClient.h>
 #include <LibWeb/Export.h>
-#include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/CrossOrigin/OpenerPolicy.h>
 #include <LibWeb/HTML/DocumentReadyState.h>
 #include <LibWeb/HTML/Focus.h>
-#include <LibWeb/HTML/HTMLScriptElement.h>
-#include <LibWeb/HTML/History.h>
 #include <LibWeb/HTML/NavigationType.h>
 #include <LibWeb/HTML/PaintConfig.h>
 #include <LibWeb/HTML/SandboxingFlagSet.h>
-#include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
 #include <LibWeb/TrustedTypes/InjectionSink.h>
-#include <LibWeb/ViewTransition/ViewTransition.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
-#include <LibWeb/WebIDL/ObservableArray.h>
-#include <LibWeb/XPath/XPath.h>
 
 namespace Web::Bindings {
 
@@ -81,64 +70,64 @@ enum class InvalidateLayoutTreeReason {
 
 [[nodiscard]] StringView to_string(InvalidateLayoutTreeReason);
 
-#define ENUMERATE_UPDATE_LAYOUT_REASONS(X)    \
-    X(CanvasRenderingContext2DSetFilter)      \
-    X(CanvasRenderingContext2DSetFillStyle)   \
-    X(CanvasRenderingContext2DSetShadowColor) \
-    X(CanvasRenderingContext2DSetStrokeStyle) \
-    X(CanvasSetFillStyle)                     \
-    X(CursorBlinkTimer)                       \
-    X(ChildDocumentStyleUpdate)               \
-    X(Debugging)                              \
-    X(DocumentElementFromPoint)               \
-    X(DocumentElementsFromPoint)              \
-    X(DocumentFindMatchingText)               \
-    X(DocumentSetDesignMode)                  \
-    X(DumpDisplayList)                        \
-    X(ElementCheckVisibility)                 \
-    X(ElementClientHeight)                    \
-    X(ElementClientLeft)                      \
-    X(ElementClientTop)                       \
-    X(ElementClientWidth)                     \
-    X(ElementGetClientRects)                  \
-    X(ElementIsPotentiallyScrollable)         \
-    X(ElementScroll)                          \
-    X(ElementScrollHeight)                    \
-    X(ElementScrollIntoView)                  \
-    X(ElementScrollLeft)                      \
-    X(ElementScrollTop)                       \
-    X(ElementScrollWidth)                     \
-    X(ElementSetScrollLeft)                   \
-    X(ElementSetScrollTop)                    \
-    X(EventHandlerHandleDoubleClick)          \
-    X(EventHandlerHandleDragAndDrop)          \
-    X(EventHandlerHandleMouseDown)            \
-    X(EventHandlerHandleMouseMove)            \
-    X(EventHandlerHandleMouseUp)              \
-    X(EventHandlerHandleMouseWheel)           \
-    X(EventHandlerHandleTripleClick)          \
-    X(HTMLElementGetTheTextSteps)             \
-    X(HTMLElementOffsetHeight)                \
-    X(HTMLElementOffsetLeft)                  \
-    X(HTMLElementOffsetParent)                \
-    X(HTMLElementOffsetTop)                   \
-    X(HTMLElementOffsetWidth)                 \
-    X(HTMLElementScrollParent)                \
-    X(HTMLEventLoopRenderingUpdate)           \
-    X(HTMLImageElementHeight)                 \
-    X(HTMLImageElementWidth)                  \
-    X(HTMLImageElementX)                      \
-    X(HTMLImageElementY)                      \
-    X(HTMLInputElementHeight)                 \
-    X(HTMLInputElementWidth)                  \
-    X(InternalsHitTest)                       \
-    X(MediaQueryListMatches)                  \
-    X(NodeNameOrDescription)                  \
-    X(RangeGetClientRects)                    \
-    X(ResolvedCSSStyleDeclarationProperty)    \
-    X(SVGDecodedImageDataRender)              \
-    X(SVGGraphicsElementGetBBox)              \
-    X(SourceSetNormalizeSourceDensities)      \
+#define ENUMERATE_UPDATE_LAYOUT_REASONS(X) \
+    X(AutoScrollSelection)                 \
+    X(ChildDocumentStyleUpdate)            \
+    X(Debugging)                           \
+    X(DocumentElementFromPoint)            \
+    X(DocumentElementsFromPoint)           \
+    X(DocumentFindMatchingText)            \
+    X(DocumentSetDesignMode)               \
+    X(DumpDisplayList)                     \
+    X(ElementCheckVisibility)              \
+    X(ElementClientHeight)                 \
+    X(ElementClientWidth)                  \
+    X(ElementGetClientRects)               \
+    X(ElementIsPotentiallyScrollable)      \
+    X(ElementScroll)                       \
+    X(ElementScrollHeight)                 \
+    X(ElementScrollIntoView)               \
+    X(ElementScrollLeft)                   \
+    X(ElementScrollTop)                    \
+    X(ElementScrollWidth)                  \
+    X(ElementSetScrollLeft)                \
+    X(ElementSetScrollTop)                 \
+    X(EventHandlerHandleDoubleClick)       \
+    X(EventHandlerHandleDragAndDrop)       \
+    X(EventHandlerHandleMouseDown)         \
+    X(EventHandlerHandleMouseMove)         \
+    X(EventHandlerHandleMouseUp)           \
+    X(EventHandlerHandleMouseWheel)        \
+    X(EventHandlerHandleTripleClick)       \
+    X(HTMLElementGetTheTextSteps)          \
+    X(HTMLElementOffsetHeight)             \
+    X(HTMLElementOffsetLeft)               \
+    X(HTMLElementOffsetParent)             \
+    X(HTMLElementOffsetTop)                \
+    X(HTMLElementOffsetWidth)              \
+    X(HTMLElementScrollParent)             \
+    X(HTMLEventLoopRenderingUpdate)        \
+    X(HTMLImageElementHeight)              \
+    X(HTMLImageElementWidth)               \
+    X(HTMLImageElementX)                   \
+    X(HTMLImageElementY)                   \
+    X(HTMLInputElementHeight)              \
+    X(HTMLInputElementWidth)               \
+    X(HTMLLabelElementActivationBehavior)  \
+    X(InspectDOMTree)                      \
+    X(InternalsHitTest)                    \
+    X(MediaQueryListMatches)               \
+    X(NavigableSelectedText)               \
+    X(NavigableViewportScroll)             \
+    X(NodeNameOrDescription)               \
+    X(RangeGetClientRects)                 \
+    X(ResolvedCSSStyleDeclarationProperty) \
+    X(SVGDecodedImageDataRender)           \
+    X(ScrollCursorIntoView)                \
+    X(ProcessScreenshot)                   \
+    X(SVGGraphicsElementGetBBox)           \
+    X(SourceSetNormalizeSourceDensities)   \
+    X(ViewTransitionCapture)               \
     X(WindowScroll)
 
 enum class UpdateLayoutReason {
@@ -183,8 +172,17 @@ enum class PolicyControlledFeature : u8 {
     Autoplay,
     EncryptedMedia,
     FocusWithoutUserActivation,
+    Fullscreen,
     Gamepad,
     WindowManagement,
+};
+
+struct PendingFullscreenEvent {
+    enum class Type {
+        Change,
+        Error,
+    } type;
+    GC::Ref<Element> element;
 };
 
 class WEB_API Document
@@ -227,10 +225,9 @@ public:
 
     GC::Ptr<Selection::Selection> get_selection() const;
 
-    WebIDL::ExceptionOr<String> cookie(Cookie::Source = Cookie::Source::NonHttp);
-    WebIDL::ExceptionOr<void> set_cookie(StringView, Cookie::Source = Cookie::Source::NonHttp);
+    WebIDL::ExceptionOr<String> cookie();
+    WebIDL::ExceptionOr<void> set_cookie(StringView);
     bool is_cookie_averse() const;
-    void enable_cookies_on_file_domains(Badge<Internals::Internals>) { m_enable_cookies_on_file_domains = true; }
 
     void set_cookie_version_index(Core::SharedVersionIndex cookie_version_index) { m_cookie_version_index = cookie_version_index; }
     void reset_cookie_version() { m_cookie_version = Core::INVALID_SHARED_VERSION; }
@@ -284,12 +281,9 @@ public:
     CSS::StyleSheetList& style_sheets();
     CSS::StyleSheetList const& style_sheets() const;
 
-    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)>&& callback) const;
+    void for_each_active_css_style_sheet(Function<void(CSS::CSSStyleSheet&)> const& callback) const;
 
     CSS::StyleSheetList* style_sheets_for_bindings() { return &style_sheets(); }
-
-    HashMap<FlyString, CSS::CustomPropertyRegistration>& registered_property_set();
-    Optional<CSS::CustomPropertyRegistration const&> get_registered_custom_property(FlyString const& name) const;
 
     double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
 
@@ -378,7 +372,11 @@ public:
     void obtain_theme_color();
 
     void update_style();
+    void update_style_if_needed_for_element(AbstractElement const&);
+    [[nodiscard]] bool element_needs_style_update(AbstractElement const&) const;
     void update_layout(UpdateLayoutReason);
+    void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
+    [[nodiscard]] bool layout_is_up_to_date() const;
     void update_paint_and_hit_testing_properties_if_needed();
     void update_animated_style_if_needed();
 
@@ -390,8 +388,14 @@ public:
     Layout::Viewport const* layout_node() const;
     Layout::Viewport* layout_node();
 
+    Layout::Viewport const* unsafe_layout_node() const;
+    Layout::Viewport* unsafe_layout_node();
+
     Painting::ViewportPaintable const* paintable() const;
     Painting::ViewportPaintable* paintable();
+
+    Painting::ViewportPaintable const* unsafe_paintable() const;
+    Painting::ViewportPaintable* unsafe_paintable();
 
     GC::Ref<NodeList> get_elements_by_name(FlyString const&);
 
@@ -473,7 +477,7 @@ public:
 
     void set_editable(bool editable) { m_editable = editable; }
 
-    // // https://html.spec.whatwg.org/multipage/interaction.html#focused-area-of-the-document
+    // https://html.spec.whatwg.org/multipage/interaction.html#focused-area-of-the-document
     GC::Ptr<Node> focused_area() { return m_focused_area; }
     GC::Ptr<Node const> focused_area() const { return m_focused_area; }
     void set_focused_area(GC::Ptr<Node>);
@@ -481,7 +485,7 @@ public:
     HTML::FocusTrigger last_focus_trigger() const { return m_last_focus_trigger; }
     void set_last_focus_trigger(HTML::FocusTrigger trigger) { m_last_focus_trigger = trigger; }
 
-    Element const* active_element() const { return m_active_element ? m_active_element.ptr() : body(); }
+    Element const* active_element() const;
     void set_active_element(GC::Ptr<Element>);
 
     Element const* target_element() const { return m_target_element.ptr(); }
@@ -591,15 +595,10 @@ public:
     GC::Ref<CSS::VisualViewport> visual_viewport();
     [[nodiscard]] CSSPixelRect viewport_rect() const;
 
-    class ViewportClient {
-    public:
-        virtual ~ViewportClient() = default;
-        virtual void did_set_viewport_rect(CSSPixelRect const&) = 0;
-    };
-
     // Python package management
     bool has_python_packages_loaded() const { return m_python_packages_loaded; }
     void set_python_packages_loaded(bool loaded) { m_python_packages_loaded = loaded; }
+    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
     void register_viewport_client(ViewportClient&);
     void unregister_viewport_client(ViewportClient&);
     void inform_all_viewport_clients_about_the_current_viewport_rect();
@@ -637,6 +636,8 @@ public:
 
     [[nodiscard]] bool needs_full_layout_tree_update() const { return m_needs_full_layout_tree_update; }
     void set_needs_full_layout_tree_update(bool b) { m_needs_full_layout_tree_update = b; }
+
+    void mark_svg_root_as_needing_relayout(Layout::SVGSVGBox&);
 
     void set_needs_to_refresh_scroll_state(bool b);
 
@@ -822,8 +823,9 @@ public:
     GC::RootVector<GC::Ref<Element>> elements_from_point(double x, double y);
     GC::Ptr<Element const> scrolling_element() const;
 
-    void set_needs_to_resolve_paint_only_properties() { m_needs_to_resolve_paint_only_properties = true; }
     void set_needs_animated_style_update() { m_needs_animated_style_update = true; }
+
+    void set_needs_invalidation_of_elements_affected_by_has() { m_needs_invalidation_of_elements_affected_by_has = true; }
 
     void set_needs_accumulated_visual_contexts_update(bool value) { m_needs_accumulated_visual_contexts_update = value; }
     bool needs_accumulated_visual_contexts_update() const { return m_needs_accumulated_visual_contexts_update; }
@@ -842,8 +844,19 @@ public:
 
     void register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
     void unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
-    void for_each_shadow_root(Function<void(DOM::ShadowRoot&)>&& callback);
-    void for_each_shadow_root(Function<void(DOM::ShadowRoot&)>&& callback) const;
+    template<typename Callback>
+    void for_each_shadow_root(Callback&& callback)
+    {
+        for (auto& shadow_root : m_shadow_roots)
+            callback(shadow_root);
+    }
+
+    template<typename Callback>
+    void for_each_shadow_root(Callback&& callback) const
+    {
+        for (auto& shadow_root : m_shadow_roots)
+            callback(const_cast<ShadowRoot&>(shadow_root));
+    }
 
     void add_an_element_to_the_top_layer(GC::Ref<Element>);
     void request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Element>);
@@ -892,8 +905,13 @@ public:
     GC::Ptr<HTML::Navigable> cached_navigable();
     void set_cached_navigable(GC::Ptr<HTML::Navigable>);
 
-    void set_needs_display(InvalidateDisplayList = InvalidateDisplayList::Yes);
-    void set_needs_display(CSSPixelRect const&, InvalidateDisplayList = InvalidateDisplayList::Yes);
+    template<OneOf<Painting::Paintable, HTML::Navigable, CSS::VisualViewport, Web::EventHandler> T>
+    void set_needs_repaint(Badge<T>, InvalidateDisplayList should_invalidate_display_list = InvalidateDisplayList::Yes)
+    {
+        set_needs_repaint(should_invalidate_display_list);
+    }
+
+    void notify_css_background_image_loaded();
 
     RefPtr<Painting::DisplayList> cached_display_list() const;
     RefPtr<Painting::DisplayList> record_display_list(HTML::PaintConfig);
@@ -901,6 +919,7 @@ public:
     void invalidate_display_list();
 
     Unicode::Segmenter& grapheme_segmenter() const;
+    Unicode::Segmenter& line_segmenter() const;
     Unicode::Segmenter& word_segmenter() const;
 
     struct StepsToFireBeforeunloadResult {
@@ -915,8 +934,14 @@ public:
     [[nodiscard]] WebIDL::CallbackType* onvisibilitychange();
     void set_onvisibilitychange(WebIDL::CallbackType*);
 
+    // https://fullscreen.spec.whatwg.org/#api
+    [[nodiscard]] WebIDL::CallbackType* onfullscreenchange();
+    void set_onfullscreenchange(WebIDL::CallbackType*);
+    [[nodiscard]] WebIDL::CallbackType* onfullscreenerror();
+    void set_onfullscreenerror(WebIDL::CallbackType*);
+
     // https://drafts.csswg.org/css-view-transitions-1/#dom-document-startviewtransition
-    GC::Ptr<ViewTransition::ViewTransition> start_view_transition(ViewTransition::ViewTransitionUpdateCallback update_callback);
+    GC::Ptr<ViewTransition::ViewTransition> start_view_transition(GC::Ptr<WebIDL::CallbackType> update_callback);
     // https://drafts.csswg.org/css-view-transitions-1/#perform-pending-transition-operations
     void perform_pending_transition_operations();
     // https://drafts.csswg.org/css-view-transitions-1/#flush-the-update-callback-queue
@@ -936,7 +961,7 @@ public:
 
     GC::Ref<EditingHostManager> editing_host_manager() const { return *m_editing_host_manager; }
 
-    // // https://w3c.github.io/editing/docs/execCommand/#default-single-line-container-name
+    // https://w3c.github.io/editing/docs/execCommand/#default-single-line-container-name
     FlyString const& default_single_line_container_name() const { return m_default_single_line_container_name; }
     void set_default_single_line_container_name(FlyString const& name) { m_default_single_line_container_name = name; }
 
@@ -976,6 +1001,22 @@ public:
 
     ElementByIdMap& element_by_id() const;
 
+    // https://fullscreen.spec.whatwg.org/#run-the-fullscreen-steps
+    void run_fullscreen_steps();
+    void append_pending_fullscreen_change(PendingFullscreenEvent::Type type, GC::Ref<Element> element);
+
+    void fullscreen_element_within_doc(GC::Ref<Element> element);
+    GC::Ptr<Element> fullscreen_element() const;
+    GC::Ptr<Element> fullscreen_element_for_bindings() const;
+
+    bool fullscreen() const;
+    bool fullscreen_enabled() const;
+
+    void fully_exit_fullscreen();
+    GC::Ref<WebIDL::Promise> exit_fullscreen();
+
+    void unfullscreen_element(GC::Ref<Element> element);
+
     auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
     auto const& script_blocking_style_sheet_set() const { return m_script_blocking_style_sheet_set; }
 
@@ -987,11 +1028,11 @@ public:
     Optional<Vector<CSS::Parser::ComponentValue>> environment_variable_value(CSS::EnvironmentVariable, Span<i64> indices = {}) const;
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
-    HashMap<FlyString, GC::Ref<Web::CSS::CSSPropertyRule>>& registered_custom_properties();
-
-    OwnPtr<Web::Bindings::PythonDOMWrapperCache> m_python_dom_wrapper_cache;
-
+    HashMap<FlyString, CSS::CustomPropertyRegistration>& registered_property_set();
+    Optional<CSS::CustomPropertyRegistration const&> get_registered_custom_property(FlyString const& name) const;
     NonnullRefPtr<CSS::StyleValue const> custom_property_initial_value(FlyString const& name) const;
+
+    HashMap<FlyString, NonnullRefPtr<CSS::CounterStyle const>> const& registered_counter_styles() const { return m_registered_counter_styles; }
 
     CSS::StyleScope const& style_scope() const { return m_style_scope; }
     CSS::StyleScope& style_scope() { return m_style_scope; }
@@ -1005,14 +1046,16 @@ protected:
     Document(JS::Realm&, URL::URL const&, TemporaryDocumentForFragmentParsing = TemporaryDocumentForFragmentParsing::No);
 
 private:
+    void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::Yes);
+
     // ^JS::Object
     virtual bool is_dom_document() const final { return true; }
 
-    // Python package management
+    // Python package management (bool is private, cache is public for PythonDOMBindings)
     bool m_python_packages_loaded { false };
 
     // ^HTML::GlobalEventHandlers
-    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return GC::Ptr<EventTarget>(static_cast<EventTarget&>(*this)); }
+    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(FlyString const&) final { return *this; }
     virtual void finalize() override final;
 
     void invalidate_style_of_elements_affected_by_has();
@@ -1024,6 +1067,9 @@ private:
     void run_unloading_cleanup_steps();
 
     void evaluate_media_rules();
+
+    bool is_simple_fullscreen_document() const;
+    GC::Ref<GC::HeapVector<GC::Ref<Document>>> collect_documents_to_unfullscreen();
 
     enum class AddLineFeed {
         Yes,
@@ -1057,8 +1103,11 @@ private:
     void run_csp_initialization() const;
 
     void build_registered_properties_cache();
+    void build_counter_style_cache();
 
     void ensure_cookie_version_index(URL::URL const& new_url, URL::URL const& old_url = {});
+
+    void unfullscreen();
 
     GC::Ref<Page> m_page;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
@@ -1088,6 +1137,7 @@ private:
     bool m_active_parser_was_aborted { false };
 
     bool m_has_been_destroyed { false };
+    bool m_has_fired_document_became_inactive { false };
 
     bool m_has_been_browsing_context_associated { false };
 
@@ -1189,6 +1239,10 @@ private:
     bool m_needs_full_style_update { false };
     bool m_needs_full_layout_tree_update { false };
 
+    bool m_is_running_update_layout { false };
+
+    HashTable<GC::Ref<Layout::SVGSVGBox>> m_svg_roots_needing_relayout;
+
     bool m_needs_animated_style_update { false };
 
     HashTable<GC::Ptr<NodeIterator>> m_node_iterators;
@@ -1223,7 +1277,7 @@ private:
     GC::Ptr<HTML::HTMLAllCollection> m_all;
 
     // https://drafts.csswg.org/css-font-loading/#font-source
-    GC::Ptr<CSS::FontFaceSet> m_fonts;
+    GC::Ref<CSS::FontFaceSet> m_fonts;
 
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#completely-loaded-time
     Optional<AK::UnixDateTime> m_completely_loaded_time;
@@ -1308,8 +1362,8 @@ private:
 
     bool m_design_mode_enabled { false };
 
-    bool m_needs_to_resolve_paint_only_properties { true };
     bool m_needs_accumulated_visual_contexts_update { false };
+    bool m_needs_invalidation_of_elements_affected_by_has { false };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
@@ -1355,12 +1409,11 @@ private:
     Optional<Core::SharedVersionIndex> m_cookie_version_index;
     String m_cookie;
 
-    bool m_enable_cookies_on_file_domains { false };
-
     Optional<HTML::PaintConfig> m_cached_display_list_paint_config;
     RefPtr<Painting::DisplayList> m_cached_display_list;
 
     mutable OwnPtr<Unicode::Segmenter> m_grapheme_segmenter;
+    mutable OwnPtr<Unicode::Segmenter> m_line_segmenter;
     mutable OwnPtr<Unicode::Segmenter> m_word_segmenter;
 
     GC::Ref<EditingHostManager> m_editing_host_manager;
@@ -1411,15 +1464,27 @@ private:
     HashMap<FlyString, CSS::CustomPropertyRegistration> m_registered_property_set;
     HashMap<FlyString, CSS::CustomPropertyRegistration> m_cached_registered_properties_from_css_property_rules;
 
+    HashMap<FlyString, NonnullRefPtr<CSS::CounterStyle const>> m_registered_counter_styles;
+
     CSS::StyleScope m_style_scope;
 
     // https://drafts.csswg.org/css-values-5/#random-caching
     HashMap<CSS::RandomCachingKey, double> m_element_shared_css_random_base_value_cache;
+
+    // https://fullscreen.spec.whatwg.org/#list-of-pending-fullscreen-events
+    Vector<PendingFullscreenEvent> m_pending_fullscreen_events;
 };
 
 template<>
 inline bool Node::fast_is<Document>() const { return is_document(); }
 
 bool is_a_registrable_domain_suffix_of_or_is_equal_to(StringView host_suffix_string, URL::Host const& original_host);
+
+}
+
+namespace JS {
+
+template<>
+inline bool JS::Object::fast_is<Web::DOM::Document>() const { return is_dom_document(); }
 
 }

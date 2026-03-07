@@ -22,7 +22,6 @@
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
-#include <LibWeb/Cookie/Cookie.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOMURL/DOMURL.h>
 #include <LibWeb/Fetch/BodyInit.h>
@@ -191,7 +190,7 @@ GC::Ref<Infrastructure::FetchController> fetch(JS::Realm& realm, Infrastructure:
     //    shared current time given crossOriginIsolatedCapability, and render-blocking is set to request’s
     //    render-blocking.
     auto timing_info = Infrastructure::FetchTimingInfo::create(vm);
-    auto now = HighResolutionTime::coarsened_shared_current_time(cross_origin_isolated_capability == HTML::CanUseCrossOriginIsolatedAPIs::Yes);
+    auto now = HighResolutionTime::coarsened_shared_current_time(cross_origin_isolated_capability);
     timing_info->set_start_time(now);
     timing_info->set_post_redirect_start_time(now);
     timing_info->set_render_blocking(request.render_blocking());
@@ -1118,10 +1117,25 @@ GC::Ref<PendingResponse> scheme_fetch(JS::Realm& realm, Infrastructure::FetchPar
     else if (request->current_url().scheme() == "file"sv || request->current_url().scheme() == "resource"sv) {
         // For now, unfortunate as it is, file: URLs are left as an exercise for the reader.
         // When in doubt, return a network error.
-        if (request->origin().has<URL::Origin>() && (request->origin().get<URL::Origin>().is_opaque() || request->origin().get<URL::Origin>().scheme() == "file"sv || request->origin().get<URL::Origin>().scheme() == "resource"sv))
-            return nonstandard_resource_loader_file_or_http_network_fetch(realm, fetch_params);
-        else
-            return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request with 'file:' or 'resource:' URL blocked"_string));
+
+        auto error = PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request with 'file:' or 'resource:' URL blocked"_string));
+
+        auto const* origin = request->origin().get_pointer<URL::Origin>();
+        if (!origin)
+            return error;
+
+        if (!(origin->is_opaque() || origin->scheme() == "file"sv || origin->scheme() == "resource"sv))
+            return error;
+
+        // Allow file:// pages to load subresources (scripts, styles, fonts, etc.) from other file:// URLs,
+        // but block the fetch() API and other requests without a destination from reading arbitrary files.
+        // Requests made via fetch() have an empty destination, so we use that to distinguish between
+        // subresource loads initiated by the browser (which have a destination) and programmatic fetches
+        // (which do not). This prevents data exfiltration via fetch() from file:// pages.
+        if (!request->destination().has_value())
+            return error;
+
+        return nonstandard_resource_loader_file_or_http_network_fetch(realm, fetch_params);
     }
     // -> HTTP(S) scheme
     else if (Infrastructure::is_http_or_https_scheme(request->current_url().scheme())) {
@@ -1167,7 +1181,7 @@ GC::Ref<PendingResponse> http_fetch(JS::Realm& realm, Infrastructure::FetchParam
 
         // 3. Let serviceWorkerStartTime be the coarsened shared current time given fetchParams’s cross-origin isolated
         //    capability.
-        auto service_worker_start_time = HighResolutionTime::coarsened_shared_current_time(fetch_params.cross_origin_isolated_capability() == HTML::CanUseCrossOriginIsolatedAPIs::Yes);
+        auto service_worker_start_time = HighResolutionTime::coarsened_shared_current_time(fetch_params.cross_origin_isolated_capability());
 
         // FIXME: 4. Set response to the result of invoking handle fetch for requestForServiceWorker, with fetchParams’s
         //           controller and fetchParams’s cross-origin isolated capability.
@@ -1459,7 +1473,7 @@ GC::Ptr<PendingResponse> http_redirect_fetch(JS::Realm& realm, Infrastructure::F
         // NOTE: BodyInitOrReadableBytes is a superset of Body::SourceType
         auto converted_source = source.has<ByteBuffer>()
             ? BodyInitOrReadableBytes { source.get<ByteBuffer>() }
-            : BodyInitOrReadableBytes { source.get<GC::Root<FileAPI::Blob>>() };
+            : BodyInitOrReadableBytes { source.get<GC::Ref<FileAPI::Blob>>() };
         auto [body, _] = safely_extract_body(realm, converted_source);
         request->set_body(body);
     }
@@ -1469,7 +1483,7 @@ GC::Ptr<PendingResponse> http_redirect_fetch(JS::Realm& realm, Infrastructure::F
 
     // 16. Set timingInfo’s redirect end time and post-redirect start time to the coarsened shared current time given
     //     fetchParams’s cross-origin isolated capability.
-    auto now = HighResolutionTime::coarsened_shared_current_time(fetch_params.cross_origin_isolated_capability() == HTML::CanUseCrossOriginIsolatedAPIs::Yes);
+    auto now = HighResolutionTime::coarsened_shared_current_time(fetch_params.cross_origin_isolated_capability());
     timing_info->set_redirect_end_time(now);
     timing_info->set_post_redirect_start_time(now);
 
@@ -1528,7 +1542,7 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
 
     // 7. Let the revalidatingFlag be unset.
 
-    auto include_credentials = IncludeCredentials::No;
+    auto include_credentials = HTTP::Cookie::IncludeCredentials::No;
 
     // 8. Run these steps, but abort when fetchParams is canceled:
     // NOTE: There's an 'if aborted' check after this anyway, so not doing this is fine and only incurs a small delay.
@@ -1572,15 +1586,15 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
                 && request->response_tainting() == Infrastructure::Request::ResponseTainting::Basic)
             // is true; otherwise false.
         ) {
-            include_credentials = IncludeCredentials::Yes;
+            include_credentials = HTTP::Cookie::IncludeCredentials::Yes;
         } else {
-            include_credentials = IncludeCredentials::No;
+            include_credentials = HTTP::Cookie::IncludeCredentials::No;
         }
 
         // 4. If Cross-Origin-Embedder-Policy allows credentials with request returns false, then set
         //    includeCredentials to false.
         if (!request->cross_origin_embedder_policy_allows_credentials())
-            include_credentials = IncludeCredentials::No;
+            include_credentials = HTTP::Cookie::IncludeCredentials::No;
 
         // 5. Let contentLength be httpRequest’s body’s length, if httpRequest’s body is non-null; otherwise null.
         auto content_length = http_request->body().has<GC::Ref<Infrastructure::Body>>()
@@ -1721,23 +1735,13 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
             http_request->header_list()->append({ "Sec-GPC"sv, "1"sv });
 
         // 21. If includeCredentials is true, then:
-        if (include_credentials == IncludeCredentials::Yes) {
+        if (include_credentials == HTTP::Cookie::IncludeCredentials::Yes) {
             // 1. If the user agent is not configured to block cookies for httpRequest (see section 7 of [COOKIES]),
             //    then:
-            if (true) {
-                // 1. Let cookies be the result of running the "cookie-string" algorithm (see section 5.4 of [COOKIES])
-                //    with the user agent’s cookie store and httpRequest’s current URL.
-                auto cookies = ([&] {
-                    auto& page = Bindings::principal_host_defined_page(HTML::principal_realm(realm));
-                    return page.client().page_did_request_cookie(http_request->current_url(), Cookie::Source::Http).cookie;
-                })();
-
-                // 2. If cookies is not the empty string, then append (`Cookie`, cookies) to httpRequest’s header list.
-                if (!cookies.is_empty()) {
-                    auto header = HTTP::Header::isomorphic_encode("Cookie"sv, cookies);
-                    http_request->header_list()->append(move(header));
-                }
-            }
+            //     1. Let cookies be the result of running the "cookie-string" algorithm (see section 5.4 of [COOKIES])
+            //        with the user agent’s cookie store and httpRequest’s current URL.
+            //     2. If cookies is not the empty string, then append (`Cookie`, cookies) to httpRequest’s header list.
+            // NB: HTTP cookies are attached by RequestServer.
 
             // 2. If httpRequest’s header list does not contain `Authorization`, then:
             if (!http_request->header_list()->contains("Authorization"sv)) {
@@ -1878,7 +1882,7 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
             response->set_range_requested(true);
 
         // 13. Set response’s request-includes-credentials to includeCredentials.
-        response->set_request_includes_credentials(include_credentials == IncludeCredentials::Yes);
+        response->set_request_includes_credentials(include_credentials == HTTP::Cookie::IncludeCredentials::Yes);
 
         auto inner_pending_response = PendingResponse::create(vm, request, *response);
 
@@ -1886,11 +1890,11 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
         //     and request’s traversable for user prompts is a traversable navigable:
         if (response->status() == 401
             && http_request->response_tainting() != Infrastructure::Request::ResponseTainting::CORS
-            && include_credentials == IncludeCredentials::Yes
+            && include_credentials == HTTP::Cookie::IncludeCredentials::Yes
             && request->traversable_for_user_prompts().has<GC::Ptr<HTML::TraversableNavigable>>()
             // AD-HOC: Require at least one WWW-Authenticate header to be set before automatically retrying an authenticated
             //         request (see rule 1 below). See: https://github.com/whatwg/fetch/issues/1766
-            && request->header_list()->contains("WWW-Authenticate"sv)) {
+            && response->header_list()->contains("WWW-Authenticate"sv)) {
             // 1. Needs testing: multiple `WWW-Authenticate` headers, missing, parsing issues.
             // (Red box in the spec, no-op)
 
@@ -1907,7 +1911,7 @@ GC::Ref<PendingResponse> http_network_or_cache_fetch(JS::Realm& realm, Infrastru
                 // NOTE: BodyInitOrReadableBytes is a superset of Body::SourceType
                 auto converted_source = source.has<ByteBuffer>()
                     ? BodyInitOrReadableBytes { source.get<ByteBuffer>() }
-                    : BodyInitOrReadableBytes { source.get<GC::Root<FileAPI::Blob>>() };
+                    : BodyInitOrReadableBytes { source.get<GC::Ref<FileAPI::Blob>>() };
                 auto [body, _] = safely_extract_body(realm, converted_source);
                 request->set_body(body);
             }
@@ -2030,7 +2034,7 @@ static void log_response(auto const& status_code, auto const& headers, auto cons
 // https://fetch.spec.whatwg.org/#concept-http-network-fetch
 // Drop-in replacement for 'HTTP-network fetch', but obviously non-standard :^)
 // It also handles file:// URLs since those can also go through ResourceLoader.
-GC::Ref<PendingResponse> nonstandard_resource_loader_file_or_http_network_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, IncludeCredentials include_credentials, IsNewConnectionFetch is_new_connection_fetch, RefPtr<HTTP::MemoryCache> http_cache)
+GC::Ref<PendingResponse> nonstandard_resource_loader_file_or_http_network_fetch(JS::Realm& realm, Infrastructure::FetchParams const& fetch_params, HTTP::Cookie::IncludeCredentials include_credentials, IsNewConnectionFetch is_new_connection_fetch, RefPtr<HTTP::MemoryCache> http_cache)
 {
     dbgln_if(WEB_FETCH_DEBUG, "Fetch: Running 'non-standard HTTP-network fetch' with: fetch_params @ {}", &fetch_params);
 
@@ -2053,7 +2057,7 @@ GC::Ref<PendingResponse> nonstandard_resource_loader_file_or_http_network_fetch(
     load_request.set_page(page);
     load_request.set_method(request->method());
     load_request.set_cache_mode(request->cache_mode());
-    load_request.set_store_set_cookie_headers(include_credentials == IncludeCredentials::Yes);
+    load_request.set_include_credentials(include_credentials);
     load_request.set_initiator_type(request->initiator_type());
 
     if (auto const* body = request->body().get_pointer<GC::Ref<Infrastructure::Body>>()) {
@@ -2167,7 +2171,7 @@ GC::Ref<PendingResponse> nonstandard_resource_loader_file_or_http_network_fetch(
     });
 
     auto network_request = ResourceLoader::the().load(load_request, on_headers_received, on_data_received, on_complete);
-    fetch_params.controller()->set_pending_request(move(network_request));
+    fetch_params.controller()->set_pending_request(network_request);
 
     return pending_response;
 }

@@ -13,6 +13,38 @@ test("basic functionality", () => {
     expect(a.uninitialized).toBeUndefined();
 });
 
+test("literal field initializers", () => {
+    class A {
+        pos_int = 42;
+        pos_float = 3.14;
+        neg_int = -1;
+        neg_float = -2.5;
+        neg_zero = -0;
+        bool_true = true;
+        bool_false = false;
+        null_val = null;
+        str_val = "hello";
+        static s_int = 99;
+        static s_neg = -7;
+        static s_str = "world";
+    }
+
+    const a = new A();
+    expect(a.pos_int).toBe(42);
+    expect(a.pos_float).toBe(3.14);
+    expect(a.neg_int).toBe(-1);
+    expect(a.neg_float).toBe(-2.5);
+    expect(a.neg_zero).toBe(-0);
+    expect(1 / a.neg_zero).toBe(-Infinity);
+    expect(a.bool_true).toBeTrue();
+    expect(a.bool_false).toBeFalse();
+    expect(a.null_val).toBeNull();
+    expect(a.str_val).toBe("hello");
+    expect(A.s_int).toBe(99);
+    expect(A.s_neg).toBe(-7);
+    expect(A.s_str).toBe("world");
+});
+
 test("extended name syntax", () => {
     class A {
         "field with space" = 1;
@@ -121,6 +153,21 @@ test("using 'arguments' via indirect eval throws at runtime instead of parse tim
             static b = indirect("arguments");
         }
     }).toThrowWithMessage(ReferenceError, "'arguments' is not defined");
+});
+
+test("regex field initializer", () => {
+    class A {
+        pattern = /hello/;
+        flags = /world/gi;
+        static s_pattern = /static/m;
+    }
+
+    const a = new A();
+    expect(a.pattern).toBeInstanceOf(RegExp);
+    expect(a.pattern.source).toBe("hello");
+    expect(a.flags.flags).toBe("gi");
+    expect(A.s_pattern.source).toBe("static");
+    expect(A.s_pattern.flags).toBe("m");
 });
 
 describe("class fields with a 'special' name", () => {

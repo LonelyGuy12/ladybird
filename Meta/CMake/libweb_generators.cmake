@@ -198,8 +198,29 @@ function (generate_html_implementation)
         arguments -j "${LIBWEB_INPUT_FOLDER}/HTML/Parser/Entities.json"
     )
 
+    invoke_py_generator(
+        "MediaControlsDOM.cpp"
+        "generate-dom-tree.py"
+        "${LIBWEB_INPUT_FOLDER}/HTML/MediaControls.html"
+        "HTML/MediaControlsDOM.h"
+        "HTML/MediaControlsDOM.cpp"
+        arguments -i "${LIBWEB_INPUT_FOLDER}/HTML/MediaControls.html"
+                  -s MediaControlsDOM
+                  -n "Web::HTML"
+                  --html-tags "${LIBWEB_INPUT_FOLDER}/HTML/TagNames.h"
+                  --html-attributes "${LIBWEB_INPUT_FOLDER}/HTML/AttributeNames.h"
+                  --svg-tags "${LIBWEB_INPUT_FOLDER}/SVG/TagNames.h"
+                  --svg-attributes "${LIBWEB_INPUT_FOLDER}/SVG/AttributeNames.h"
+        dependencies "${LIBWEB_INPUT_FOLDER}/HTML/TagNames.h"
+                     "${LIBWEB_INPUT_FOLDER}/HTML/AttributeNames.h"
+                     "${LIBWEB_INPUT_FOLDER}/SVG/TagNames.h"
+                     "${LIBWEB_INPUT_FOLDER}/SVG/AttributeNames.h"
+                     "${LIBWEB_INPUT_FOLDER}/HTML/MediaControls.css"
+    )
+
     set(HTML_GENERATED_HEADERS
        "HTML/Parser/NamedCharacterReferences.h"
+       "HTML/MediaControlsDOM.h"
     )
     list(TRANSFORM HTML_GENERATED_HEADERS PREPEND "${CMAKE_CURRENT_BINARY_DIR}/")
     if (ENABLE_INSTALL_HEADERS)
@@ -298,7 +319,7 @@ function (generate_js_bindings target)
 
     function(generate_exposed_interface_files)
         set(exposed_interface_sources
-            IntrinsicDefinitions.cpp
+            IntrinsicDefinitions.cpp IntrinsicDefinitions.h
             DedicatedWorkerExposedInterfaces.cpp DedicatedWorkerExposedInterfaces.h
             SharedWorkerExposedInterfaces.cpp SharedWorkerExposedInterfaces.h
             ShadowRealmExposedInterfaces.cpp ShadowRealmExposedInterfaces.h
@@ -315,6 +336,7 @@ function (generate_js_bindings target)
             OUTPUT  ${exposed_interface_sources}
             COMMAND "${CMAKE_COMMAND}" -E make_directory "tmp"
             COMMAND $<TARGET_FILE:Lagom::GenerateWindowOrWorkerInterfaces> -o "${CMAKE_CURRENT_BINARY_DIR}/tmp" -b "${LIBWEB_INPUT_FOLDER}" -b "${CMAKE_CURRENT_BINARY_DIR}" ${LIBWEB_ALL_IDL_FILES_ARGUMENT}
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different tmp/IntrinsicDefinitions.h "Bindings/IntrinsicDefinitions.h"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different tmp/IntrinsicDefinitions.cpp "Bindings/IntrinsicDefinitions.cpp"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different tmp/DedicatedWorkerExposedInterfaces.h "Bindings/DedicatedWorkerExposedInterfaces.h"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different tmp/DedicatedWorkerExposedInterfaces.cpp "Bindings/DedicatedWorkerExposedInterfaces.cpp"

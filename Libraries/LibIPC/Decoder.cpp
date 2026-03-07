@@ -8,12 +8,10 @@
 #include <AK/IPv4Address.h>
 #include <AK/IPv6Address.h>
 #include <AK/JsonValue.h>
-#include <AK/NumericLimits.h>
 #include <AK/Types.h>
 #include <AK/Utf16String.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/Proxy.h>
-#include <LibCore/Socket.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/File.h>
 #include <LibURL/Parser.h>
@@ -136,8 +134,9 @@ ErrorOr<URL::Origin> decode(Decoder& decoder)
 {
     auto is_opaque = TRY(decoder.decode<bool>());
     if (is_opaque) {
-        auto nonce = TRY(decoder.decode<URL::Origin::Nonce>());
-        return URL::Origin { nonce };
+        auto nonce = TRY(decoder.decode<URL::Origin::OpaqueData::Nonce>());
+        auto type = TRY(decoder.decode<URL::Origin::OpaqueData::Type>());
+        return URL::Origin { URL::Origin::OpaqueData { nonce, type } };
     }
 
     auto scheme = TRY(decoder.decode<Optional<String>>());

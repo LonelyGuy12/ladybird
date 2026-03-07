@@ -16,6 +16,7 @@
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/DisplayListRecordingContext.h>
 #include <LibWeb/Painting/Paintable.h>
+#include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/PaintableWithLines.h>
 #include <LibWeb/Painting/StackingContext.h>
 
@@ -38,6 +39,7 @@ Paintable::Paintable(Layout::Node const& layout_node)
     m_absolutely_positioned = computed_values.position() == CSS::Positioning::Absolute;
     m_floating = layout_node.is_floating();
     m_inline = layout_node.is_inline();
+    m_display = layout_node.display();
 }
 
 Paintable::~Paintable() = default;
@@ -63,23 +65,6 @@ String Paintable::debug_description() const
     return MUST(String::formatted("{}({})", class_name(), layout_node().debug_description()));
 }
 
-void Paintable::resolve_paint_properties()
-{
-    m_visible_for_hit_testing = true;
-    if (auto dom_node = this->dom_node(); dom_node && dom_node->is_inert()) {
-        // https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees
-        // When a node is inert:
-        // - Hit-testing must act as if the 'pointer-events' CSS property were set to 'none'.
-        m_visible_for_hit_testing = false;
-    }
-}
-
-bool Paintable::is_visible() const
-{
-    auto const& computed_values = this->computed_values();
-    return computed_values.visibility() == CSS::Visibility::Visible && computed_values.opacity() != 0;
-}
-
 DOM::Document const& Paintable::document() const
 {
     return layout_node().document();
@@ -88,11 +73,6 @@ DOM::Document const& Paintable::document() const
 DOM::Document& Paintable::document()
 {
     return layout_node().document();
-}
-
-CSS::Display Paintable::display() const
-{
-    return layout_node().display();
 }
 
 PaintableBox* Paintable::containing_block() const
@@ -112,7 +92,9 @@ CSS::ImmutableComputedValues const& Paintable::computed_values() const
 
 bool Paintable::visible_for_hit_testing() const
 {
-    return m_visible_for_hit_testing && computed_values().pointer_events() != CSS::PointerEvents::None;
+    if (auto node = dom_node(); node && node->is_inert())
+        return false;
+    return computed_values().pointer_events() != CSS::PointerEvents::None;
 }
 
 void Paintable::set_dom_node(GC::Ptr<DOM::Node> dom_node)
@@ -212,20 +194,13 @@ void Paintable::paint_inspector_overlay(DisplayListRecordingContext& context) co
     display_list_recorder.set_accumulated_visual_context({});
 }
 
-void Paintable::set_needs_display(InvalidateDisplayList should_invalidate_display_list)
+void Paintable::set_needs_repaint(InvalidateDisplayList should_invalidate_display_list)
 {
-    auto& document = this->document();
-    if (should_invalidate_display_list == InvalidateDisplayList::Yes)
-        document.invalidate_display_list();
-
-    auto* containing_block = this->containing_block();
-    if (!containing_block)
-        return;
-
-    if (!is<PaintableWithLines>(*containing_block))
-        return;
-    for (auto const& fragment : as<PaintableWithLines>(*containing_block).fragments())
-        document.set_needs_display(fragment.absolute_rect(), InvalidateDisplayList::No);
+    if (should_invalidate_display_list == InvalidateDisplayList::Yes) {
+        if (auto* containing_block = this->containing_block())
+            containing_block->invalidate_paint_cache();
+    }
+    document().set_needs_repaint(Badge<Painting::Paintable> {}, should_invalidate_display_list);
 }
 
 CSSPixelPoint Paintable::box_type_agnostic_position() const
@@ -296,18 +271,6 @@ Painting::BorderRadiiData normalize_border_radii_data(Layout::Node const& node, 
     }
 
     return radii_px;
-}
-
-void Paintable::set_needs_paint_only_properties_update(bool needs_update)
-{
-    if (needs_update == m_needs_paint_only_properties_update)
-        return;
-
-    m_needs_paint_only_properties_update = needs_update;
-
-    if (needs_update) {
-        document().set_needs_to_resolve_paint_only_properties();
-    }
 }
 
 // https://drafts.csswg.org/css-pseudo-4/#highlight-styling
@@ -386,6 +349,49 @@ Paintable::SelectionStyle Paintable::selection_style() const
     }
 
     return default_style;
+}
+
+void Paintable::set_selection_state(SelectionState state)
+{
+    if (m_selection_state == state)
+        return;
+    m_selection_state = state;
+    if (auto* box = as_if<PaintableBox>(this))
+        box->invalidate_paint_cache();
+    else if (auto* containing_block = this->containing_block())
+        containing_block->invalidate_paint_cache();
+}
+
+void Paintable::scroll_ancestor_to_offset_into_view(size_t offset)
+{
+    // Walk up to find the containing PaintableWithLines.
+    GC::Ptr<PaintableWithLines const> paintable_with_lines;
+    for (auto* ancestor = this; ancestor; ancestor = ancestor->parent()) {
+        paintable_with_lines = as_if<PaintableWithLines>(*ancestor);
+        if (paintable_with_lines)
+            break;
+    }
+    if (!paintable_with_lines)
+        return;
+
+    // Find the fragment containing the offset and compute a cursor rect.
+    for (auto const& fragment : paintable_with_lines->fragments()) {
+        if (&fragment.paintable() != this)
+            continue;
+        if (offset < fragment.start_offset() || offset > fragment.start_offset() + fragment.length_in_code_units())
+            continue;
+
+        auto cursor_rect = fragment.range_rect(SelectionState::StartAndEnd, offset, offset);
+
+        // Walk up the containing block chain to find the nearest scrollable ancestor.
+        for (auto* ancestor = containing_block(); ancestor; ancestor = ancestor->containing_block()) {
+            if (ancestor->has_scrollable_overflow()) {
+                ancestor->scroll_into_view(cursor_rect);
+                break;
+            }
+        }
+        return;
+    }
 }
 
 }

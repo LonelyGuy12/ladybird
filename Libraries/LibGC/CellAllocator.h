@@ -8,7 +8,6 @@
 
 #include <AK/IntrusiveList.h>
 #include <AK/NeverDestroyed.h>
-#include <AK/NonnullOwnPtr.h>
 #include <LibGC/BlockAllocator.h>
 #include <LibGC/Forward.h>
 #include <LibGC/HeapBlock.h>
@@ -32,10 +31,10 @@ namespace GC {
 
 class GC_API CellAllocator {
 public:
-    CellAllocator(size_t cell_size, StringView = {}, bool overrides_must_survive_garbage_collection = false, bool overrides_finalize = false);
+    CellAllocator(size_t cell_size, Optional<StringView> = {}, bool overrides_must_survive_garbage_collection = false, bool overrides_finalize = false);
     ~CellAllocator() = default;
 
-    StringView class_name() const { return m_class_name; }
+    Optional<StringView> class_name() const { return m_class_name; }
     size_t cell_size() const { return m_cell_size; }
 
     Cell* allocate_cell(Heap&);
@@ -65,7 +64,7 @@ public:
     FlatPtr max_block_address() const { return m_max_block_address; }
 
 private:
-    StringView m_class_name;
+    Optional<StringView> m_class_name;
     size_t const m_cell_size;
 
     BlockAllocator m_block_allocator;

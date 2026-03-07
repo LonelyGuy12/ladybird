@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/MessagePort.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WorkerAgentParent.h>
@@ -54,17 +55,13 @@ void WorkerAgentParent::initialize(JS::Realm& realm)
 
     auto serialized_outside_settings = m_outside_settings->serialize();
 
-    Optional<URL::URL> document_url_if_started_by_window_fixme;
-    if (auto* window = as_if<HTML::Window>(m_outside_settings->realm().global_object()))
-        document_url_if_started_by_window_fixme = window->associated_document().url();
-
-    m_worker_ipc->async_start_worker(m_url, m_worker_options.type, m_worker_options.credentials, m_worker_options.name, move(data_holder), serialized_outside_settings, m_agent_type, document_url_if_started_by_window_fixme);
+    m_worker_ipc->async_start_worker(m_url, m_worker_options.type, m_worker_options.credentials, m_worker_options.name, move(data_holder), serialized_outside_settings, m_agent_type);
 }
 
 void WorkerAgentParent::setup_worker_ipc_callbacks(JS::Realm& realm)
 {
     // NOTE: As long as WorkerAgentParent is alive, realm and m_worker_ipc will be alive.
-    m_worker_ipc->on_request_cookie = [realm = GC::RawRef { realm }](URL::URL const& url, Cookie::Source source) {
+    m_worker_ipc->on_request_cookie = [realm = GC::RawRef { realm }](URL::URL const& url, HTTP::Cookie::Source source) {
         auto& client = Bindings::principal_host_defined_page(realm).client();
         return client.page_did_request_cookie(url, source);
     };

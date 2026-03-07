@@ -114,6 +114,8 @@ static ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_proc
         arguments.append("--enable-idl-tracing"sv);
     if (web_content_options.enable_http_memory_cache == WebView::EnableMemoryHTTPCache::Yes)
         arguments.append("--enable-http-memory-cache"sv);
+    if (web_content_options.expose_experimental_interfaces == WebView::ExposeExperimentalInterfaces::Yes)
+        arguments.append("--expose-experimental-interfaces"sv);
     if (web_content_options.expose_internals_object == WebView::ExposeInternalsObject::Yes)
         arguments.append("--expose-internals-object"sv);
     if (web_content_options.force_cpu_painting == WebView::ForceCPUPainting::Yes)
@@ -124,6 +126,10 @@ static ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_proc
         arguments.append("--collect-garbage-on-every-allocation"sv);
     if (web_content_options.paint_viewport_scrollbars == PaintViewportScrollbars::No)
         arguments.append("--disable-scrollbar-painting"sv);
+
+    // Propogate this process-wide setting to the child process also.
+    if (URL::file_scheme_urls_have_tuple_origins())
+        arguments.append("--tuple-file-origins"sv);
 
     if (auto const maybe_echo_server_port = web_content_options.echo_server_port; maybe_echo_server_port.has_value()) {
         arguments.append("--echo-server-port"sv);
@@ -182,6 +188,8 @@ ErrorOr<NonnullRefPtr<Web::HTML::WebWorkerClient>> launch_web_worker_process(Web
 
     Vector<ByteString> arguments;
 
+    if (web_content_options.expose_experimental_interfaces == WebView::ExposeExperimentalInterfaces::Yes)
+        arguments.append("--expose-experimental-interfaces"sv);
     if (web_content_options.enable_http_memory_cache == WebView::EnableMemoryHTTPCache::Yes)
         arguments.append("--enable-http-memory-cache"sv);
 
@@ -207,6 +215,10 @@ ErrorOr<NonnullRefPtr<Web::HTML::WebWorkerClient>> launch_web_worker_process(Web
     default:
         VERIFY_NOT_REACHED();
     }
+
+    // Propogate this process-wide setting to the child process also.
+    if (URL::file_scheme_urls_have_tuple_origins())
+        arguments.append("--tuple-file-origins"sv);
 
     return launch_server_process<Web::HTML::WebWorkerClient>("WebWorker"sv, move(arguments));
 }
@@ -247,13 +259,16 @@ ErrorOr<NonnullRefPtr<Requests::RequestClient>> launch_request_server_process()
 
     auto client = TRY(launch_server_process<Requests::RequestClient>("RequestServer"sv, move(arguments)));
 
-    WebView::Application::settings().dns_settings().visit(
-        [](WebView::SystemDNS) {},
-        [&](WebView::DNSOverTLS const& dns_over_tls) {
+    auto const& browsing_data_settings = Application::settings().browsing_data_settings();
+    client->async_set_disk_cache_settings(browsing_data_settings.disk_cache_settings);
+
+    Application::settings().dns_settings().visit(
+        [](SystemDNS) {},
+        [&](DNSOverTLS const& dns_over_tls) {
             dbgln("Setting DNS server to {}:{} with TLS ({} local dnssec)", dns_over_tls.server_address, dns_over_tls.port, dns_over_tls.validate_dnssec_locally ? "with" : "without");
             client->async_set_dns_server(dns_over_tls.server_address, dns_over_tls.port, true, dns_over_tls.validate_dnssec_locally);
         },
-        [&](WebView::DNSOverUDP const& dns_over_udp) {
+        [&](DNSOverUDP const& dns_over_udp) {
             dbgln("Setting DNS server to {}:{} ({} local dnssec)", dns_over_udp.server_address, dns_over_udp.port, dns_over_udp.validate_dnssec_locally ? "with" : "without");
             client->async_set_dns_server(dns_over_udp.server_address, dns_over_udp.port, false, dns_over_udp.validate_dnssec_locally);
         });

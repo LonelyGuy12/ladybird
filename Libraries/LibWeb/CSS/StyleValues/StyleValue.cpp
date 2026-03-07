@@ -29,6 +29,7 @@
 #include <LibWeb/CSS/StyleValues/ConicGradientStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleSystemStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
@@ -41,6 +42,7 @@
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FontSourceStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FontStyleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FontVariantAlternatesFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
@@ -78,11 +80,13 @@
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TreeCountingFunctionStyleValue.h>
+#include <LibWeb/CSS/StyleValues/TupleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnicodeRangeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ViewFunctionStyleValue.h>
 #include <LibWeb/CSS/SystemColor.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/Layout/Node.h>
 
@@ -180,6 +184,57 @@ StyleValueVector StyleValue::subdivide_into_iterations(PropertyNameAndID const&)
     //    containing the iterations in order.
     // NB: We do this by type. By default, we assume step 1 applies. For step 2, override this method.
     return StyleValueVector { *this };
+}
+
+i64 int_from_style_value(NonnullRefPtr<StyleValue const> const& style_value)
+{
+    if (style_value->is_integer())
+        return style_value->as_integer().integer();
+
+    if (style_value->is_calculated())
+        return style_value->as_calculated().resolve_integer({}).value();
+
+    VERIFY_NOT_REACHED();
+}
+
+double number_from_style_value(NonnullRefPtr<StyleValue const> const& style_value, Optional<double> percentage_basis)
+{
+    if (style_value->is_number())
+        return style_value->as_number().number();
+
+    if (style_value->is_calculated()) {
+        auto const& calculated_style_value = style_value->as_calculated();
+
+        if (calculated_style_value.resolves_to_number())
+            return calculated_style_value.resolve_number({}).value();
+
+        if (calculated_style_value.resolves_to_percentage()) {
+            VERIFY(percentage_basis.has_value());
+
+            return calculated_style_value.resolve_percentage({}).value().as_fraction() * percentage_basis.value();
+        }
+
+        VERIFY_NOT_REACHED();
+    }
+
+    if (style_value->is_percentage()) {
+        VERIFY(percentage_basis.has_value());
+
+        return percentage_basis.value() * style_value->as_percentage().percentage().as_fraction();
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+FlyString const& string_from_style_value(NonnullRefPtr<StyleValue const> const& style_value)
+{
+    if (style_value->is_string())
+        return style_value->as_string().string_value();
+
+    if (style_value->is_custom_ident())
+        return style_value->as_custom_ident().custom_ident();
+
+    VERIFY_NOT_REACHED();
 }
 
 }

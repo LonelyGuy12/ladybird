@@ -6,10 +6,7 @@
 
 #pragma once
 
-#include <AK/RefPtr.h>
 #include <LibGC/Ptr.h>
-#include <LibWeb/CSS/Display.h>
-#include <LibWeb/CSS/Selector.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::Layout {
@@ -25,6 +22,7 @@ private:
         bool has_svg_root = false;
         bool layout_top_layer = false;
         bool layout_svg_mask_or_clip_path = false;
+        bool layout_svg_pattern = false;
     };
 
     i32 calculate_list_item_index(DOM::Node&);

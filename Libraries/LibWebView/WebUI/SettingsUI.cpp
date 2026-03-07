@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, Tim Flynn <trflynn89@ladybird.org>
+ * Copyright (c) 2025-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -16,9 +16,6 @@ void SettingsUI::register_interfaces()
 {
     register_interface("loadCurrentSettings"sv, [this](auto const&) {
         load_current_settings();
-    });
-    register_interface("restoreDefaultSettings"sv, [this](auto const&) {
-        restore_default_settings();
     });
 
     register_interface("setNewTabPageURL"sv, [this](auto const& data) {
@@ -66,6 +63,9 @@ void SettingsUI::register_interfaces()
     register_interface("estimateBrowsingDataSizes"sv, [this](auto const& data) {
         estimate_browsing_data_sizes(data);
     });
+    register_interface("setBrowsingDataSettings"sv, [this](auto const& data) {
+        set_browsing_data_settings(data);
+    });
     register_interface("clearBrowsingData"sv, [this](auto const& data) {
         clear_browsing_data(data);
     });
@@ -82,12 +82,6 @@ void SettingsUI::load_current_settings()
 {
     auto settings = WebView::Application::settings().serialize_json();
     async_send_message("loadSettings"sv, settings);
-}
-
-void SettingsUI::restore_default_settings()
-{
-    WebView::Application::settings().restore_defaults();
-    load_current_settings();
 }
 
 void SettingsUI::set_new_tab_page_url(JsonValue const& new_tab_page_url)
@@ -309,6 +303,12 @@ void SettingsUI::estimate_browsing_data_sizes(JsonValue const& options)
         .when_rejected([](Error const& error) {
             dbgln("Failed to estimate browsing data sizes: {}", error);
         });
+}
+
+void SettingsUI::set_browsing_data_settings(JsonValue const& settings)
+{
+    Application::settings().set_browsing_data_settings(Settings::parse_browsing_data_settings(settings));
+    load_current_settings();
 }
 
 void SettingsUI::clear_browsing_data(JsonValue const& options)

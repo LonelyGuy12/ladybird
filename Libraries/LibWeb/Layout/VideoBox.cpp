@@ -13,18 +13,8 @@ namespace Web::Layout {
 GC_DEFINE_ALLOCATOR(VideoBox);
 
 VideoBox::VideoBox(DOM::Document& document, DOM::Element& element, GC::Ref<CSS::ComputedProperties> style)
-    : ReplacedBox(document, element, move(style))
+    : ReplacedBox(document, element, style)
 {
-    document.register_viewport_client(*this);
-}
-
-void VideoBox::finalize()
-{
-    Base::finalize();
-
-    // NOTE: We unregister from the document in finalize() to avoid trouble
-    //       in the scenario where our Document has already been swept by GC.
-    document().unregister_viewport_client(*this);
 }
 
 HTML::HTMLVideoElement& VideoBox::dom_node()
@@ -37,6 +27,12 @@ HTML::HTMLVideoElement const& VideoBox::dom_node() const
     return static_cast<HTML::HTMLVideoElement const&>(*ReplacedBox::dom_node());
 }
 
+bool VideoBox::can_have_children() const
+{
+    // If we allow children when controls are disabled, innerText may be non-empty.
+    return dom_node().shadow_root() != nullptr;
+}
+
 CSS::SizeWithAspectRatio VideoBox::natural_size() const
 {
     CSSPixels width = dom_node().video_width();
@@ -44,12 +40,6 @@ CSS::SizeWithAspectRatio VideoBox::natural_size() const
     if (width > 0 && height > 0)
         return { width, height, CSSPixelFraction(width, height) };
     return { width, height, {} };
-}
-
-void VideoBox::did_set_viewport_rect(CSSPixelRect const&)
-{
-    // FIXME: Several steps in HTMLMediaElement indicate we may optionally handle whether the media object
-    //        is in view. Implement those steps.
 }
 
 GC::Ptr<Painting::Paintable> VideoBox::create_paintable() const

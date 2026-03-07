@@ -23,6 +23,7 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/Bindings/PythonDOMBindings.h>
 #include <LibWeb/Bindings/SyntheticHostDefined.h>
 #include <LibWeb/Bindings/WindowExposedInterfaces.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
@@ -39,6 +40,7 @@
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Scripting/Fetching.h>
 #include <LibWeb/HTML/Scripting/ModuleScript.h>
+#include <LibWeb/HTML/Scripting/PythonEngine.h>
 #include <LibWeb/HTML/Scripting/Script.h>
 #include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Scripting/SyntheticRealmSettings.h>
@@ -52,8 +54,6 @@
 #include <LibWeb/ServiceWorker/ServiceWorkerGlobalScope.h>
 #include <LibWeb/WebAssembly/WebAssembly.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
-#include <LibWeb/HTML/Scripting/PythonEngine.h>
-#include <LibWeb/Bindings/PythonDOMBindings.h>
 
 namespace Web::Bindings {
 
@@ -101,9 +101,6 @@ void initialize_main_thread_vm(AgentType type)
 
     // Initialize Python engine before creating the JS VM
     HTML::PythonEngine::initialize();
-
-    // Initialize Python DOM API bindings
-    // Web::Bindings::PythonDOMAPI::initialize_module();
 
     s_main_thread_vm = JS::VM::create();
     s_main_thread_vm->set_agent(create_agent(s_main_thread_vm->heap(), type));
@@ -278,7 +275,7 @@ void initialize_main_thread_vm(AgentType type)
     };
 
     // 8.1.5.4.3 HostEnqueuePromiseJob(job, realm), https://html.spec.whatwg.org/multipage/webappapis.html#hostenqueuepromisejob
-    // // https://whatpr.org/html/9893/webappapis.html#hostenqueuepromisejob
+    // https://whatpr.org/html/9893/webappapis.html#hostenqueuepromisejob
     s_main_thread_vm->host_enqueue_promise_job = [](GC::Ref<GC::Function<JS::ThrowCompletionOr<JS::Value>()>> job, JS::Realm* realm) {
         auto& vm = *s_main_thread_vm;
 
@@ -633,8 +630,10 @@ void initialize_main_thread_vm(AgentType type)
             // 5. Perform FinishLoadingImportedModule(referrer, moduleRequest, payload, completion).
             // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
 
-            JS::ExecutionContext* module_execution_context = nullptr;
-            ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0, 0);
+            auto& stack = vm.interpreter_stack();
+            auto* stack_mark = stack.top();
+            auto* module_execution_context = stack.allocate(0, 0, 0);
+            VERIFY(module_execution_context);
             module_execution_context->realm = realm;
             if (module)
                 module_execution_context->script_or_module = GC::Ref { *module };
@@ -643,6 +642,7 @@ void initialize_main_thread_vm(AgentType type)
             JS::finish_loading_imported_module(referrer, module_request, payload, completion);
 
             vm.pop_execution_context();
+            stack.deallocate(stack_mark);
         });
 
         // 16. Fetch a single imported module script given url, fetchClient, destination, fetchOptions, moduleMapRealm, fetchReferrer,
@@ -715,18 +715,6 @@ JS::VM& main_thread_vm()
 {
     VERIFY(s_main_thread_vm);
     return *s_main_thread_vm;
-}
-
-// Function to initialize the Python engine
-WEB_API void initialize_python_engine()
-{
-    HTML::PythonEngine::initialize();
-}
-
-// Function to properly shut down the Python engine when the application exits
-WEB_API void shutdown_python_engine()
-{
-    HTML::PythonEngine::shutdown();
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-observer-compound-microtask

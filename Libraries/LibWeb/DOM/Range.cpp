@@ -24,6 +24,7 @@
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/Geometry/DOMRectList.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
@@ -111,9 +112,10 @@ void Range::update_associated_selection()
     auto& document = m_start_container->document();
     document.reset_cursor_blink_cycle();
 
-    if (auto* viewport = document.paintable()) {
+    // NB: Called during selection update after range change.
+    if (auto* viewport = document.unsafe_paintable()) {
         viewport->recompute_selection_states(*this);
-        viewport->set_needs_display();
+        viewport->set_needs_repaint();
     }
 
     // https://w3c.github.io/selection-api/#selectionchange-event

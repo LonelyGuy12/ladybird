@@ -41,6 +41,8 @@ CSSConditionRule
 CSSCounterStyleRule
 CSSFontFaceDescriptors
 CSSFontFaceRule
+CSSFontFeatureValuesMap
+CSSFontFeatureValuesRule
 CSSGroupingRule
 CSSImageValue
 CSSImportRule
@@ -369,6 +371,7 @@ ResizeObserverSize
 Response
 SVGAElement
 SVGAnimatedEnumeration
+SVGAnimatedInteger
 SVGAnimatedLength
 SVGAnimatedLengthList
 SVGAnimatedNumber
@@ -388,6 +391,7 @@ SVGFEBlendElement
 SVGFEColorMatrixElement
 SVGFEComponentTransferElement
 SVGFECompositeElement
+SVGFEDisplacementMapElement
 SVGFEDropShadowElement
 SVGFEFloodElement
 SVGFEFuncAElement
@@ -400,6 +404,7 @@ SVGFEMergeElement
 SVGFEMergeNodeElement
 SVGFEMorphologyElement
 SVGFEOffsetElement
+SVGFETurbulenceElement
 SVGFilterElement
 SVGForeignObjectElement
 SVGGElement
@@ -417,6 +422,7 @@ SVGMetadataElement
 SVGNumber
 SVGNumberList
 SVGPathElement
+SVGPatternElement
 SVGPoint
 SVGPolygonElement
 SVGPolylineElement

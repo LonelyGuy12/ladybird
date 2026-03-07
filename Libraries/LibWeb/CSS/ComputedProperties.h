@@ -95,6 +95,7 @@ public:
     ColorInterpolation color_interpolation() const;
     PreferredColorScheme color_scheme(PreferredColorScheme, Optional<Vector<String> const&> document_supported_schemes) const;
     TextAnchor text_anchor() const;
+    Optional<BaselineMetric> dominant_baseline() const;
     TextAlign text_align() const;
     TextJustify text_justify() const;
     TextOverflow text_overflow() const;
@@ -103,8 +104,8 @@ public:
     TextUnderlinePosition text_underline_position() const;
     Vector<BackgroundLayerData> background_layers() const;
     BackgroundBox background_color_clip() const;
-    Length border_spacing_horizontal(Layout::Node const&) const;
-    Length border_spacing_vertical(Layout::Node const&) const;
+    Length border_spacing_horizontal() const;
+    Length border_spacing_vertical() const;
     CaptionSide caption_side() const;
     Clip clip() const;
     Display display() const;
@@ -134,7 +135,7 @@ public:
     Vector<ShadowData> text_shadow(Layout::Node const&) const;
     TextIndentData text_indent() const;
     TextWrapMode text_wrap_mode() const;
-    ListStyleType list_style_type() const;
+    ListStyleType list_style_type(HashMap<FlyString, NonnullRefPtr<CSS::CounterStyle const>> const&) const;
     ListStylePosition list_style_position() const;
     FlexDirection flex_direction() const;
     FlexWrap flex_wrap() const;
@@ -162,12 +163,12 @@ public:
     PointerEvents pointer_events() const;
     Variant<VerticalAlign, LengthPercentage> vertical_align() const;
     FontFeatureData font_feature_data() const;
-    Optional<Gfx::FontVariantAlternates> font_variant_alternates() const;
+    Optional<FontVariantAlternates> font_variant_alternates() const;
     FontVariantCaps font_variant_caps() const;
-    Optional<Gfx::FontVariantEastAsian> font_variant_east_asian() const;
+    Optional<FontVariantEastAsian> font_variant_east_asian() const;
     FontVariantEmoji font_variant_emoji() const;
-    Optional<Gfx::FontVariantLigatures> font_variant_ligatures() const;
-    Optional<Gfx::FontVariantNumeric> font_variant_numeric() const;
+    Optional<FontVariantLigatures> font_variant_ligatures() const;
+    Optional<FontVariantNumeric> font_variant_numeric() const;
     FontVariantPosition font_variant_position() const;
     FontKerning font_kerning() const;
     Optional<FlyString> font_language_override() const;
@@ -184,7 +185,7 @@ public:
     GridTrackPlacement grid_row_start() const;
     BorderCollapse border_collapse() const;
     CSS::EmptyCells empty_cells() const;
-    Vector<Vector<String>> grid_template_areas() const;
+    GridTemplateAreas grid_template_areas() const;
     ObjectFit object_fit() const;
     Position object_position() const;
     TableLayout table_layout() const;
@@ -208,8 +209,9 @@ public:
         AnimationFillMode fill_mode;
         AnimationComposition composition;
         FlyString name;
+        GC::Ptr<Animations::AnimationTimeline> timeline;
     };
-    Vector<AnimationProperties> animations() const;
+    Vector<AnimationProperties> animations(DOM::AbstractElement const&) const;
     Vector<TransitionProperties> transitions() const;
 
     Display display_before_box_type_transformation() const;
@@ -229,6 +231,7 @@ public:
     MaskType mask_type() const;
     float stop_opacity() const;
     float fill_opacity() const;
+    Vector<Variant<LengthPercentage, float>> stroke_dasharray() const;
     StrokeLinecap stroke_linecap() const;
     StrokeLinejoin stroke_linejoin() const;
     double stroke_miterlimit() const;

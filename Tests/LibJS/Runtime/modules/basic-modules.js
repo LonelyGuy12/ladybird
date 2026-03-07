@@ -209,6 +209,10 @@ describe("in- and exports", () => {
         expectModulePassed("./top-level-dispose.mjs");
     });
 
+    test("default export of parenthesized named class expression", () => {
+        expectModulePassed("./default-export-named-class-expression.mjs");
+    });
+
     test("can export default a RegExp", () => {
         const result = expectModulePassed("./default-regexp-export.mjs");
         expect(result.default).toBeInstanceOf(RegExp);
@@ -231,7 +235,7 @@ describe("loops", () => {
 });
 
 describe("failing modules cascade", () => {
-    let failingModuleError = "Left-hand side of postfix";
+    let failingModuleError = "postfix";
     test("importing a file with a SyntaxError results in a SyntaxError", () => {
         expectedModuleToThrowSyntaxError("./failing.mjs", failingModuleError);
     });

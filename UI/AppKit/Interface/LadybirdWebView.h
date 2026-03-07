@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ * Copyright (c) 2023-2026, Tim Flynn <trflynn89@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -33,6 +33,9 @@
 - (void)onFaviconChange:(Gfx::Bitmap const&)bitmap;
 - (void)onAudioPlayStateChange:(Web::HTML::AudioPlayState)play_state;
 
+- (void)onEnterFullscreenWindow;
+- (void)onExitFullscreenWindow;
+
 - (void)onFindInPageResult:(size_t)current_match_index
            totalMatchCount:(Optional<size_t> const&)total_match_count;
 
@@ -56,11 +59,14 @@
 - (void)handleResize;
 - (void)handleDevicePixelRatioChange;
 - (void)handleDisplayRefreshRateChange;
+- (void)handleExitFullScreen;
 - (void)handleVisibility:(BOOL)is_visible;
 
 - (void)findInPage:(NSString*)query
     caseSensitivity:(CaseSensitivity)case_sensitivity;
 - (void)findInPageNextMatch;
 - (void)findInPagePreviousMatch;
+
+- (void)requestClose;
 
 @end

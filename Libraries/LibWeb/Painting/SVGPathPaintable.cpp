@@ -52,16 +52,6 @@ static Gfx::WindingRule to_gfx_winding_rule(SVG::FillRule fill_rule)
     }
 }
 
-void SVGPathPaintable::resolve_paint_properties()
-{
-    Base::resolve_paint_properties();
-
-    auto& graphics_element = dom_node();
-    m_stroke_thickness = graphics_element.stroke_width().value_or(1);
-    m_stroke_dasharray = graphics_element.stroke_dasharray();
-    m_stroke_dashoffset = graphics_element.stroke_dashoffset().value_or(0);
-}
-
 void SVGPathPaintable::paint(DisplayListRecordingContext& context, PaintPhase phase) const
 {
     if (!is_visible() || !computed_path().has_value())
@@ -113,7 +103,7 @@ void SVGPathPaintable::paint(DisplayListRecordingContext& context, PaintPhase ph
     auto paint_fill = [&] {
         auto fill_opacity = graphics_element.fill_opacity().value_or(1);
         auto winding_rule = to_gfx_winding_rule(graphics_element.fill_rule().value_or(SVG::FillRule::Nonzero));
-        if (auto paint_style = graphics_element.fill_paint_style(paint_context); paint_style.has_value()) {
+        if (auto paint_style = graphics_element.fill_paint_style(paint_context, &context); paint_style.has_value()) {
             context.display_list_recorder().fill_path({
                 .path = path,
                 .opacity = fill_opacity,
@@ -163,13 +153,13 @@ void SVGPathPaintable::paint(DisplayListRecordingContext& context, PaintPhase ph
 
         // Note: This is assuming .x_scale() == .y_scale() (which it does currently).
         auto viewbox_scale = paint_transform.x_scale();
-        float stroke_thickness = m_stroke_thickness * viewbox_scale;
-        auto stroke_dasharray = m_stroke_dasharray;
+        float stroke_thickness = graphics_element.stroke_width().value_or(1) * viewbox_scale;
+        auto stroke_dasharray = graphics_element.stroke_dasharray();
         for (auto& value : stroke_dasharray)
             value *= viewbox_scale;
-        float stroke_dashoffset = m_stroke_dashoffset * viewbox_scale;
+        float stroke_dashoffset = graphics_element.stroke_dashoffset().value_or(0) * viewbox_scale;
 
-        if (auto paint_style = graphics_element.stroke_paint_style(paint_context); paint_style.has_value()) {
+        if (auto paint_style = graphics_element.stroke_paint_style(paint_context, &context); paint_style.has_value()) {
             context.display_list_recorder().stroke_path({
                 .cap_style = cap_style,
                 .join_style = join_style,

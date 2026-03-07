@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <LibGfx/Forward.h>
+#include <LibWeb/Forward.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/PaintableFragment.h>
 
@@ -45,8 +45,6 @@ public:
             visitor.visit(GC::Ref { fragment.layout_node() });
     }
 
-    virtual void resolve_paint_properties() override;
-
     size_t line_index() const { return m_line_index; }
 
 protected:
@@ -55,6 +53,9 @@ protected:
 
 private:
     [[nodiscard]] virtual bool is_paintable_with_lines() const final { return true; }
+
+    Optional<PaintableFragment const&> fragment_at_position(DOM::Position const&) const;
+    void paint_cursor(DisplayListRecordingContext&) const;
 
     Vector<PaintableFragment> m_fragments;
 

@@ -7,7 +7,6 @@
  */
 
 #include <AK/Vector.h>
-#include <LibCore/Socket.h>
 #include <LibIPC/Connection.h>
 #include <LibIPC/Message.h>
 #include <LibIPC/Stub.h>
@@ -35,10 +34,11 @@ bool ConnectionBase::is_open() const
 
 ErrorOr<void> ConnectionBase::post_message(Message const& message)
 {
-    return post_message(TRY(message.encode()));
+    auto buffer = TRY(message.encode());
+    return post_message(buffer);
 }
 
-ErrorOr<void> ConnectionBase::post_message(MessageBuffer buffer)
+ErrorOr<void> ConnectionBase::post_message(MessageBuffer& buffer)
 {
     // NOTE: If this connection is being shut down, but has not yet been destroyed,
     //       the socket will be closed. Don't try to send more messages.

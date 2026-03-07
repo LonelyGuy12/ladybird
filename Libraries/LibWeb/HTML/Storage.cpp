@@ -10,6 +10,7 @@
 #include <LibGC/RootVector.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/StoragePrototype.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Storage.h>
 #include <LibWeb/HTML/StorageEvent.h>
@@ -40,10 +41,10 @@ Storage::Storage(JS::Realm& realm, Type type, GC::Ref<StorageAPI::StorageBottle>
     m_legacy_platform_object_flags = LegacyPlatformObjectFlags {
         .supports_indexed_properties = false,
         .supports_named_properties = true,
-        .has_indexed_property_setter = true,
+        .has_indexed_property_setter = false,
         .has_named_property_setter = true,
         .has_named_property_deleter = true,
-        .indexed_property_setter_has_identifier = true,
+        .indexed_property_setter_has_identifier = false,
         .named_property_setter_has_identifier = true,
         .named_property_deleter_has_identifier = true,
     };
@@ -209,10 +210,15 @@ void Storage::broadcast(Optional<String> const& key, Optional<String> const& old
         if (type() == Type::Session) {
             auto& storage_document = *relevant_settings_object(storage).responsible_document();
 
-            // NOTE: It is possible the remote storage may have not been fully teared down immediately at the point it's document is made inactive.
+            // NB: It is possible the remote storage may have not been fully teared down immediately at the point it's
+            //     document is made inactive.
             if (!storage_document.navigable())
                 continue;
-            VERIFY(this_document.navigable());
+
+            // NB: It is possible for this storage's document to have lost its navigable if script holds a reference to
+            //     the Storage object after its browsing context has navigated to a new document.
+            if (!this_document.navigable())
+                continue;
 
             if (storage_document.navigable()->traversable_navigable() != this_document.navigable()->traversable_navigable())
                 continue;
@@ -249,16 +255,6 @@ Vector<FlyString> Storage::supported_property_names() const
     return names;
 }
 
-Optional<JS::Value> Storage::item_value(size_t index) const
-{
-    // Handle index as a string since that's our key type
-    auto key = String::number(index);
-    auto value = get_item(key);
-    if (!value.has_value())
-        return {};
-    return JS::PrimitiveString::create(vm(), value.release_value());
-}
-
 JS::Value Storage::named_item_value(FlyString const& name) const
 {
     auto value = get_item(String(name));
@@ -273,13 +269,6 @@ WebIDL::ExceptionOr<Bindings::PlatformObject::DidDeletionFail> Storage::delete_v
 {
     remove_item(name);
     return DidDeletionFail::NotRelevant;
-}
-
-WebIDL::ExceptionOr<void> Storage::set_value_of_indexed_property(u32 index, JS::Value unconverted_value)
-{
-    // Handle index as a string since that's our key type
-    auto key = String::number(index);
-    return set_value_of_named_property(key, unconverted_value);
 }
 
 WebIDL::ExceptionOr<void> Storage::set_value_of_named_property(String const& key, JS::Value unconverted_value)

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/GraphemeEdgeTracker.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
@@ -30,10 +31,9 @@ PaintableFragment::PaintableFragment(Layout::LineBoxFragment const& fragment)
 
 CSSPixelRect const PaintableFragment::absolute_rect() const
 {
-    CSSPixelRect rect { {}, size() };
+    CSSPixelRect rect { offset(), size() };
     if (auto const* containing_block = paintable().containing_block())
-        rect.set_location(containing_block->absolute_position());
-    rect.translate_by(offset());
+        rect.translate_by(containing_block->absolute_position());
     return rect;
 }
 
@@ -119,21 +119,47 @@ CSSPixelRect PaintableFragment::range_rect(Paintable::SelectionState selection_s
         pixel_offset = 0;
         pixel_width = rect.primary_size_for_orientation(orientation());
     } else {
-        pixel_offset = CSSPixels::nearest_value_for(font.width(text().substring_view(0, offsets->start)));
+        float offset_accumulator = 0.f;
+        float width_accumulator = 0.f;
 
-        // When start equals end, this is a cursor position.
-        if (offsets->start == offsets->end) {
-            pixel_width = 1;
-        } else {
-            pixel_width = CSSPixels::nearest_value_for(font.width(text().substring_view(offsets->start, offsets->end - offsets->start)));
+        if (m_glyph_run) {
+            size_t code_units_seen = 0;
+            for (auto const& glyph : m_glyph_run->glyphs()) {
+                if (code_units_seen < offsets->start)
+                    offset_accumulator += glyph.glyph_width;
+                else if (code_units_seen < offsets->end)
+                    width_accumulator += glyph.glyph_width;
+                code_units_seen += glyph.length_in_code_units;
+            }
         }
+
+        pixel_offset = CSSPixels { offset_accumulator };
+        pixel_width = CSSPixels { width_accumulator };
     }
 
-    if (m_has_trailing_whitespace && offsets->include_trailing_whitespace && offsets->start != offsets->end)
-        pixel_width += CSSPixels::nearest_value_for(font.glyph_width(' '));
+    // When start equals end, this is a cursor position.
+    if (offsets->start == offsets->end)
+        pixel_width = 1;
 
-    rect.set_primary_offset_for_orientation(orientation(), rect.primary_offset_for_orientation(orientation()) + pixel_offset);
+    // Include an additional space at the end if we remembered that this fragment contained trailing whitespace. This
+    // shows the user that at least one whitespace character was present when selecting text, even though we don't store
+    // that whitespace in the glyph run or text fragment.
+    if (offsets->start != offsets->end && m_has_trailing_whitespace && offsets->include_trailing_whitespace)
+        pixel_width += CSSPixels { font.glyph_width(' ') };
+
+    rect.translate_primary_offset_for_orientation(orientation(), pixel_offset);
     rect.set_primary_size_for_orientation(orientation(), pixel_width);
+
+    // Inflate so the rect covers glyph ascenders and descenders that may extend beyond the line box.
+    auto const& font_metrics = font.pixel_metrics();
+    if (font_metrics.ascent > 0.f || font_metrics.descent > 0.f) {
+        CSSPixels ascent { font_metrics.ascent };
+        CSSPixels descent { font_metrics.descent };
+        auto overflow_top = max<CSSPixels>(0, ascent - m_baseline);
+        auto overflow_bottom = max<CSSPixels>(0, descent - rect.secondary_size_for_orientation(orientation()) + m_baseline);
+        rect.inflate_secondary_for_orientation(orientation(), overflow_top, overflow_bottom);
+    }
+
     return rect;
 }
 

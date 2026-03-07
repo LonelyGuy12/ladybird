@@ -6,6 +6,7 @@
 
 #include <LibWeb/Layout/SVGClipBox.h>
 #include <LibWeb/Layout/SVGMaskBox.h>
+#include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/SVGClipPaintable.h>
 #include <LibWeb/Painting/SVGGraphicsPaintable.h>
 #include <LibWeb/Painting/StackingContext.h>
@@ -16,9 +17,10 @@ namespace Web::Painting {
 template<typename T>
 static T const* first_child_layout_node_of_type(SVG::SVGGraphicsElement const& graphics_element)
 {
-    if (!graphics_element.layout_node())
+    // NB: Called during painting.
+    if (!graphics_element.unsafe_layout_node())
         return nullptr;
-    return graphics_element.layout_node()->first_child_of_type<T>();
+    return graphics_element.unsafe_layout_node()->first_child_of_type<T>();
 }
 
 static auto get_mask_box(SVG::SVGGraphicsElement const& graphics_element)
@@ -75,7 +77,7 @@ static RefPtr<DisplayList> paint_mask_or_clip_to_display_list(
     bool is_clip_path)
 {
     auto mask_rect = context.enclosing_device_rect(area);
-    auto display_list = DisplayList::create(context.device_pixels_per_css_pixel());
+    auto display_list = DisplayList::create();
     DisplayListRecorder display_list_recorder(*display_list);
     display_list_recorder.translate(-mask_rect.location().to_type<int>());
     auto paint_context = context.clone(display_list_recorder);

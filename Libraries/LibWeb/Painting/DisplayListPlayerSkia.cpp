@@ -10,6 +10,7 @@
 #include <core/SkBitmap.h>
 #include <core/SkBlurTypes.h>
 #include <core/SkCanvas.h>
+#include <core/SkColorFilter.h>
 #include <core/SkFont.h>
 #include <core/SkMaskFilter.h>
 #include <core/SkPath.h>
@@ -19,7 +20,7 @@
 #include <effects/SkDashPathEffect.h>
 #include <effects/SkGradientShader.h>
 #include <effects/SkImageFilters.h>
-#include <effects/SkRuntimeEffect.h>
+#include <effects/SkLumaColorFilter.h>
 #include <gpu/ganesh/GrDirectContext.h>
 #include <gpu/ganesh/SkSurfaceGanesh.h>
 #include <pathops/SkPathOps.h>
@@ -30,6 +31,7 @@
 #include <LibGfx/SkiaUtils.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/Painting/DisplayListPlayerSkia.h>
+#include <LibWeb/Painting/PaintStyle.h>
 #include <LibWeb/Painting/ShadowPainting.h>
 
 namespace Web::Painting {
@@ -137,16 +139,19 @@ void DisplayListPlayerSkia::fill_rect(FillRect const& command)
     canvas.drawRect(to_skia_rect(rect), paint);
 }
 
-void DisplayListPlayerSkia::draw_painting_surface(DrawPaintingSurface const& command)
+void DisplayListPlayerSkia::draw_external_content(DrawExternalContent const& command)
 {
-    auto src_rect = to_skia_rect(command.src_rect);
+    auto bitmap = command.source->current_bitmap();
+    if (!bitmap)
+        return;
+    if (m_context && !bitmap->ensure_sk_image(*m_context))
+        return;
     auto dst_rect = to_skia_rect(command.dst_rect);
-    auto& sk_surface = command.surface->sk_surface();
+    SkRect src_rect = SkRect::MakeIWH(bitmap->width(), bitmap->height());
     auto& canvas = surface().canvas();
-    auto image = sk_surface.makeImageSnapshot();
     SkPaint paint;
     paint.setAntiAlias(true);
-    canvas.drawImageRect(image, src_rect, dst_rect, to_skia_sampling_options(command.scaling_mode), &paint, SkCanvas::kStrict_SrcRectConstraint);
+    canvas.drawImageRect(bitmap->sk_image(), src_rect, dst_rect, to_skia_sampling_options(command.scaling_mode), &paint, SkCanvas::kStrict_SrcRectConstraint);
 }
 
 void DisplayListPlayerSkia::draw_scaled_immutable_bitmap(DrawScaledImmutableBitmap const& command)
@@ -475,7 +480,7 @@ static SkTileMode to_skia_tile_mode(SVGLinearGradientPaintStyle::SpreadMethod sp
     }
 }
 
-static SkPaint paint_style_to_skia_paint(Painting::SVGGradientPaintStyle const& paint_style, Gfx::FloatRect const& bounding_rect)
+static SkPaint gradient_paint_style_to_skia_paint(Painting::SVGGradientPaintStyle const& paint_style, Gfx::FloatRect const& bounding_rect)
 {
     SkPaint paint;
 
@@ -524,6 +529,41 @@ static SkPaint paint_style_to_skia_paint(Painting::SVGGradientPaintStyle const& 
     }
 
     return paint;
+}
+
+SkPaint DisplayListPlayerSkia::paint_style_to_skia_paint(Painting::SVGPaintServerPaintStyle const& paint_style, Gfx::FloatRect const& bounding_rect)
+{
+    if (auto const* gradient = as_if<SVGGradientPaintStyle>(paint_style))
+        return gradient_paint_style_to_skia_paint(*gradient, bounding_rect);
+
+    if (auto const* pattern = as_if<SVGPatternPaintStyle>(paint_style)) {
+        auto const& tile_rect = pattern->tile_rect();
+        auto tile_size = Gfx::IntSize(ceilf(tile_rect.width()), ceilf(tile_rect.height()));
+        if (tile_size.is_empty())
+            return {};
+
+        auto tile_surface = Gfx::PaintingSurface::create_with_size(m_context, tile_size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+
+        execute_display_list_into_surface(*pattern->tile_display_list(), *tile_surface);
+
+        auto image = tile_surface->sk_surface().makeImageSnapshot();
+
+        SkMatrix matrix;
+        matrix.setTranslate(tile_rect.x(), tile_rect.y());
+
+        matrix.preScale(tile_rect.width() / tile_size.width(), tile_rect.height() / tile_size.height());
+        if (auto transform = pattern->pattern_transform(); transform.has_value())
+            matrix = matrix * to_skia_matrix(transform.value());
+
+        auto sampling = SkSamplingOptions(SkFilterMode::kLinear);
+        auto shader = image->makeShader(SkTileMode::kRepeat, SkTileMode::kRepeat, sampling, &matrix);
+
+        SkPaint paint;
+        paint.setShader(shader);
+        return paint;
+    }
+
+    return {};
 }
 
 void DisplayListPlayerSkia::fill_path(FillPath const& command)
@@ -743,82 +783,12 @@ void DisplayListPlayerSkia::add_rounded_rect_clip(AddRoundedRectClip const& comm
     canvas.clipRRect(rounded_rect, clip_op, true);
 }
 
-struct DisplayListPlayerSkia::CachedRuntimeEffects {
-    sk_sp<SkRuntimeEffect> luminance_mask;
-    sk_sp<SkRuntimeEffect> alpha_mask;
-};
-
-DisplayListPlayerSkia::CachedRuntimeEffects& DisplayListPlayerSkia::cached_runtime_effects()
-{
-    if (!m_cached_runtime_effects)
-        m_cached_runtime_effects = make<DisplayListPlayerSkia::CachedRuntimeEffects>();
-    return *m_cached_runtime_effects;
-}
-
-void DisplayListPlayerSkia::add_mask(AddMask const& command)
-{
-    auto const& rect = command.rect;
-    if (rect.is_empty())
-        return;
-    auto mask_surface = Gfx::PaintingSurface::create_with_size(m_context, rect.size(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
-
-    ScrollStateSnapshot scroll_state_snapshot;
-    execute_impl(*command.display_list, scroll_state_snapshot, mask_surface);
-
-    SkMatrix mask_matrix;
-    mask_matrix.setTranslate(rect.x(), rect.y());
-    auto image = mask_surface->sk_surface().makeImageSnapshot();
-
-    auto compile_effect = [](char const* sksl_shader) {
-        auto [effect, error] = SkRuntimeEffect::MakeForShader(SkString(sksl_shader));
-        if (!effect) {
-            dbgln("SkSL error: {}", error.c_str());
-            VERIFY_NOT_REACHED();
-        }
-        return effect;
-    };
-
-    auto& cached_runtime_effects = this->cached_runtime_effects();
-
-    sk_sp<SkRuntimeEffect> effect;
-    if (command.kind == Gfx::MaskKind::Luminance) {
-        char const* sksl_shader = R"(
-                uniform shader mask_image;
-                half4 main(float2 coord) {
-                    half4 color = mask_image.eval(coord);
-                    half luminance = 0.2126 * color.b + 0.7152 * color.g + 0.0722 * color.r;
-                    return half4(0.0, 0.0, 0.0, color.a * luminance);
-                }
-            )";
-        if (!cached_runtime_effects.luminance_mask) {
-            cached_runtime_effects.luminance_mask = compile_effect(sksl_shader);
-        }
-        effect = cached_runtime_effects.luminance_mask;
-    } else {
-        char const* sksl_shader = R"(
-                uniform shader mask_image;
-                half4 main(float2 coord) {
-                    half4 color = mask_image.eval(coord);
-                    return half4(0.0, 0.0, 0.0, color.a);
-                }
-            )";
-        if (!cached_runtime_effects.alpha_mask) {
-            cached_runtime_effects.alpha_mask = compile_effect(sksl_shader);
-        }
-        effect = cached_runtime_effects.alpha_mask;
-    }
-
-    SkRuntimeShaderBuilder builder(effect);
-    builder.child("mask_image") = image->makeShader(SkSamplingOptions(), mask_matrix);
-    surface().canvas().clipShader(builder.makeShader());
-}
-
 void DisplayListPlayerSkia::paint_nested_display_list(PaintNestedDisplayList const& command)
 {
     auto& canvas = surface().canvas();
     canvas.translate(command.rect.x(), command.rect.y());
     ScrollStateSnapshot scroll_state_snapshot = m_scroll_state_snapshots_by_display_list.get(*command.display_list).value_or({});
-    execute_impl(*command.display_list, scroll_state_snapshot, {});
+    execute_impl(*command.display_list, scroll_state_snapshot);
 }
 
 void DisplayListPlayerSkia::paint_scrollbar(PaintScrollBar const& command)
@@ -866,6 +836,9 @@ void DisplayListPlayerSkia::apply_effects(ApplyEffects const& command)
 
     if (command.filter.has_value())
         paint.setImageFilter(to_skia_image_filter(command.filter.value()));
+
+    if (command.mask_kind.has_value() && command.mask_kind.value() == Gfx::MaskKind::Luminance)
+        paint.setColorFilter(SkLumaColorFilter::Make());
 
     canvas.saveLayer(nullptr, &paint);
 }

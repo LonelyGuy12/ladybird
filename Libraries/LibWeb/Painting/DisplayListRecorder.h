@@ -23,6 +23,7 @@
 #include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/BorderRadiiData.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
+#include <LibWeb/Painting/DisplayListCommand.h>
 #include <LibWeb/Painting/GradientData.h>
 #include <LibWeb/Painting/PaintBoxShadowParams.h>
 #include <LibWeb/Painting/PaintStyle.h>
@@ -71,8 +72,8 @@ public:
 
     void draw_rect(Gfx::IntRect const& rect, Color color, bool rough = false);
 
-    void draw_painting_surface(Gfx::IntRect const& dst_rect, NonnullRefPtr<Gfx::PaintingSurface>, Gfx::IntRect const& src_rect, Gfx::ScalingMode scaling_mode = Gfx::ScalingMode::NearestNeighbor);
     void draw_scaled_immutable_bitmap(Gfx::IntRect const& dst_rect, Gfx::IntRect const& clip_rect, Gfx::ImmutableBitmap const& bitmap, Gfx::ScalingMode scaling_mode = Gfx::ScalingMode::NearestNeighbor);
+    void draw_external_content(Gfx::IntRect const& dst_rect, NonnullRefPtr<ExternalContentSource>, Gfx::ScalingMode scaling_mode = Gfx::ScalingMode::NearestNeighbor);
 
     void draw_repeated_immutable_bitmap(Gfx::IntRect dst_rect, Gfx::IntRect clip_rect, NonnullRefPtr<Gfx::ImmutableBitmap const> bitmap, Gfx::ScalingMode scaling_mode, bool repeat_x, bool repeat_y);
 
@@ -90,6 +91,27 @@ public:
     void set_accumulated_visual_context(RefPtr<AccumulatedVisualContext const> state) { m_accumulated_visual_context = move(state); }
     RefPtr<AccumulatedVisualContext const> accumulated_visual_context() const { return m_accumulated_visual_context; }
 
+    void replay_cached_commands(ReadonlySpan<DisplayListCommand> commands);
+
+    class CommandCapture {
+        AK_MAKE_NONCOPYABLE(CommandCapture);
+
+    public:
+        CommandCapture(CommandCapture&& other)
+            : m_recorder(exchange(other.m_recorder, nullptr))
+        {
+        }
+        ~CommandCapture();
+        Vector<DisplayListCommand> take();
+
+    private:
+        friend class DisplayListRecorder;
+        explicit CommandCapture(DisplayListRecorder&);
+        DisplayListRecorder* m_recorder { nullptr };
+    };
+
+    CommandCapture begin_command_capture();
+
     void save();
     void save_layer();
     void restore();
@@ -97,9 +119,16 @@ public:
     void paint_nested_display_list(RefPtr<DisplayList> display_list, Gfx::IntRect rect);
 
     void add_rounded_rect_clip(CornerRadii corner_radii, Gfx::IntRect border_rect, CornerClip corner_clip);
-    void add_mask(RefPtr<DisplayList> display_list, Gfx::IntRect rect, Gfx::MaskKind kind);
 
-    void apply_backdrop_filter(Gfx::IntRect const& backdrop_region, BorderRadiiData const& border_radii_data, Gfx::Filter const& backdrop_filter);
+    struct MaskInfo {
+        RefPtr<DisplayList> display_list;
+        Gfx::IntRect rect;
+        Gfx::MaskKind kind;
+    };
+    void begin_masks(ReadonlySpan<MaskInfo>);
+    void end_masks(ReadonlySpan<MaskInfo>);
+
+    void apply_backdrop_filter(Gfx::IntRect const& backdrop_region, CornerRadii const& corner_radii, Gfx::Filter const& backdrop_filter);
 
     void paint_outer_box_shadow(PaintBoxShadowParams params);
     void paint_inner_box_shadow(PaintBoxShadowParams params);
@@ -109,9 +138,9 @@ public:
     void fill_rect_with_rounded_corners(Gfx::IntRect const& a_rect, Color color, int radius);
     void fill_rect_with_rounded_corners(Gfx::IntRect const& a_rect, Color color, int top_left_radius, int top_right_radius, int bottom_right_radius, int bottom_left_radius);
 
-    void paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, CSSPixelFraction scroll_size, Color thumb_color, Color track_color, bool vertical);
+    void paint_scrollbar(int scroll_frame_id, Gfx::IntRect gutter_rect, Gfx::IntRect thumb_rect, double scroll_size, Color thumb_color, Color track_color, bool vertical);
 
-    void apply_effects(float opacity = 1.0f, Gfx::CompositingAndBlendingOperator = Gfx::CompositingAndBlendingOperator::Normal, Optional<Gfx::Filter> filter = {});
+    void apply_effects(float opacity = 1.0f, Gfx::CompositingAndBlendingOperator = Gfx::CompositingAndBlendingOperator::Normal, Optional<Gfx::Filter> filter = {}, Optional<Gfx::MaskKind> mask_kind = {});
 
     DisplayListRecorder(DisplayList&);
     ~DisplayListRecorder();
@@ -119,9 +148,13 @@ public:
     int m_save_nesting_level { 0 };
 
 private:
+    void end_capture();
+
     RefPtr<AccumulatedVisualContext const> m_accumulated_visual_context;
     Vector<size_t> m_push_sc_index_stack;
     DisplayList& m_display_list;
+    bool m_is_capturing { false };
+    Vector<DisplayListCommand> m_captured_commands;
 };
 
 class DisplayListRecorderStateSaver {

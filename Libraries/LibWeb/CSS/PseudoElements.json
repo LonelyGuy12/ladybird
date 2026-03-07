@@ -2,6 +2,9 @@
   "-moz-meter-bar": {
     "alias-for": "slider-fill"
   },
+  "-moz-placeholder": {
+    "alias-for": "placeholder"
+  },
   "-moz-progress-bar": {
     "alias-for": "slider-fill"
   },
@@ -13,6 +16,9 @@
   },
   "-moz-range-thumb": {
     "alias-for": "slider-thumb"
+  },
+  "-webkit-input-placeholder": {
+    "alias-for": "placeholder"
   },
   "-webkit-meter-bar": {
     "alias-for": "slider-track"
@@ -57,7 +63,8 @@
       "#margin-properties",
       "#padding-properties",
       "#border-properties",
-      "box-shadow"
+      "box-shadow",
+      "#custom-properties"
     ]
   },
   "first-line": {
@@ -69,6 +76,7 @@
       "#background-properties",
       "#inline-typesetting-properties",
       "#text-decoration-properties",
+      "#custom-properties",
       "FIXME: ruby-position",
       "#inline-layout-properties"
     ]
@@ -90,6 +98,7 @@
       "#background-properties",
       "#inline-typesetting-properties",
       "#text-decoration-properties",
+      "#custom-properties",
       "FIXME: ruby-position"
     ]
   },

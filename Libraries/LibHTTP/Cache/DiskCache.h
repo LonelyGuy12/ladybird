@@ -52,6 +52,9 @@ public:
     };
     Variant<Optional<CacheEntryReader&>, CacheHasOpenEntry> open_entry(CacheRequest&, URL::URL const&, StringView method, HeaderList const& request_headers, CacheMode, OpenMode);
 
+    void remove_entries_exceeding_cache_limit();
+    void set_maximum_disk_cache_size(u64 maximum_disk_cache_size);
+
     Requests::CacheSizes estimate_cache_size_accessed_since(UnixDateTime since);
     void remove_entries_accessed_since(UnixDateTime since);
 
@@ -68,7 +71,10 @@ private:
     };
     bool check_if_cache_has_open_entry(CacheRequest&, u64 cache_key, URL::URL const&, CheckReaderEntries);
 
+    void delete_entry(u64 cache_key, u64 vary_key);
+
     Mode m_mode;
+    Optional<String> m_partitioned_cache_key;
 
     NonnullRefPtr<Database::Database> m_database;
 
@@ -76,8 +82,8 @@ private:
         NonnullOwnPtr<CacheEntry> entry;
         WeakPtr<CacheRequest> request;
     };
-    HashMap<u64, Vector<OpenCacheEntry, 1>> m_open_cache_entries;
-    HashMap<u64, Vector<WeakPtr<CacheRequest>, 1>> m_requests_waiting_completion;
+    HashMap<u64, Vector<OpenCacheEntry, 1>, IdentityHashTraits<u64>> m_open_cache_entries;
+    HashMap<u64, Vector<WeakPtr<CacheRequest>, 1>, IdentityHashTraits<u64>> m_requests_waiting_completion;
 
     LexicalPath m_cache_directory;
     CacheIndex m_index;

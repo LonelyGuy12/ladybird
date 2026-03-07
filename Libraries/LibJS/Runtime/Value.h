@@ -154,22 +154,50 @@ public:
         return !is_nan() && !is_infinity();
     }
 
-    template<typename T>
-    ALWAYS_INLINE T* as_if()
+    template<DerivedFrom<Object> T>
+    [[nodiscard]] ALWAYS_INLINE bool is() const
     {
-        static_assert(IsBaseOf<Object, T>);
-        if (!is_object())
-            return nullptr;
-        return ::as_if<T>(as_object());
+        return as_if<T>() != nullptr;
     }
 
-    template<typename T>
-    ALWAYS_INLINE T const* as_if() const
+    template<DerivedFrom<Object> T>
+    [[nodiscard]] ALWAYS_INLINE GC::Ptr<T> as_if()
     {
-        static_assert(IsBaseOf<Object, T>);
         if (!is_object())
             return nullptr;
-        return ::as_if<T>(as_object());
+        if constexpr (IsSame<T, Object>) {
+            return as_object();
+        } else {
+            return ::as_if<T>(as_object());
+        }
+    }
+
+    template<DerivedFrom<Object> T>
+    [[nodiscard]] ALWAYS_INLINE GC::Ptr<T const> as_if() const
+    {
+        if (!is_object())
+            return nullptr;
+        if constexpr (IsSame<T, Object>) {
+            return as_object();
+        } else {
+            return ::as_if<T>(as_object());
+        }
+    }
+
+    template<DerivedFrom<Object> T>
+    [[nodiscard]] ALWAYS_INLINE T& as()
+    {
+        auto ptr = as_if<T>();
+        VERIFY(ptr);
+        return *ptr;
+    }
+
+    template<DerivedFrom<Object> T>
+    [[nodiscard]] ALWAYS_INLINE T const& as() const
+    {
+        auto ptr = as_if<T>();
+        VERIFY(ptr);
+        return *ptr;
     }
 
     constexpr Value()

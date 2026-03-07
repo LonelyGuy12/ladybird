@@ -22,6 +22,8 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/CanvasRenderingContext2D.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -210,9 +212,8 @@ WebIDL::ExceptionOr<void> CanvasRenderingContext2D::draw_image_internal(CanvasIm
 void CanvasRenderingContext2D::did_draw(Gfx::FloatRect const&)
 {
     // FIXME: Make use of the rect to reduce the invalidated area when possible.
-    if (!canvas_element().paintable())
-        return;
-    canvas_element().paintable()->set_needs_display(InvalidateDisplayList::No);
+    canvas_element().set_canvas_content_dirty();
+    canvas_element().set_needs_repaint(InvalidateDisplayList::No);
 }
 
 Gfx::Painter* CanvasRenderingContext2D::painter()
@@ -220,7 +221,7 @@ Gfx::Painter* CanvasRenderingContext2D::painter()
     allocate_painting_surface_if_needed();
     auto surface = canvas_element().surface();
     if (!m_painter && surface) {
-        canvas_element().document().invalidate_display_list();
+        canvas_element().set_needs_repaint();
         m_painter = make<Gfx::PainterSkia>(*canvas_element().surface());
     }
     return m_painter.ptr();
@@ -1104,11 +1105,12 @@ void CanvasRenderingContext2D::set_shadow_color(String color)
     // 2. Let parsedValue be the result of parsing the given value with context if non-null.
     auto style_value = parse_css_value(CSS::Parser::ParsingParams(), color, CSS::PropertyID::Color);
     if (style_value && style_value->has_color()) {
+        DOM::AbstractElement abstract_element { context };
+        context.document().update_style_if_needed_for_element(abstract_element);
+
         CSS::ColorResolutionContext color_resolution_context {};
-        context.document().update_layout(DOM::UpdateLayoutReason::CanvasRenderingContext2DSetShadowColor);
-        if (auto node = context.layout_node()) {
-            color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*node);
-        }
+        if (context.computed_properties())
+            color_resolution_context = CSS::ColorResolutionContext::for_element(abstract_element);
 
         auto parsedValue = style_value->to_color(color_resolution_context).value_or(Color::Black);
 
@@ -1215,18 +1217,26 @@ void CanvasRenderingContext2D::set_filter(String filter)
     auto style_value = parser.parse_as_css_value(CSS::PropertyID::Filter);
 
     if (style_value && style_value->is_filter_value_list()) {
-        auto filter_value_list = style_value->as_filter_value_list().filter_value_list();
+        auto& document = canvas_element().document();
+        DOM::AbstractElement abstract_element { canvas_element() };
+        document.update_style_if_needed_for_element(abstract_element);
 
-        // Note: The layout must be updated to make sure the canvas's layout node isn't null.
-        canvas_element().document().update_layout(DOM::UpdateLayoutReason::CanvasRenderingContext2DSetFilter);
-        auto layout_node = canvas_element().layout_node();
+        auto length_resolution_context = canvas_element().computed_properties()
+            ? CSS::Length::ResolutionContext::for_element(abstract_element)
+            : CSS::Length::ResolutionContext::for_document(document);
+
+        CSS::ComputationContext computation_context {
+            .length_resolution_context = length_resolution_context,
+            .abstract_element = abstract_element,
+        };
+        auto filter_value_list = style_value->absolutized(computation_context)->as_filter_value_list().filter_value_list();
 
         // 4. Set this's current filter to the given value.
         for (auto& item : filter_value_list) {
             // FIXME: Add support for SVG filters when they get implement by the CSS parser.
             item.visit(
                 [&](CSS::FilterOperation::Blur const& blur_filter) {
-                    float radius = blur_filter.resolved_radius(*layout_node);
+                    float radius = blur_filter.resolved_radius();
                     auto new_filter = Gfx::Filter::blur(radius, radius);
 
                     drawing_state().filter = drawing_state().filter.has_value()
@@ -1242,7 +1252,7 @@ void CanvasRenderingContext2D::set_filter(String filter)
                         : new_filter;
                 },
                 [&](CSS::FilterOperation::HueRotate const& hue_rotate) {
-                    float angle = hue_rotate.angle_degrees(*layout_node);
+                    float angle = hue_rotate.angle_degrees();
                     auto new_filter = Gfx::Filter::hue_rotate(angle);
 
                     drawing_state().filter = drawing_state().filter.has_value()
@@ -1250,24 +1260,19 @@ void CanvasRenderingContext2D::set_filter(String filter)
                         : new_filter;
                 },
                 [&](CSS::FilterOperation::DropShadow const& drop_shadow) {
-                    auto resolution_context = CSS::Length::ResolutionContext::for_layout_node(*layout_node);
-                    CSS::CalculationResolutionContext calculation_context {
-                        .length_resolution_context = resolution_context,
-                    };
-                    auto zero_px = CSS::Length::make_px(0);
-
-                    float offset_x = static_cast<float>(drop_shadow.offset_x.resolved(calculation_context).value_or(zero_px).to_px(resolution_context));
-                    float offset_y = static_cast<float>(drop_shadow.offset_y.resolved(calculation_context).value_or(zero_px).to_px(resolution_context));
+                    float offset_x = static_cast<float>(CSS::Length::from_style_value(drop_shadow.offset_x, {}).absolute_length_to_px());
+                    float offset_y = static_cast<float>(CSS::Length::from_style_value(drop_shadow.offset_y, {}).absolute_length_to_px());
 
                     float radius = 0.0f;
-                    if (drop_shadow.radius.has_value()) {
-                        radius = static_cast<float>(drop_shadow.radius->resolved(calculation_context).value_or(zero_px).to_px(resolution_context));
+                    if (drop_shadow.radius) {
+                        radius = static_cast<float>(CSS::Length::from_style_value(*drop_shadow.radius, {}).absolute_length_to_px());
                     };
 
-                    auto color_context = CSS::ColorResolutionContext::for_layout_node_with_style(*layout_node);
-                    auto color = drop_shadow.color
-                        ? drop_shadow.color->to_color(color_context).value_or(Gfx::Color::Black)
-                        : Gfx::Color::Black;
+                    Gfx::Color color = Gfx::Color::Black;
+                    if (drop_shadow.color && canvas_element().computed_properties()) {
+                        auto color_context = CSS::ColorResolutionContext::for_element(abstract_element);
+                        color = drop_shadow.color->to_color(color_context).value_or(Gfx::Color::Black);
+                    }
 
                     auto new_filter = Gfx::Filter::drop_shadow(offset_x, offset_y, radius, color);
 

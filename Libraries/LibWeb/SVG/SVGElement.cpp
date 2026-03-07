@@ -9,8 +9,10 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/SVGElementPrototype.h>
+#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/SVG/SVGDescElement.h>
@@ -69,6 +71,7 @@ static ReadonlySpan<NamedPropertyID> attribute_style_properties()
         NamedPropertyID(CSS::PropertyID::Cy, { SVG::TagNames::circle, SVG::TagNames::ellipse }),
         NamedPropertyID(CSS::PropertyID::Direction),
         NamedPropertyID(CSS::PropertyID::Display),
+        NamedPropertyID(CSS::PropertyID::DominantBaseline),
         NamedPropertyID(CSS::PropertyID::FillOpacity),
         NamedPropertyID(CSS::PropertyID::FillRule),
         NamedPropertyID(CSS::PropertyID::Filter),
@@ -107,6 +110,8 @@ static ReadonlySpan<NamedPropertyID> attribute_style_properties()
         NamedPropertyID(CSS::PropertyID::TextDecoration),
         NamedPropertyID(CSS::PropertyID::TextRendering),
         NamedPropertyID(CSS::PropertyID::TextOverflow),
+        NamedPropertyID(CSS::PropertyID::Transform, SVG::AttributeNames::gradientTransform, { SVG::TagNames::linearGradient, SVG::TagNames::radialGradient }),
+        NamedPropertyID(CSS::PropertyID::Transform, SVG::AttributeNames::patternTransform, { SVG::TagNames::pattern }),
         NamedPropertyID(CSS::PropertyID::TransformOrigin),
         NamedPropertyID(CSS::PropertyID::UnicodeBidi),
         NamedPropertyID(CSS::PropertyID::Visibility),
@@ -277,6 +282,19 @@ void SVGElement::remove_from_use_element_that_reference_this()
         use_element.svg_element_removed(*this);
         return TraversalDecision::Continue;
     });
+}
+
+void SVGElement::adjust_computed_style(CSS::ComputedProperties& computed_properties)
+{
+    Base::adjust_computed_style(computed_properties);
+
+    // The outermost <svg> element (no ancestor <svg>) participates in CSS box layout
+    // and may be positioned. All other SVG elements, including nested <svg> elements,
+    // use SVG's coordinate system and must be forced to position:static.
+    if (is<SVGSVGElement>(*this) && !owner_svg_element())
+        return;
+
+    computed_properties.set_property(CSS::PropertyID::Position, CSS::KeywordStyleValue::create(CSS::Keyword::Static));
 }
 
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__classNames

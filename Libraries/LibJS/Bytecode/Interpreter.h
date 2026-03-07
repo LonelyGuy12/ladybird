@@ -43,7 +43,6 @@ public:
     }
 
     ALWAYS_INLINE Value& accumulator() { return reg(Register::accumulator()); }
-    ALWAYS_INLINE Value& saved_return_value() { return reg(Register::saved_return_value()); }
     Value& reg(Register const& r)
     {
         return m_running_execution_context->registers_and_constants_and_locals_and_arguments()[r.index()];
@@ -65,13 +64,7 @@ public:
         reg(Register::exception()) = js_special_empty_value();
     }
 
-    void enter_unwind_context();
-    void leave_unwind_context();
     void catch_exception(Operand dst);
-    void restore_scheduled_jump();
-    void leave_finally();
-
-    void enter_object_environment(Object&);
 
     Executable& current_executable() { return *m_running_execution_context->executable; }
     Executable const& current_executable() const { return *m_running_execution_context->executable; }
@@ -95,14 +88,28 @@ private:
         ExitFromExecutable,
         ContinueInThisExecutable,
     };
-    [[nodiscard]] COLD HandleExceptionResponse handle_exception(u32& program_counter, Value exception);
+    [[nodiscard]] COLD HandleExceptionResponse handle_exception(u32 program_counter, Value exception);
+
+    [[nodiscard]] NEVER_INLINE bool try_inline_call(Instruction const&, u32 current_pc);
+    [[nodiscard]] NEVER_INLINE bool try_inline_call_construct(Instruction const&, u32 current_pc);
+    NEVER_INLINE void pop_inline_frame(Value return_value);
+
+    ExecutionContext* push_inline_frame(
+        ECMAScriptFunctionObject& callee_function,
+        Executable& callee_executable,
+        ReadonlySpan<Operand> arguments,
+        u32 return_pc,
+        u32 dst_raw,
+        Value this_value,
+        Object* new_target,
+        bool is_construct);
 
     ExecutionContext* m_running_execution_context { nullptr };
 };
 
 JS_API extern bool g_dump_bytecode;
 
-ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM&, ASTNode const&, JS::FunctionKind kind, Utf16FlyString const& name);
-ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM&, GC::Ref<SharedFunctionInstanceData const>, BuiltinAbstractOperationsEnabled builtin_abstract_operations_enabled);
+GC::Ref<Bytecode::Executable> compile(VM&, ASTNode const&, JS::FunctionKind kind, Utf16FlyString const& name);
+GC::Ref<Bytecode::Executable> compile(VM&, GC::Ref<SharedFunctionInstanceData const>, BuiltinAbstractOperationsEnabled builtin_abstract_operations_enabled);
 
 }

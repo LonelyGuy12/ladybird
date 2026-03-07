@@ -112,9 +112,9 @@ private:
     virtual Messages::WebContentClient::DidRequestAllCookiesWebdriverResponse did_request_all_cookies_webdriver(URL::URL) override;
     virtual Messages::WebContentClient::DidRequestAllCookiesCookiestoreResponse did_request_all_cookies_cookiestore(URL::URL) override;
     virtual Messages::WebContentClient::DidRequestNamedCookieResponse did_request_named_cookie(URL::URL, String) override;
-    virtual Messages::WebContentClient::DidRequestCookieResponse did_request_cookie(u64 page_id, URL::URL, Web::Cookie::Source) override;
-    virtual void did_set_cookie(URL::URL, Web::Cookie::ParsedCookie, Web::Cookie::Source) override;
-    virtual void did_update_cookie(Web::Cookie::Cookie) override;
+    virtual Messages::WebContentClient::DidRequestCookieResponse did_request_cookie(u64 page_id, URL::URL, HTTP::Cookie::Source) override;
+    virtual void did_set_cookie(URL::URL, HTTP::Cookie::ParsedCookie, HTTP::Cookie::Source) override;
+    virtual void did_update_cookie(HTTP::Cookie::Cookie) override;
     virtual void did_expire_cookies_with_time_offset(AK::Duration) override;
     virtual Messages::WebContentClient::DidRequestStorageItemResponse did_request_storage_item(Web::StorageAPI::StorageEndpointType storage_endpoint, String storage_key, String bottle_key) override;
     virtual Messages::WebContentClient::DidSetStorageItemResponse did_set_storage_item(Web::StorageAPI::StorageEndpointType storage_endpoint, String storage_key, String bottle_key, String value) override;
@@ -130,7 +130,8 @@ private:
     virtual void did_request_resize_window(u64 page_id, Gfx::IntSize) override;
     virtual void did_request_maximize_window(u64 page_id) override;
     virtual void did_request_minimize_window(u64 page_id) override;
-    virtual void did_request_fullscreen_window(u64 page_id) override;
+    virtual Messages::WebContentClient::DidRequestFullscreenWindowResponse did_request_fullscreen_window(u64 page_id) override;
+    virtual void did_request_exit_fullscreen(u64 page_id) override;
     virtual void did_request_file(u64 page_id, ByteString path, i32) override;
     virtual void did_request_color_picker(u64 page_id, Color current_color) override;
     virtual void did_request_file_picker(u64 page_id, Web::HTML::FileFilter accepted_file_types, Web::HTML::AllowMultipleFiles) override;

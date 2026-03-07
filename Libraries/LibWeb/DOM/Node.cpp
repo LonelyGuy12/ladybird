@@ -9,6 +9,7 @@
  */
 
 #include <AK/HashTable.h>
+#include <AK/JsonObjectSerializer.h>
 #include <AK/StringBuilder.h>
 #include <LibGC/DeferGC.h>
 #include <LibIPC/Decoder.h>
@@ -20,6 +21,7 @@
 #include <LibWeb/Bindings/NodePrototype.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/DOM/AccessibilityTreeNode.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/CDATASection.h>
 #include <LibWeb/DOM/Comment.h>
@@ -47,6 +49,7 @@
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/HTMLLegendElement.h>
+#include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLStyleElement.h>
@@ -57,6 +60,7 @@
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -418,6 +422,19 @@ GC::Ptr<HTML::Navigable> Node::navigable() const
     }
 }
 
+static bool reason_may_affect_has_selectors(StyleInvalidationReason reason)
+{
+    // :has() selectors match based on DOM state only (structure, attributes, pseudo-classes). Reasons that don't change
+    // any DOM state can't affect :has() matching, so we can skip scheduling :has() ancestor invalidation.
+    return !first_is_one_of(reason,
+        StyleInvalidationReason::BaseURLChanged,
+        StyleInvalidationReason::CSSFontLoaded,
+        StyleInvalidationReason::HTMLIFrameElementGeometryChange,
+        StyleInvalidationReason::HTMLObjectElementUpdateLayoutAndChildObjects,
+        StyleInvalidationReason::NavigableSetViewportSize,
+        StyleInvalidationReason::SettingsChange);
+}
+
 void Node::invalidate_style(StyleInvalidationReason reason)
 {
     if (is_character_data())
@@ -435,7 +452,7 @@ void Node::invalidate_style(StyleInvalidationReason reason)
                     return IterationDecision::Continue;
                 });
             }
-        } else {
+        } else if (reason_may_affect_has_selectors(reason)) {
             style_scope.schedule_ancestors_style_invalidation_due_to_presence_of_has(*this);
         }
     }
@@ -464,16 +481,30 @@ void Node::invalidate_style(StyleInvalidationReason reason)
     // When invalidating style for a node, we actually invalidate:
     // - the node itself
     // - all of its descendants
-    // - all of its preceding siblings and their descendants (only on DOM insert/remove)
-    // - all of its subsequent siblings and their descendants
+    // - preceding siblings that depend on following-sibling counts (only on DOM insert/remove)
+    // - subsequent siblings that depend on previous siblings or sibling combinators
     // FIXME: This is a lot of invalidation and we should implement more sophisticated invalidation to do less work!
 
-    set_entire_subtree_needs_style_update(true);
+    auto mark_entire_subtree_for_style_update = [](Node& node_to_mark) {
+        node_to_mark.set_entire_subtree_needs_style_update(true);
+    };
+
+    mark_entire_subtree_for_style_update(*this);
+
+    auto previous_sibling_needs_structural_invalidation = [](Element const& element) {
+        return element.affected_by_backward_structural_changes();
+    };
+
+    auto next_sibling_needs_structural_invalidation = [](Element const& element, size_t current_sibling_distance) {
+        if (element.affected_by_indirect_sibling_combinator() || element.affected_by_first_child_pseudo_class() || element.affected_by_forward_positional_pseudo_class())
+            return true;
+        return element.affected_by_direct_sibling_combinator() && current_sibling_distance <= element.sibling_invalidation_distance();
+    };
 
     if (reason == StyleInvalidationReason::NodeInsertBefore || reason == StyleInvalidationReason::NodeRemove) {
         for (auto* sibling = previous_sibling(); sibling; sibling = sibling->previous_sibling()) {
-            if (auto* element = as_if<Element>(sibling); element && element->style_affected_by_structural_changes())
-                element->set_entire_subtree_needs_style_update(true);
+            if (auto* element = as_if<Element>(sibling); element && previous_sibling_needs_structural_invalidation(*element))
+                mark_entire_subtree_for_style_update(*element);
         }
     }
 
@@ -482,15 +513,14 @@ void Node::invalidate_style(StyleInvalidationReason reason)
         if (auto* element = as_if<Element>(sibling)) {
             bool needs_to_invalidate = false;
             if (reason == StyleInvalidationReason::NodeInsertBefore || reason == StyleInvalidationReason::NodeRemove) {
-                needs_to_invalidate = element->style_affected_by_structural_changes();
-            } else if (element->affected_by_indirect_sibling_combinator() || element->affected_by_nth_child_pseudo_class()) {
+                needs_to_invalidate = next_sibling_needs_structural_invalidation(*element, current_sibling_distance);
+            } else if (element->affected_by_indirect_sibling_combinator() || element->affected_by_forward_positional_pseudo_class()) {
                 needs_to_invalidate = true;
             } else if (element->affected_by_direct_sibling_combinator() && current_sibling_distance <= element->sibling_invalidation_distance()) {
                 needs_to_invalidate = true;
             }
-            if (needs_to_invalidate) {
-                element->set_entire_subtree_needs_style_update(true);
-            }
+            if (needs_to_invalidate)
+                mark_entire_subtree_for_style_update(*element);
             current_sibling_distance++;
         }
     }
@@ -822,7 +852,8 @@ void Node::insert_before(GC::Ref<Node> node, GC::Ptr<Node> child, bool suppress_
     }
 
     if (is_connected()) {
-        if (layout_node() && layout_node()->display().is_contents() && parent_element()) {
+        // NB: Called during DOM insertion, layout is not up to date.
+        if (unsafe_layout_node() && unsafe_layout_node()->display().is_contents() && parent_element()) {
             parent_element()->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBeforeWithDisplayContents);
         }
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
@@ -962,9 +993,10 @@ void Node::remove(bool suppress_observers)
         // In the future, we should find a way to only invalidate the parts that actually need it.
         invalidate_style(StyleInvalidationReason::NodeRemove);
 
-        // NOTE: If we didn't have a layout node before, rebuilding the layout tree isn't gonna give us one
-        //       after we've been removed from the DOM.
-        if (layout_node())
+        // NOTE: If we didn’t have a layout node before, rebuilding the layout tree isn’t gonna give us one
+        //       after we’ve been removed from the DOM.
+        // NB: Called during DOM removal, layout is not up to date.
+        if (unsafe_layout_node())
             parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
     }
 
@@ -1274,11 +1306,12 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
     if (old_parent->is_connected()) {
         // Since the tree structure is about to change, we need to invalidate both style and layout.
         // In the future, we should find a way to only invalidate the parts that actually need it.
-        old_parent->invalidate_style(StyleInvalidationReason::NodeRemove);
+        invalidate_style(StyleInvalidationReason::NodeRemove);
 
-        // NOTE: If we didn't have a layout node before, rebuilding the layout tree isn't gonna give us one
-        //       after we've been removed from the DOM.
-        if (layout_node())
+        // NOTE: If we didn’t have a layout node before, rebuilding the layout tree isn’t gonna give us one
+        //       after we’ve been removed from the DOM.
+        // NB: Called during DOM node move, layout is not up to date.
+        if (unsafe_layout_node())
             old_parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
     }
 
@@ -1346,7 +1379,7 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         new_parent.insert_before_impl(*this, child);
     }
 
-    new_parent.invalidate_style(StyleInvalidationReason::NodeInsertBefore);
+    invalidate_style(StyleInvalidationReason::NodeInsertBefore);
     if (is_connected()) {
         new_parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
     }
@@ -1584,6 +1617,25 @@ void Node::set_document(Document& document)
     }
 }
 
+void Node::recompute_editable_subtree_flag()
+{
+    bool new_value;
+    if (is_document()) {
+        new_value = as<Document>(*this).design_mode_enabled_state();
+    } else if (auto const* html_element = as_if<HTML::HTMLElement>(*this)) {
+        auto state = html_element->content_editable_state();
+        if (state == HTML::ContentEditableState::True || state == HTML::ContentEditableState::PlaintextOnly)
+            new_value = true;
+        else if (state == HTML::ContentEditableState::False)
+            new_value = false;
+        else
+            new_value = parent() && parent()->m_in_editable_subtree;
+    } else {
+        new_value = parent() && parent()->m_in_editable_subtree;
+    }
+    m_in_editable_subtree = new_value;
+}
+
 // https://w3c.github.io/editing/docs/execCommand/#editable
 bool Node::is_editable() const
 {
@@ -1597,7 +1649,7 @@ bool Node::is_editable() const
         return false;
 
     // its parent is an editing host or editable;
-    if (!parent() || !parent()->is_editable_or_editing_host())
+    if (!parent() || !parent()->m_in_editable_subtree)
         return false;
 
     // https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees
@@ -1633,7 +1685,7 @@ bool Node::is_editing_host() const
     //         `::editing_host()` to automatically traverse to the top-most editing host.
     auto state = html_element->content_editable_state();
     if ((state == HTML::ContentEditableState::True || state == HTML::ContentEditableState::PlaintextOnly)
-        && (!parent() || !parent()->is_editable_or_editing_host())) {
+        && (!parent() || !parent()->m_in_editable_subtree)) {
         return true;
     }
 
@@ -1732,7 +1784,8 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
             }
         }
 
-        if (auto layout_node = this->layout_node()) {
+        // NB: Propagating layout invalidation, layout is not up to date.
+        if (auto layout_node = this->unsafe_layout_node()) {
             layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
 
             // If the layout node has an anonymous parent, rebuild from the nearest non-anonymous ancestor.
@@ -1769,11 +1822,13 @@ void Node::post_connection()
 
 void Node::inserted()
 {
+    recompute_editable_subtree_flag();
     set_needs_style_update(true);
 }
 
 void Node::removed_from(Node*, Node&)
 {
+    m_in_editable_subtree = false;
     m_layout_node = nullptr;
     m_paintable = nullptr;
 }
@@ -1781,6 +1836,7 @@ void Node::removed_from(Node*, Node&)
 // https://dom.spec.whatwg.org/#concept-node-move-ext
 void Node::moved_from(GC::Ptr<Node>)
 {
+    recompute_editable_subtree_flag();
 }
 
 ParentNode* Node::parent_or_shadow_host()
@@ -2621,6 +2677,20 @@ size_t Node::length() const
     return child_count();
 }
 
+Layout::Node const* Node::layout_node() const
+{
+    if (m_layout_node)
+        VERIFY(document().layout_is_up_to_date());
+    return m_layout_node;
+}
+
+Layout::Node* Node::layout_node()
+{
+    if (m_layout_node)
+        VERIFY(document().layout_is_up_to_date());
+    return m_layout_node;
+}
+
 void Node::set_paintable(GC::Ptr<Painting::Paintable> paintable)
 {
     m_paintable = paintable;
@@ -2631,27 +2701,57 @@ void Node::clear_paintable()
     m_paintable = nullptr;
 }
 
+void Node::set_needs_repaint(InvalidateDisplayList should_invalidate_display_list)
+{
+    if (auto* p = unsafe_paintable())
+        p->set_needs_repaint(should_invalidate_display_list);
+}
+
+void Node::set_needs_layout_update(SetNeedsLayoutReason reason)
+{
+    if (auto* node = unsafe_layout_node())
+        node->set_needs_layout_update(reason);
+}
+
 Painting::Paintable const* Node::paintable() const
 {
+    if (m_paintable)
+        VERIFY(document().layout_is_up_to_date());
     return m_paintable;
 }
 
 Painting::Paintable* Node::paintable()
 {
+    if (m_paintable)
+        VERIFY(document().layout_is_up_to_date());
     return m_paintable;
 }
 
 Painting::PaintableBox const* Node::paintable_box() const
 {
-    if (paintable() && paintable()->is_paintable_box())
-        return static_cast<Painting::PaintableBox const*>(paintable());
+    if (auto* p = paintable(); p && p->is_paintable_box())
+        return static_cast<Painting::PaintableBox const*>(p);
     return nullptr;
 }
 
 Painting::PaintableBox* Node::paintable_box()
 {
-    if (paintable() && paintable()->is_paintable_box())
-        return static_cast<Painting::PaintableBox*>(paintable());
+    if (auto* p = paintable(); p && p->is_paintable_box())
+        return static_cast<Painting::PaintableBox*>(p);
+    return nullptr;
+}
+
+Painting::PaintableBox const* Node::unsafe_paintable_box() const
+{
+    if (m_paintable && m_paintable->is_paintable_box())
+        return static_cast<Painting::PaintableBox const*>(m_paintable.ptr());
+    return nullptr;
+}
+
+Painting::PaintableBox* Node::unsafe_paintable_box()
+{
+    if (m_paintable && m_paintable->is_paintable_box())
+        return static_cast<Painting::PaintableBox*>(m_paintable.ptr());
     return nullptr;
 }
 

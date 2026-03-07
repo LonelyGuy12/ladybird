@@ -40,11 +40,6 @@ void FillRect::dump(StringBuilder& builder) const
     builder.appendff(" rect={} color={}", rect, color);
 }
 
-void DrawPaintingSurface::dump(StringBuilder& builder) const
-{
-    builder.appendff(" dst_rect={} src_rect={}", dst_rect, src_rect);
-}
-
 void DrawScaledImmutableBitmap::dump(StringBuilder& builder) const
 {
     builder.appendff(" dst_rect={} clip_rect={}", dst_rect, clip_rect);
@@ -53,6 +48,11 @@ void DrawScaledImmutableBitmap::dump(StringBuilder& builder) const
 void DrawRepeatedImmutableBitmap::dump(StringBuilder& builder) const
 {
     builder.appendff(" dst_rect={} clip_rect={}", dst_rect, clip_rect);
+}
+
+void DrawExternalContent::dump(StringBuilder& builder) const
+{
+    builder.appendff(" dst_rect={}", dst_rect);
 }
 
 void Save::dump(StringBuilder&) const
@@ -149,11 +149,6 @@ void DrawRect::dump(StringBuilder& builder) const
 void AddRoundedRectClip::dump(StringBuilder& builder) const
 {
     builder.appendff(" rect={}", border_rect);
-}
-
-void AddMask::dump(StringBuilder& builder) const
-{
-    builder.appendff(" rect={}", rect);
 }
 
 void PaintNestedDisplayList::dump(StringBuilder& builder) const

@@ -36,10 +36,11 @@ NonnullOwnPtr<Request> Request::fetch(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
 {
-    auto request = adopt_own(*new Request { request_id, Type::Fetch, disk_cache, cache_mode, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), move(alt_svc_cache_path), proxy_data });
+    auto request = adopt_own(*new Request { request_id, Type::Fetch, disk_cache, cache_mode, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), include_credentials, move(alt_svc_cache_path), proxy_data });
     request->process();
 
     return request;
@@ -77,10 +78,11 @@ NonnullOwnPtr<Request> Request::revalidate(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
 {
-    auto request = adopt_own(*new Request { request_id, Type::BackgroundRevalidation, disk_cache, HTTP::CacheMode::Default, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), move(alt_svc_cache_path), proxy_data });
+    auto request = adopt_own(*new Request { request_id, Type::BackgroundRevalidation, disk_cache, HTTP::CacheMode::Default, client, curl_multi, resolver, move(url), move(method), move(request_headers), move(request_body), include_credentials, move(alt_svc_cache_path), proxy_data });
     request->process();
 
     return request;
@@ -98,6 +100,7 @@ Request::Request(
     ByteString method,
     NonnullRefPtr<HTTP::HeaderList> request_headers,
     ByteBuffer request_body,
+    HTTP::Cookie::IncludeCredentials include_credentials,
     ByteString alt_svc_cache_path,
     Core::ProxyData proxy_data)
     : m_request_id(request_id)
@@ -111,6 +114,7 @@ Request::Request(
     , m_method(move(method))
     , m_request_headers(move(request_headers))
     , m_request_body(move(request_body))
+    , m_include_credentials(include_credentials)
     , m_alt_svc_cache_path(move(alt_svc_cache_path))
     , m_proxy_data(proxy_data)
     , m_response_headers(HTTP::HeaderList::create())
@@ -162,6 +166,16 @@ void Request::notify_request_unblocked(Badge<HTTP::DiskCache>)
     // FIXME: We may want a timer to limit how long we are waiting for a request before proceeding with a network
     //        request that skips the disk cache.
     transition_to_state(State::Init);
+}
+
+void Request::notify_retrieved_http_cookie(Badge<ConnectionFromClient>, StringView cookie)
+{
+    if (!cookie.is_empty()) {
+        auto header = HTTP::Header::isomorphic_encode("Cookie"sv, cookie);
+        m_request_headers->append(move(header));
+    }
+
+    transition_to_state(State::Fetch);
 }
 
 void Request::notify_fetch_complete(Badge<ConnectionFromClient>, int result_code)
@@ -216,6 +230,9 @@ void Request::process()
     case State::DNSLookup:
         handle_dns_lookup_state();
         break;
+    case State::RetrieveCookie:
+        handle_retrieve_cookie_state();
+        break;
     case State::Connect:
         handle_connect_state();
         break;
@@ -255,7 +272,7 @@ void Request::handle_initial_state()
 
                     if (m_cache_entry_reader.has_value()) {
                         if (m_cache_entry_reader->revalidation_type() == HTTP::CacheEntryReader::RevalidationType::StaleWhileRevalidate)
-                            m_client.start_revalidation_request({}, m_method, m_url, m_request_headers, m_request_body, m_proxy_data);
+                            m_client.start_revalidation_request({}, m_method, m_url, m_request_headers, m_request_body, m_include_credentials, m_proxy_data);
 
                         if (is_revalidation_request())
                             transition_to_state(State::DNSLookup);
@@ -315,18 +332,18 @@ void Request::handle_read_cache_state()
 
     m_cache_entry_reader->send_to(
         m_client_request_pipe->writer_fd(),
-        [this](auto bytes_sent) {
-            m_bytes_transferred_to_client = bytes_sent;
-            m_curl_result_code = CURLE_OK;
+        weak_callback(*this, [](auto& self, auto bytes_sent) {
+            self.m_bytes_transferred_to_client = bytes_sent;
+            self.m_curl_result_code = CURLE_OK;
 
-            transition_to_state(State::Complete);
-        },
-        [this](auto bytes_sent) {
-            m_bytes_transferred_to_client = bytes_sent;
-            m_network_error = Requests::NetworkError::CacheReadFailed;
+            self.transition_to_state(State::Complete);
+        }),
+        weak_callback(*this, [](auto& self, auto bytes_sent) {
+            self.m_bytes_transferred_to_client = bytes_sent;
+            self.m_network_error = Requests::NetworkError::CacheReadFailed;
 
-            transition_to_state(State::Error);
-        });
+            self.transition_to_state(State::Error);
+        }));
 }
 
 void Request::handle_failed_cache_only_state()
@@ -393,6 +410,7 @@ void Request::handle_serve_substitution_state()
 
     m_response_headers->append({ "Content-Type"sv, ByteString { content_type } });
     m_response_headers->append({ "Content-Length"sv, ByteString::number(content.value().size()) });
+    m_response_headers->append({ "Access-Control-Allow-Origin"sv, "*"sv });
 
     if (inform_client_request_started().is_error())
         return;
@@ -418,23 +436,38 @@ void Request::handle_dns_lookup_state()
     auto const& dns_info = DNSInfo::the();
 
     m_resolver->dns.lookup(host, DNS::Messages::Class::IN, { DNS::Messages::ResourceType::A, DNS::Messages::ResourceType::AAAA }, { .validate_dnssec_locally = dns_info.validate_dnssec_locally })
-        ->when_rejected([this, host](auto const& error) {
+        ->when_rejected(weak_callback(*this, [host](auto& self, auto const& error) {
             dbgln("Request::handle_dns_lookup_state: DNS lookup failed for '{}': {}", host, error);
-            m_network_error = Requests::NetworkError::UnableToResolveHost;
-            transition_to_state(State::Error);
-        })
-        .when_resolved([this, host](NonnullRefPtr<DNS::LookupResult const> dns_result) mutable {
+            self.m_network_error = Requests::NetworkError::UnableToResolveHost;
+            self.transition_to_state(State::Error);
+        }))
+        .when_resolved(weak_callback(*this, [host](auto& self, NonnullRefPtr<DNS::LookupResult const> dns_result) {
             if (dns_result->is_empty() || !dns_result->has_cached_addresses()) {
                 dbgln("Request::handle_dns_lookup_state: DNS lookup failed for '{}'", host);
-                m_network_error = Requests::NetworkError::UnableToResolveHost;
-                transition_to_state(State::Error);
-            } else if (m_type == Type::Fetch || m_type == Type::BackgroundRevalidation) {
-                m_dns_result = move(dns_result);
-                transition_to_state(State::Fetch);
+                self.m_network_error = Requests::NetworkError::UnableToResolveHost;
+                self.transition_to_state(State::Error);
+            } else if (first_is_one_of(self.m_type, Type::Fetch, Type::BackgroundRevalidation)) {
+                self.m_dns_result = move(dns_result);
+                self.transition_to_state(State::RetrieveCookie);
             } else {
-                transition_to_state(State::Complete);
+                self.transition_to_state(State::Complete);
             }
-        });
+        }));
+}
+
+void Request::handle_retrieve_cookie_state()
+{
+    if (m_include_credentials == HTTP::Cookie::IncludeCredentials::No) {
+        transition_to_state(State::Fetch);
+        return;
+    }
+
+    if (auto connection = ConnectionFromClient::primary_connection(); connection.has_value()) {
+        connection->async_retrieve_http_cookie(m_client.client_id(), m_request_id, m_url);
+    } else {
+        m_network_error = Requests::NetworkError::RequestServerDied;
+        transition_to_state(State::Error);
+    }
 }
 
 void Request::handle_connect_state()
@@ -544,14 +577,13 @@ void Request::handle_fetch_state()
         VERIFY(revalidation_attributes.etag.has_value() || revalidation_attributes.last_modified.has_value());
 
         if (revalidation_attributes.etag.has_value()) {
-            // There is no CURLOPT for If-None-Match, so we must set the header value directly.
             auto header_string = ByteString::formatted("If-None-Match: {}", *revalidation_attributes.etag);
             curl_headers = curl_slist_append(curl_headers, header_string.characters());
         }
 
         if (revalidation_attributes.last_modified.has_value()) {
-            set_option(CURLOPT_TIMECONDITION, CURL_TIMECOND_IFMODSINCE);
-            set_option(CURLOPT_TIMEVALUE, revalidation_attributes.last_modified->seconds_since_epoch());
+            auto header_string = ByteString::formatted("If-Modified-Since: {}", *revalidation_attributes.last_modified);
+            curl_headers = curl_slist_append(curl_headers, header_string.characters());
         }
     }
 
@@ -641,7 +673,7 @@ size_t Request::on_header_received(void* buffer, size_t size, size_t nmemb, void
             space_index = header_line.find(' ', *space_index + 1);
 
         if (space_index.has_value()) {
-            if (auto reason_phrase = header_line.substring_view(*space_index + 1).trim_whitespace(); !reason_phrase.is_empty()) {
+            if (auto reason_phrase = HTTP::normalize_header_value(header_line.substring_view(*space_index + 1)); !reason_phrase.is_empty()) {
                 auto decoder = TextCodec::decoder_for_exact_name("ISO-8859-1"sv);
                 VERIFY(decoder.has_value());
 
@@ -652,8 +684,8 @@ size_t Request::on_header_received(void* buffer, size_t size, size_t nmemb, void
     }
 
     if (auto colon_index = header_line.find(':'); colon_index.has_value()) {
-        auto name = header_line.substring_view(0, *colon_index).trim_whitespace();
-        auto value = header_line.substring_view(*colon_index + 1).trim_whitespace();
+        auto name = HTTP::normalize_header_value(header_line.substring_view(0, *colon_index));
+        auto value = HTTP::normalize_header_value(header_line.substring_view(*colon_index + 1));
         request.m_response_headers->append({ name, value });
     }
 
@@ -787,10 +819,10 @@ ErrorOr<void> Request::write_queued_bytes_without_blocking()
         m_client_writer_notifier = Core::Notifier::construct(m_client_request_pipe->writer_fd(), Core::NotificationType::Write);
         m_client_writer_notifier->set_enabled(false);
 
-        m_client_writer_notifier->on_activation = [this] {
-            if (auto result = write_queued_bytes_without_blocking(); result.is_error())
+        m_client_writer_notifier->on_activation = weak_callback(*this, [](auto& self) {
+            if (auto result = self.write_queued_bytes_without_blocking(); result.is_error())
                 dbgln("Warning: Failed to write buffered request data (it's likely the client disappeared): {}", result.error());
-        };
+        });
     }
 
     auto result = m_client_request_pipe->write(bytes_to_send);

@@ -11,11 +11,11 @@
 #include <AK/Vector.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/CompositingAndBlendingOperator.h>
+#include <LibGfx/Filter.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibGfx/LineStyle.h>
 #include <LibGfx/PaintStyle.h>
-#include <LibGfx/PaintingSurface.h>
 #include <LibGfx/Path.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
@@ -25,7 +25,7 @@
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/Painting/BorderRadiiData.h>
 #include <LibWeb/Painting/BorderRadiusCornerClipper.h>
-#include <LibWeb/Painting/DisplayListRecorder.h>
+#include <LibWeb/Painting/ExternalContentSource.h>
 #include <LibWeb/Painting/GradientData.h>
 #include <LibWeb/Painting/PaintBoxShadowParams.h>
 #include <LibWeb/Painting/PaintStyle.h>
@@ -59,18 +59,6 @@ struct FillRect {
     void dump(StringBuilder&) const;
 };
 
-struct DrawPaintingSurface {
-    static constexpr StringView command_name = "DrawPaintingSurface"sv;
-
-    Gfx::IntRect dst_rect;
-    NonnullRefPtr<Gfx::PaintingSurface const> surface;
-    Gfx::IntRect src_rect;
-    Gfx::ScalingMode scaling_mode;
-
-    [[nodiscard]] Gfx::IntRect bounding_rect() const { return dst_rect; }
-    void dump(StringBuilder&) const;
-};
-
 struct DrawScaledImmutableBitmap {
     static constexpr StringView command_name = "DrawScaledImmutableBitmap"sv;
 
@@ -98,6 +86,17 @@ struct DrawRepeatedImmutableBitmap {
     Repeat repeat;
 
     [[nodiscard]] Gfx::IntRect bounding_rect() const { return clip_rect; }
+    void dump(StringBuilder&) const;
+};
+
+struct DrawExternalContent {
+    static constexpr StringView command_name = "DrawExternalContent"sv;
+
+    Gfx::IntRect dst_rect;
+    NonnullRefPtr<ExternalContentSource> source;
+    Gfx::ScalingMode scaling_mode;
+
+    [[nodiscard]] Gfx::IntRect bounding_rect() const { return dst_rect; }
     void dump(StringBuilder&) const;
 };
 
@@ -136,7 +135,7 @@ struct AddClipRect {
     Gfx::IntRect rect;
 
     [[nodiscard]] Gfx::IntRect bounding_rect() const { return rect; }
-    bool is_clip_or_mask() const { return true; }
+    bool is_clip() const { return true; }
     void dump(StringBuilder&) const;
 };
 
@@ -270,7 +269,7 @@ struct ApplyBackdropFilter {
     static constexpr StringView command_name = "ApplyBackdropFilter"sv;
 
     Gfx::IntRect backdrop_region;
-    BorderRadiiData border_radii_data;
+    CornerRadii corner_radii;
     Optional<Gfx::Filter> backdrop_filter;
 
     [[nodiscard]] Gfx::IntRect bounding_rect() const { return backdrop_region; }
@@ -323,20 +322,7 @@ struct AddRoundedRectClip {
     CornerClip corner_clip;
 
     [[nodiscard]] Gfx::IntRect bounding_rect() const { return border_rect; }
-    bool is_clip_or_mask() const { return true; }
-
-    void dump(StringBuilder&) const;
-};
-
-struct AddMask {
-    static constexpr StringView command_name = "AddMask"sv;
-
-    RefPtr<DisplayList> display_list;
-    Gfx::IntRect rect;
-    Gfx::MaskKind kind;
-
-    [[nodiscard]] Gfx::IntRect bounding_rect() const { return rect; }
-    bool is_clip_or_mask() const { return true; }
+    bool is_clip() const { return true; }
 
     void dump(StringBuilder&) const;
 };
@@ -358,7 +344,7 @@ struct PaintScrollBar {
     int scroll_frame_id { 0 };
     Gfx::IntRect gutter_rect;
     Gfx::IntRect thumb_rect;
-    CSSPixelFraction scroll_size;
+    double scroll_size;
     Color thumb_color;
     Color track_color;
     bool vertical;
@@ -373,6 +359,7 @@ struct ApplyEffects {
     float opacity { 1.0f };
     Gfx::CompositingAndBlendingOperator compositing_and_blending_operator { Gfx::CompositingAndBlendingOperator::Normal };
     Optional<Gfx::Filter> filter {};
+    Optional<Gfx::MaskKind> mask_kind {};
 
     void dump(StringBuilder&) const;
 };
@@ -380,9 +367,9 @@ struct ApplyEffects {
 using DisplayListCommand = Variant<
     DrawGlyphRun,
     FillRect,
-    DrawPaintingSurface,
     DrawScaledImmutableBitmap,
     DrawRepeatedImmutableBitmap,
+    DrawExternalContent,
     Save,
     SaveLayer,
     Restore,
@@ -403,7 +390,6 @@ using DisplayListCommand = Variant<
     ApplyBackdropFilter,
     DrawRect,
     AddRoundedRectClip,
-    AddMask,
     PaintNestedDisplayList,
     PaintScrollBar,
     ApplyEffects>;

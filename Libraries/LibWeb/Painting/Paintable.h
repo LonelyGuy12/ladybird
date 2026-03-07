@@ -8,6 +8,7 @@
 
 #include <LibGC/Root.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/Display.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
@@ -62,14 +63,18 @@ public:
 
     void detach_from_layout_node();
 
-    [[nodiscard]] bool is_visible() const;
+    [[nodiscard]] bool is_visible() const
+    {
+        auto const& cv = computed_values();
+        return cv.visibility() == CSS::Visibility::Visible && cv.opacity() != 0;
+    }
     [[nodiscard]] bool is_positioned() const { return m_positioned; }
     [[nodiscard]] bool is_fixed_position() const { return m_fixed_position; }
     [[nodiscard]] bool is_sticky_position() const { return m_sticky_position; }
     [[nodiscard]] bool is_absolutely_positioned() const { return m_absolutely_positioned; }
     [[nodiscard]] bool is_floating() const { return m_floating; }
     [[nodiscard]] bool is_inline() const { return m_inline; }
-    [[nodiscard]] CSS::Display display() const;
+    [[nodiscard]] CSS::Display display() const { return m_display; }
 
     bool has_stacking_context() const;
     StackingContext* enclosing_stacking_context();
@@ -110,9 +115,7 @@ public:
 
     GC::Ptr<HTML::Navigable> navigable() const;
 
-    virtual void set_needs_display(InvalidateDisplayList = InvalidateDisplayList::Yes);
-    void set_needs_paint_only_properties_update(bool);
-    [[nodiscard]] bool needs_paint_only_properties_update() const { return m_needs_paint_only_properties_update; }
+    virtual void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::Yes);
 
     PaintableBox* containing_block() const;
 
@@ -134,6 +137,8 @@ public:
 
     CSSPixelPoint box_type_agnostic_position() const;
 
+    void scroll_ancestor_to_offset_into_view(size_t offset);
+
     enum class SelectionState : u8 {
         None,        // No selection
         Start,       // Selection starts in this Node
@@ -143,7 +148,7 @@ public:
     };
 
     SelectionState selection_state() const { return m_selection_state; }
-    void set_selection_state(SelectionState state) { m_selection_state = state; }
+    void set_selection_state(SelectionState state);
 
     // https://drafts.csswg.org/css-pseudo-4/#highlight-styling
     struct TextDecorationStyle {
@@ -163,8 +168,6 @@ public:
         }
     };
     [[nodiscard]] SelectionStyle selection_style() const;
-
-    MUST_UPCALL virtual void resolve_paint_properties();
 
     [[nodiscard]] String debug_description() const;
 
@@ -193,10 +196,7 @@ private:
     bool m_absolutely_positioned : 1 { false };
     bool m_floating : 1 { false };
     bool m_inline : 1 { false };
-    bool m_visible_for_hit_testing : 1 { true };
-
-protected:
-    bool m_needs_paint_only_properties_update : 1 { true };
+    CSS::Display m_display;
 };
 
 inline DOM::Node* HitTestResult::dom_node()

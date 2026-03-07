@@ -71,6 +71,26 @@ WebIDL::ExceptionOr<GC::Ptr<JavaScriptModuleScript>> JavaScriptModuleScript::cre
     return script;
 }
 
+WebIDL::ExceptionOr<GC::Ptr<JavaScriptModuleScript>> JavaScriptModuleScript::create_from_pre_parsed(ByteString const& filename, NonnullRefPtr<JS::SourceCode const> source_code, JS::Realm& realm, URL::URL base_url, RustParsedProgram* parsed)
+{
+    auto script = realm.create<JavaScriptModuleScript>(move(base_url), filename, realm);
+
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    auto result = JS::SourceTextModule::parse_from_pre_parsed(parsed, move(source_code), realm, script);
+
+    if (result.is_error()) {
+        auto& parse_error = result.error().first();
+        dbgln("JavaScriptModuleScript: Failed to parse: {}", parse_error.to_string());
+        script->set_parse_error(JS::SyntaxError::create(realm, parse_error.to_string()));
+        return script;
+    }
+
+    script->m_record = result.value();
+    return script;
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#run-a-module-script
 // https://whatpr.org/html/9893/webappapis.html#run-a-module-script
 JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
@@ -103,8 +123,10 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
         VERIFY(record);
 
         // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
-        JS::ExecutionContext* module_execution_context = nullptr;
-        ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0, 0);
+        auto& stack = vm().interpreter_stack();
+        auto* stack_mark = stack.top();
+        auto* module_execution_context = stack.allocate(0, 0, 0);
+        VERIFY(module_execution_context);
         module_execution_context->realm = &realm;
         module_execution_context->script_or_module = GC::Ref<JS::Module> { *record };
         vm().push_execution_context(*module_execution_context);
@@ -126,6 +148,7 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
 
         // NON-STANDARD: Pop the execution context mentioned above.
         vm().pop_execution_context();
+        stack.deallocate(stack_mark);
     }
 
     // FIXME: 7. If preventErrorReporting is false, then upon rejection of evaluationPromise with reason, report the exception given by reason for script.

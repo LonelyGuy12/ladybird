@@ -157,7 +157,7 @@ public:
 
     bool allowed_by_sandboxing_to_navigate(Navigable const& target, SourceSnapshotParams const&);
 
-    void reload(UserNavigationInvolvement = UserNavigationInvolvement::None);
+    void reload(Optional<SerializationRecord> navigation_api_state = {}, UserNavigationInvolvement = UserNavigationInvolvement::None);
 
     // https://github.com/whatwg/html/issues/9690
     [[nodiscard]] bool has_been_destroyed() const { return m_has_been_destroyed; }
@@ -169,8 +169,9 @@ public:
     CSSPixelPoint viewport_scroll_offset() const { return m_viewport_scroll_offset; }
     CSSPixelRect viewport_rect() const { return { m_viewport_scroll_offset, m_viewport_size }; }
     CSSPixelSize viewport_size() const { return m_viewport_size; }
-    void set_viewport_size(CSSPixelSize);
+    void set_viewport_size(CSSPixelSize, InvalidateDisplayList = InvalidateDisplayList::No);
     void perform_scroll_of_viewport_scrolling_box(CSSPixelPoint position);
+    void clamp_viewport_scroll_offset();
 
     Painting::BackingStoreManager& backing_store_manager() { return *m_backing_store_manager; }
 

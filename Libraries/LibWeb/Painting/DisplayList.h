@@ -13,7 +13,6 @@
 #include <LibGfx/Color.h>
 #include <LibGfx/Forward.h>
 #include <LibGfx/PaintStyle.h>
-#include <LibWeb/CSS/Enums.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/DisplayListCommand.h>
@@ -28,8 +27,9 @@ public:
     void execute(DisplayList&, ScrollStateSnapshotByDisplayList&&, RefPtr<Gfx::PaintingSurface>);
 
 protected:
-    Gfx::PaintingSurface& surface() const { return m_surfaces.last(); }
-    void execute_impl(DisplayList&, ScrollStateSnapshot const& scroll_state, RefPtr<Gfx::PaintingSurface>);
+    Gfx::PaintingSurface& surface() const { return *m_surface; }
+    void execute_impl(DisplayList&, ScrollStateSnapshot const& scroll_state);
+    void execute_display_list_into_surface(DisplayList&, Gfx::PaintingSurface&);
 
     ScrollStateSnapshotByDisplayList m_scroll_state_snapshots_by_display_list;
 
@@ -37,9 +37,9 @@ private:
     virtual void flush() = 0;
     virtual void draw_glyph_run(DrawGlyphRun const&) = 0;
     virtual void fill_rect(FillRect const&) = 0;
-    virtual void draw_painting_surface(DrawPaintingSurface const&) = 0;
     virtual void draw_scaled_immutable_bitmap(DrawScaledImmutableBitmap const&) = 0;
     virtual void draw_repeated_immutable_bitmap(DrawRepeatedImmutableBitmap const&) = 0;
+    virtual void draw_external_content(DrawExternalContent const&) = 0;
     virtual void save(Save const&) = 0;
     virtual void save_layer(SaveLayer const&) = 0;
     virtual void restore(Restore const&) = 0;
@@ -60,7 +60,6 @@ private:
     virtual void apply_backdrop_filter(ApplyBackdropFilter const&) = 0;
     virtual void draw_rect(DrawRect const&) = 0;
     virtual void add_rounded_rect_clip(AddRoundedRectClip const&) = 0;
-    virtual void add_mask(AddMask const&) = 0;
     virtual void paint_nested_display_list(PaintNestedDisplayList const&) = 0;
     virtual void paint_scrollbar(PaintScrollBar const&) = 0;
     virtual void apply_effects(ApplyEffects const&) = 0;
@@ -69,17 +68,17 @@ private:
 
     virtual void add_clip_path(Gfx::Path const&) = 0;
 
-    Vector<NonnullRefPtr<Gfx::PaintingSurface>, 1> m_surfaces;
+    RefPtr<Gfx::PaintingSurface> m_surface;
 };
 
 class DisplayList : public AtomicRefCounted<DisplayList> {
 public:
-    static NonnullRefPtr<DisplayList> create(double device_pixels_per_css_pixel)
+    static NonnullRefPtr<DisplayList> create()
     {
-        return adopt_ref(*new DisplayList(device_pixels_per_css_pixel));
+        return adopt_ref(*new DisplayList());
     }
 
-    void append(DisplayListCommand&& command, RefPtr<AccumulatedVisualContext const> context);
+    bool append(DisplayListCommand&& command, RefPtr<AccumulatedVisualContext const> context);
 
     struct CommandListItem {
         RefPtr<AccumulatedVisualContext const> context;
@@ -88,16 +87,11 @@ public:
 
     auto& commands(Badge<DisplayListRecorder>) { return m_commands; }
     auto const& commands() const { return m_commands; }
-    double device_pixels_per_css_pixel() const { return m_device_pixels_per_css_pixel; }
 
 private:
-    DisplayList(double device_pixels_per_css_pixel)
-        : m_device_pixels_per_css_pixel(device_pixels_per_css_pixel)
-    {
-    }
+    DisplayList() = default;
 
     AK::SegmentedVector<CommandListItem, 512> m_commands;
-    double m_device_pixels_per_css_pixel;
 };
 
 }

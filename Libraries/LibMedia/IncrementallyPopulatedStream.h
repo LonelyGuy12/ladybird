@@ -11,6 +11,7 @@
 #include <AK/Forward.h>
 #include <AK/Function.h>
 #include <AK/RedBlackTree.h>
+#include <AK/RefPtr.h>
 #include <AK/Time.h>
 #include <AK/Vector.h>
 #include <LibCore/Forward.h>
@@ -38,8 +39,9 @@ public:
     void set_data_request_callback(DataRequestCallback);
 
     void add_chunk_at(u64 offset, ReadonlyBytes);
+    u64 next_chunk_start() const { return m_last_chunk_end; }
 
-    void reached_end_of_body();
+    void close();
 
     u64 size();
     void set_expected_size(u64);
@@ -57,6 +59,7 @@ public:
 
         virtual void abort() override;
         virtual void reset_abort() override { m_aborted = false; }
+        virtual bool is_aborted() const override { return m_aborted; }
 
         virtual bool is_blocked() const override { return m_blocked; }
 

@@ -11,7 +11,6 @@
 #include <AK/Vector.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
-#include <LibWeb/DOM/Document.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/DisplayListRecordingContext.h>
@@ -113,6 +112,7 @@ public:
     virtual bool is_svg_geometry_box() const { return false; }
     virtual bool is_svg_clip_box() const { return false; }
     virtual bool is_svg_mask_box() const { return false; }
+    virtual bool is_svg_pattern_box() const { return false; }
     virtual bool is_svg_svg_box() const { return false; }
     virtual bool is_svg_graphics_box() const { return false; }
     virtual bool is_svg_foreign_object_box() const { return false; }
@@ -126,6 +126,8 @@ public:
     virtual bool is_table_wrapper() const { return false; }
     virtual bool is_node_with_style() const { return false; }
     virtual bool is_node_with_style_and_box_model_metrics() const { return false; }
+
+    bool is_replaced_box_with_children() const { return is_replaced_box() && can_have_children(); }
 
     template<typename T>
     bool fast_is() const = delete;
@@ -248,6 +250,7 @@ private:
     bool m_is_grid_item { false };
 
     bool m_has_been_wrapped_in_table_wrapper { false };
+    bool m_is_body { false };
 
     bool m_needs_layout_update { false };
 
@@ -275,12 +278,15 @@ public:
 
     void transfer_table_box_computed_values_to_wrapper_computed_values(CSS::ComputedValues& wrapper_computed_values);
 
-    bool is_body() const;
+    bool is_body() const { return m_is_body; }
     bool is_scroll_container() const;
 
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
     void set_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
+
+    u32 layout_index() const { return m_layout_index; }
+    void set_layout_index(u32 index) { m_layout_index = index; }
 
 protected:
     NodeWithStyle(DOM::Document&, DOM::Node*, GC::Ref<CSS::ComputedProperties>);
@@ -295,6 +301,7 @@ private:
 
     NonnullOwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::AbstractImageStyleValue const> m_list_style_image;
+    u32 m_layout_index { 0 };
 };
 
 template<>
@@ -382,5 +389,7 @@ inline Gfx::Font const& NodeWithStyle::first_available_font() const
     // First font for which the character U+0020 (space) is not excluded by a unicode-range
     return computed_values().font_list().font_for_code_point(' ');
 }
+
+bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow);
 
 }

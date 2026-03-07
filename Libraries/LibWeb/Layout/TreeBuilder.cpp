@@ -33,6 +33,7 @@
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/SVGClipBox.h>
 #include <LibWeb/Layout/SVGMaskBox.h>
+#include <LibWeb/Layout/SVGPatternBox.h>
 #include <LibWeb/Layout/TableGrid.h>
 #include <LibWeb/Layout/TableWrapper.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -304,15 +305,14 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
     // FIXME: This + ListItemBox + ListItemMarkerBox will disappear once ::marker pseudo-elements with 'normal' content
     //        are rendered using the special list-item counter.
     //        See: https://github.com/LadybirdBrowser/ladybird/issues/4782
+    // NB: Called during layout tree construction.
     if (pseudo_element == CSS::PseudoElement::Marker && pseudo_element_content.type == CSS::ContentData::Type::Normal)
-        if (auto* list_box = as_if<ListItemBox>(*element.layout_node())) {
+        if (auto* list_box = as_if<ListItemBox>(*element.unsafe_layout_node())) {
             // https://www.w3.org/TR/css-lists-3/#content-property
             // "::marker does not generate a box" when list-style-type is 'none' and there's no marker image. Custom
             // ::marker content is already excluded by the outer condition checking for Type::Normal.
             auto const& list_style_type = list_box->computed_values().list_style_type();
-            if (list_style_type.has<CSS::CounterStyleNameKeyword>()
-                && list_style_type.get<CSS::CounterStyleNameKeyword>() == CSS::CounterStyleNameKeyword::None
-                && !list_box->list_style_image()) {
+            if (list_style_type.has<Empty>() && !list_box->list_style_image()) {
                 return {};
             }
 
@@ -555,7 +555,7 @@ static bool is_ignorable_whitespace(Layout::Node const& node)
                     contains_only_white_space = false;
                     return TraversalDecision::Break;
                 }
-            } else if (descendant.is_out_of_flow()) {
+            } else if (descendant.is_out_of_flow() || !descendant.is_anonymous()) {
                 contains_only_white_space = false;
                 return TraversalDecision::Break;
             }
@@ -570,10 +570,11 @@ static bool is_ignorable_whitespace(Layout::Node const& node)
 
 void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& context, MustCreateSubtree must_create_subtree)
 {
+    // NB: Called during layout tree construction.
     bool should_create_layout_node = must_create_subtree == MustCreateSubtree::Yes
         || dom_node.needs_layout_tree_update()
         || dom_node.document().needs_full_layout_tree_update()
-        || (dom_node.is_document() && !dom_node.layout_node());
+        || (dom_node.is_document() && !dom_node.unsafe_layout_node());
 
     if (dom_node.is_element()) {
         auto& element = static_cast<DOM::Element&>(dom_node);
@@ -588,7 +589,8 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
             dom_node.document().style_computer().pop_ancestor(static_cast<DOM::Element const&>(dom_node));
     };
 
-    GC::Ptr<Layout::Node> old_layout_node = dom_node.layout_node();
+    // NB: Called during layout tree construction.
+    GC::Ptr<Layout::Node> old_layout_node = dom_node.unsafe_layout_node();
     GC::Ptr<Layout::Node> layout_node;
     Optional<TemporaryChange<bool>> has_svg_root_change;
 
@@ -599,7 +601,13 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
             dom_node.for_each_in_inclusive_subtree([&](auto& node) {
                 node.set_needs_layout_tree_update(false, DOM::SetNeedsLayoutTreeUpdateReason::None);
                 node.set_child_needs_layout_tree_update(false);
-                auto layout_node = node.layout_node();
+                // NB: Called during layout tree construction.
+                auto layout_node = node.unsafe_layout_node();
+                // SVGPatternBox, SVGMaskBox, and SVGClipBox are created on behalf of a referencing
+                // element and attached to that element's layout subtree. Skip them so they survive cleanup of their
+                // DOM ancestor.
+                if (layout_node && (is<SVGPatternBox>(*layout_node) || is<SVGMaskBox>(*layout_node) || is<SVGClipBox>(*layout_node)))
+                    return TraversalDecision::SkipChildrenAndContinue;
                 if (layout_node && layout_node->parent()) {
                     layout_node->remove();
                 }
@@ -629,7 +637,8 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
             style = element.computed_properties();
             display = style->display();
         }
-        layout_node = dom_node.layout_node();
+        // NB: Called during layout tree construction.
+        layout_node = dom_node.unsafe_layout_node();
     } else {
         if (is<DOM::Element>(dom_node)) {
             auto& element = static_cast<DOM::Element&>(dom_node);
@@ -653,6 +662,9 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                     VERIFY_NOT_REACHED();
                 // Only layout direct uses of SVG masks/clipPaths.
                 context.layout_svg_mask_or_clip_path = false;
+            } else if (context.layout_svg_pattern) {
+                layout_node = document.heap().allocate<Layout::SVGPatternBox>(document, as<SVG::SVGPatternElement>(dom_node), *style);
+                context.layout_svg_pattern = false;
             } else {
                 layout_node = element.create_layout_node(*style);
             }
@@ -729,9 +741,20 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
         if ((dom_node.has_children() || shadow_root) && layout_node->can_have_children() && !element_has_content_visibility_hidden) {
             push_parent(as<NodeWithStyle>(*layout_node));
             if (shadow_root) {
+                // For replaced elements with shadow DOM children, wrap the children in an
+                // anonymous BlockContainer so that a BFC handles their layout.
+                if (layout_node->is_replaced_box_with_children()) {
+                    if (!layout_node->first_child() || !layout_node->first_child()->is_anonymous()) {
+                        auto wrapper = as<NodeWithStyle>(*layout_node).create_anonymous_wrapper();
+                        m_ancestor_stack.last()->append_child(wrapper);
+                    }
+                    push_parent(as<NodeWithStyle>(*layout_node->first_child()));
+                }
                 for (auto* node = shadow_root->first_child(); node; node = node->next_sibling()) {
                     update_layout_tree(*node, context, should_create_layout_node ? MustCreateSubtree::Yes : MustCreateSubtree::No);
                 }
+                if (layout_node->is_replaced_box_with_children())
+                    pop_parent();
                 shadow_root->set_child_needs_layout_tree_update(false);
                 shadow_root->set_needs_layout_tree_update(false, DOM::SetNeedsLayoutTreeUpdateReason::None);
             } else {
@@ -878,6 +901,31 @@ void TreeBuilder::update_layout_tree_after_children(DOM::Node& dom_node, GC::Ref
             layout_mask_or_clip_path(mask);
         if (auto clip_path = graphics_element.clip_path())
             layout_mask_or_clip_path(clip_path);
+
+        HashTable<SVG::SVGPatternElement const*> seen_content_elements;
+        auto layout_pattern = [&](GC::Ptr<SVG::SVGPatternElement const> pattern) {
+            if (!pattern)
+                return;
+            auto content_element = pattern->pattern_content_element();
+            if (!content_element)
+                return;
+            if (seen_content_elements.set(content_element.ptr()) != AK::HashSetResult::InsertedNewEntry)
+                return;
+            TemporaryChange<bool> layout_flag(context.layout_svg_pattern, true);
+            push_parent(as<NodeWithStyle>(*layout_node));
+            for (GC::Ref<NodeWithStyle> ancestor : m_ancestor_stack) {
+                if (ancestor->dom_node() == content_element.ptr()) {
+                    pop_parent();
+                    return;
+                }
+            }
+            update_layout_tree(const_cast<SVG::SVGPatternElement&>(*content_element), context, MustCreateSubtree::Yes);
+            pop_parent();
+        };
+        if (auto fill = graphics_element.fill_pattern())
+            layout_pattern(fill);
+        if (auto stroke = graphics_element.stroke_pattern())
+            layout_pattern(stroke);
     }
 
     // Add nodes for the ::after pseudo-element.
@@ -897,6 +945,43 @@ void TreeBuilder::update_layout_tree_after_children(DOM::Node& dom_node, GC::Ref
         create_pseudo_element_if_needed(element, CSS::PseudoElement::After, AppendOrPrepend::Append);
         pop_parent();
     }
+
+    // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
+    // The anonymous fieldset content box is expected to appear after the rendered legend and is expected to contain the
+    // content (including the '::before' and '::after' pseudo-elements) of the fieldset element except for the rendered
+    // legend, if there is one.
+    if (auto* fieldset_box = as_if<FieldSetBox>(*layout_node)) {
+        if (auto legend = fieldset_box->rendered_legend()) {
+            auto wrapper = fieldset_box->create_anonymous_wrapper();
+            auto& wrapper_mutable_values = wrapper->mutable_computed_values();
+            wrapper_mutable_values.set_display(CSS::Display::from_short(CSS::Display::Short::FlowRoot));
+
+            // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
+            // The following properties are expected to inherit from the fieldset element:
+            //     align-content, align-items, border-radius, column-count, column-fill, column-gap, column-rule,
+            //     column-width, flex-direction, flex-wrap, grid (grid-auto-columns, grid-auto-flow, grid-auto-rows,
+            //     grid-column-gap, grid-row-gap, grid-template-areas, grid-template-columns, grid-template-rows),
+            //     justify-content, justify-items, overflow, padding, text-overflow, unicode-bidi
+            // FIXME: Transfer all of these properties, not just overflow.
+            auto& fieldset_mutable_values = fieldset_box->mutable_computed_values();
+
+            wrapper_mutable_values.set_overflow_x(fieldset_box->computed_values().overflow_x());
+            fieldset_mutable_values.set_overflow_x(CSS::InitialValues::overflow());
+
+            wrapper_mutable_values.set_overflow_y(fieldset_box->computed_values().overflow_y());
+            fieldset_mutable_values.set_overflow_y(CSS::InitialValues::overflow());
+
+            for (GC::Ptr<Node> child = fieldset_box->first_child(); child;) {
+                auto next = child->next_sibling();
+                if (child != legend) {
+                    fieldset_box->remove_child(*child);
+                    wrapper->append_child(*child);
+                }
+                child = next;
+            }
+            fieldset_box->append_child(*wrapper);
+        }
+    }
 }
 
 GC::Ptr<Layout::Node> TreeBuilder::build(DOM::Node& dom_node)
@@ -909,7 +994,8 @@ GC::Ptr<Layout::Node> TreeBuilder::build(DOM::Node& dom_node)
     m_quote_nesting_level = 0;
     update_layout_tree(dom_node, context, MustCreateSubtree::No);
 
-    if (auto* root = dom_node.document().layout_node())
+    // NB: Called during layout tree construction.
+    if (auto* root = dom_node.document().unsafe_layout_node())
         fixup_tables(*root);
 
     return m_layout_root;
@@ -1133,7 +1219,7 @@ void TreeBuilder::generate_missing_child_wrappers(NodeWithStyle& root)
 Vector<GC::Root<Box>> TreeBuilder::generate_missing_parents(NodeWithStyle& root)
 {
     Vector<GC::Root<Box>> table_roots_to_wrap;
-    root.for_each_in_inclusive_subtree_of_type<Box>([&](auto& parent) {
+    root.for_each_in_inclusive_subtree_of_type<NodeWithStyle>([&](auto& parent) {
         // 1. An anonymous table-row box must be generated around each sequence of consecutive table-cell boxes whose
         //    parent is not a table-row.
         if (is_not_table_row(parent)) {
@@ -1173,13 +1259,14 @@ Vector<GC::Root<Box>> TreeBuilder::generate_missing_parents(NodeWithStyle& root)
         }
 
         // 3. An anonymous table-wrapper box must be generated around each table-root.
-        if (parent.display().is_table_inside()) {
-            if (parent.has_been_wrapped_in_table_wrapper()) {
+        if (auto* box = as_if<Box>(parent); box && box->display().is_table_inside()) {
+            if (box->has_been_wrapped_in_table_wrapper()) {
                 VERIFY(parent.parent());
                 VERIFY(parent.parent()->is_table_wrapper());
                 return TraversalDecision::Continue;
             }
-            table_roots_to_wrap.append(parent);
+
+            table_roots_to_wrap.append(*box);
         }
 
         return TraversalDecision::Continue;

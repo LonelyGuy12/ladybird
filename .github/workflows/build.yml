@@ -58,6 +58,19 @@ jobs:
           sudo ln -snf /usr/share/zoneinfo/Etc/UTC /etc/localtime
           echo "Etc/UTC" | sudo tee /etc/timezone
 
+      - name: Pre-clone vcpkg (with retry)
+        run: |
+          VCPKG_REV=$(python3 -c "import json; print(json.load(open('vcpkg.json'))['builtin-baseline'])")
+          VCPKG_DIR="Build/vcpkg"
+          if [ ! -d "$VCPKG_DIR/.git" ]; then
+            for i in 1 2 3 4 5; do
+              git clone https://github.com/microsoft/vcpkg.git "$VCPKG_DIR" && break
+              echo "vcpkg clone attempt $i failed, retrying in 30s..."
+              rm -rf "$VCPKG_DIR"
+              sleep 30
+            done
+          fi
+
       - name: Build Ladybird
         env:
           VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg_cache,readwrite"
@@ -114,8 +127,12 @@ jobs:
 
       - name: Install dependencies including Clang 19+
         run: |
-          brew update
-          brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool
+          brew update || true   # non-fatal: tap HTTP 500s are transient; homebrew/core still updates
+          for i in 1 2 3; do
+            brew install cmake ninja ccache qt python@3.14 pkg-config wabt autoconf autoconf-archive automake libtool && break
+            echo "brew install attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
           
           # Ensure Python 3.14 is properly linked
           brew link --overwrite python@3.14
@@ -191,6 +208,18 @@ jobs:
           which ninja
           which clang-20 || which clang
           echo "Build environment ready"
+
+      - name: Pre-clone vcpkg (with retry)
+        run: |
+          VCPKG_DIR="Build/vcpkg"
+          if [ ! -d "$VCPKG_DIR/.git" ]; then
+            for i in 1 2 3 4 5; do
+              git clone https://github.com/microsoft/vcpkg.git "$VCPKG_DIR" && break
+              echo "vcpkg clone attempt $i failed, retrying in 30s..."
+              rm -rf "$VCPKG_DIR"
+              sleep 30
+            done
+          fi
 
       - name: Build Ladybird (macOS)
         env:

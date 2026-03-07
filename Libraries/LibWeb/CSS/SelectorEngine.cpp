@@ -5,9 +5,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Keyword.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/PseudoClass.h>
 #include <LibWeb/CSS/SelectorEngine.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/Document.h>
@@ -556,19 +558,23 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         auto focused_area = element.document().focused_area();
         return focused_area && element.is_inclusive_ancestor_of(*focused_area);
     }
+    case CSS::PseudoClass::Fullscreen: {
+        return element.is_fullscreen_element();
+    }
     case CSS::PseudoClass::FirstChild:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_first_child_pseudo_class(true);
         }
         return !element.previous_element_sibling();
     case CSS::PseudoClass::LastChild:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_last_child_pseudo_class(true);
         }
         return !element.next_element_sibling();
     case CSS::PseudoClass::OnlyChild:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_first_child_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_last_child_pseudo_class(true);
         }
         return !(element.previous_element_sibling() || element.next_element_sibling());
     case CSS::PseudoClass::Empty: {
@@ -596,17 +602,18 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         return scope ? &element == scope : is<HTML::HTMLHtmlElement>(element);
     case CSS::PseudoClass::FirstOfType:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_forward_positional_pseudo_class(true);
         }
         return !previous_sibling_with_same_tag_name(element);
     case CSS::PseudoClass::LastOfType:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_backward_positional_pseudo_class(true);
         }
         return !next_sibling_with_same_tag_name(element);
     case CSS::PseudoClass::OnlyOfType:
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_sibling_position_or_count_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_forward_positional_pseudo_class(true);
+            const_cast<DOM::Element&>(element).set_affected_by_backward_positional_pseudo_class(true);
         }
         return !previous_sibling_with_same_tag_name(element) && !next_sibling_with_same_tag_name(element);
     case CSS::PseudoClass::Lang:
@@ -676,7 +683,19 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
             return false;
 
         if (context.collect_per_element_selector_involvement_metadata) {
-            const_cast<DOM::Element&>(element).set_affected_by_nth_child_pseudo_class(true);
+            auto& mutable_element = const_cast<DOM::Element&>(element);
+            switch (pseudo_class.type) {
+            case CSS::PseudoClass::NthChild:
+            case CSS::PseudoClass::NthOfType:
+                mutable_element.set_affected_by_forward_positional_pseudo_class(true);
+                break;
+            case CSS::PseudoClass::NthLastChild:
+            case CSS::PseudoClass::NthLastOfType:
+                mutable_element.set_affected_by_backward_positional_pseudo_class(true);
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
         }
 
         auto matches_selector_list = [&context, shadow_host](CSS::SelectorList const& list, DOM::Element const& element) {
@@ -784,17 +803,8 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
         return !matches_read_write_pseudo_class(element);
     case CSS::PseudoClass::ReadWrite:
         return matches_read_write_pseudo_class(element);
-    case CSS::PseudoClass::PlaceholderShown: {
-        // https://html.spec.whatwg.org/multipage/semantics-other.html#selector-placeholder-shown
-        //  The :placeholder-shown pseudo-class must match any element falling into one of the following categories:
-        // - input elements that have a placeholder attribute whose value is currently being presented to the user.
-        if (is<HTML::HTMLInputElement>(element) && element.has_attribute(HTML::AttributeNames::placeholder)) {
-            auto const& input_element = static_cast<HTML::HTMLInputElement const&>(element);
-            return input_element.placeholder_element() && input_element.placeholder_value().has_value();
-        }
-        // - FIXME: textarea elements that have a placeholder attribute whose value is currently being presented to the user.
-        return false;
-    }
+    case CSS::PseudoClass::PlaceholderShown:
+        return element.matches_placeholder_shown_pseudo_class();
     case CSS::PseudoClass::Open:
         return matches_open_state_pseudo_class(element, pseudo_class.type == CSS::PseudoClass::Open);
     case CSS::PseudoClass::Modal: {
@@ -1174,7 +1184,9 @@ static inline bool matches(CSS::Selector::SimpleSelector const& component, DOM::
     VERIFY_NOT_REACHED();
 }
 
-bool matches(CSS::Selector const& selector, int component_list_index, DOM::Element const& initial_element, GC::Ptr<DOM::Element const> shadow_host, MatchContext& context, GC::Ptr<DOM::ParentNode const> scope, SelectorKind selector_kind, GC::Ptr<DOM::Element const> anchor)
+bool matches(CSS::Selector const& selector, int component_list_index, DOM::Element const& initial_element,
+    GC::Ptr<DOM::Element const> shadow_host, MatchContext& context, GC::Ptr<DOM::ParentNode const> scope,
+    SelectorKind selector_kind, GC::Ptr<DOM::Element const> anchor)
 {
     auto& compound_selector = selector.compound_selectors()[component_list_index];
     NonnullRawPtr element_for_compound_matching { initial_element };
@@ -1251,20 +1263,35 @@ bool matches(CSS::Selector const& selector, int component_list_index, DOM::Eleme
 
 bool fast_matches(CSS::Selector const& selector, DOM::Element const& element_to_match, GC::Ptr<DOM::Element const> shadow_host, MatchContext& context);
 
-bool matches(CSS::Selector const& selector, DOM::Element const& element, GC::Ptr<DOM::Element const> shadow_host, MatchContext& context, Optional<CSS::PseudoElement> pseudo_element, GC::Ptr<DOM::ParentNode const> scope, SelectorKind selector_kind, GC::Ptr<DOM::Element const> anchor)
+bool matches(CSS::Selector const& selector, DOM::Element const& element, GC::Ptr<DOM::Element const> shadow_host,
+    MatchContext& context, Optional<CSS::PseudoElement> pseudo_element, GC::Ptr<DOM::ParentNode const> scope,
+    SelectorKind selector_kind, GC::Ptr<DOM::Element const> anchor)
 {
-    if (selector_kind == SelectorKind::Normal && selector.can_use_fast_matches()) {
+    if (selector_kind == SelectorKind::Normal && selector.can_use_fast_matches())
         return fast_matches(selector, element, shadow_host, context);
-    }
+
     VERIFY(!selector.compound_selectors().is_empty());
-    // FIXME: Selectors can have multiple pseudo-elements, and we need to check them one by one, not just do a simple match.
-    //        Ignoring it for ::part() is a hack.
-    if (!selector.has_part_pseudo_element()) {
+    if (selector.has_part_pseudo_element()) {
+        // For ::part() selectors, find any additional pseudo-element beyond ::part() (e.g., the ::selection in
+        // ::part(foo)::selection) and verify it matches the target pseudo-element. A bare ::part(foo) selector has no
+        // additional pseudo-element and should only match base element styles.
+        Optional<CSS::PseudoElement> target_pseudo;
+        for (auto const& simple : selector.compound_selectors().last().simple_selectors) {
+            if (simple.type == CSS::Selector::SimpleSelector::Type::PseudoElement
+                && simple.pseudo_element().type() != CSS::PseudoElement::Part) {
+                target_pseudo = simple.pseudo_element().type();
+                break;
+            }
+        }
+        if (target_pseudo != pseudo_element)
+            return false;
+    } else {
         if (pseudo_element.has_value() && selector.pseudo_element().has_value() && selector.pseudo_element().value().type() != pseudo_element)
             return false;
         if (!pseudo_element.has_value() && selector.pseudo_element().has_value())
             return false;
     }
+
     return matches(selector, selector.compound_selectors().size() - 1, element, shadow_host, context, scope, selector_kind, anchor);
 }
 
